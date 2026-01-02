@@ -9,7 +9,7 @@ import { AdminDashboard } from "@/components/admin/AdminDashboard"
 import { SetterDashboard } from "@/components/setter/SetterDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
 import { SellerManager } from "@/components/crm/SellerManager" 
-import { LoginView } from "@/components/auth/LoginView" // Por si se vence la sesión
+import { LoginView } from "@/components/auth/LoginView" 
 
 export default function DashboardPage() {
     const supabase = createClient()
@@ -23,7 +23,6 @@ export default function DashboardPage() {
     // 1. CHEQUEO DE SESIÓN AL CARGAR
     useEffect(() => {
         const checkSession = async () => {
-            // Recuperamos datos guardados en el login
             const cachedRole = localStorage.getItem("gml_user_role")
             const cachedName = localStorage.getItem("gml_user_name")
 
@@ -32,14 +31,12 @@ export default function DashboardPage() {
                 setUserName(cachedName)
                 setLoading(false)
             } else {
-                // Si no hay datos, lo mandamos al login
                 router.push("/")
             }
         }
         checkSession()
     }, [])
 
-    // Función de Salir
     const handleLogout = async () => {
         await supabase.auth.signOut()
         localStorage.clear()
@@ -48,19 +45,19 @@ export default function DashboardPage() {
 
     if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400 animate-pulse">Cargando Sistema GML...</div>
 
-    // --- 2. ROUTER DE VISTAS (SEGÚN ROL) ---
+    // --- ROUTER DE VISTAS ---
 
     // A. GERENCIA / ADMIN
     if (userRole === 'admin' || userRole === 'admin_god' || userRole === 'supervisor') {
         return <AdminDashboard onLogout={handleLogout} />
     }
 
-    // B. OPERACIONES (MACA)
-    // *** ACÁ ESTABA EL ERROR: AHORA LE PASAMOS LAS PROPS QUE PIDE ***
+    // B. OPERACIONES
     if (userRole === 'ops' || userRole === 'admin_ops') {
         return (
             <div className="relative h-screen w-full">
-                <OpsManager role={userRole} userName={userName} />
+                {/* ACÁ ESTÁ EL ARREGLO "as any" */}
+                <OpsManager role={userRole as any} userName={userName} />
             </div>
         )
     }
@@ -79,6 +76,6 @@ export default function DashboardPage() {
         )
     }
 
-    // D. VENDEDOR (SELLER)
+    // D. VENDEDOR
     return <SellerManager userName={userName} onLogout={handleLogout} />
 }

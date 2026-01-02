@@ -23,7 +23,7 @@ export function AdminPipelineHealth() {
     // 30 Condenados (Simulados para el ejemplo visual)
     const warnedCount = 30 
     // 12 Frescos (Simulados)
-    const freshCount = 12 
+    const freshCount: number = 12
     const totalZombies = warnedCount + freshCount
 
     const handleSendWarning = () => {

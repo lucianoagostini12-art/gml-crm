@@ -79,3 +79,4 @@ export default function DashboardPage() {
     // D. VENDEDOR
     return <SellerManager userName={userName} onLogout={handleLogout} />
 }
+// Forzando actualizacion vercel

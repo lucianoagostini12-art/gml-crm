@@ -1,6 +1,6 @@
 "use client"
 
-import { Lead } from "./crm/LeadCard"
+import { Lead } from "./LeadCard"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"

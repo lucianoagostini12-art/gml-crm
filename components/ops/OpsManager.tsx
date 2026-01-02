@@ -91,7 +91,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             .order('last_update', { ascending: false })
 
         if (data) {
-            const mappedOps: Operation[] = data.map((op: any) => ({
+            const mappedOps: any = data.map((op: any) => ({
                 id: op.id,
                 clientName: op.name,
                 dni: op.dni || "S/D",

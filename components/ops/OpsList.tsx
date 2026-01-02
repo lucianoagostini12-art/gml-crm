@@ -47,7 +47,7 @@ export function OpsList({ operations, onSelectOp, updateOp }: any) {
                                     <SelectTrigger onClick={(e) => e.stopPropagation()} className={`h-8 w-[200px] text-xs font-bold focus:ring-0 ${getSubStateStyle(op.subState)}`}>
                                         <SelectValue placeholder="Estado..." />
                                     </SelectTrigger>
-                                    <SelectContent>{SUB_STATES[op.status]?.map((sub: string) => (<SelectItem key={sub} value={sub} className="text-xs font-medium">{sub}</SelectItem>))}</SelectContent>
+                                <SelectContent>{(SUB_STATES as any)[op.status]?.map((sub: string) => (<SelectItem key={sub} value={sub} className="text-xs font-medium">{sub}</SelectItem>))}</SelectContent>
                                 </Select>
                             </div>
                         </div>

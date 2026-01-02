@@ -49,14 +49,14 @@ const COMMISSION_RULES = {
     }
 }
 
-// --- 2. DATOS DEMO (CORREGIDOS: Se eliminaron propiedades conflictivas) ---
+// --- 2. DATOS DEMO BLINDADOS (Sin propiedades ilegales) ---
 const DEMO_DATA: Operation[] = [
-    { id: "d1", clientName: "Juan Pérez", dni: "20.123.456", plan: "A2", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-15", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'monotributo', origen: 'Meta Ads', hijos: [] },
-    { id: "d2", clientName: "Pedro Pendiente", dni: "33.111.222", plan: "A4", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-29", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'monotributo', origen: 'Otros', hijos: [] },
-    { id: "d3", clientName: "Carlos Ruiz", dni: "20.555.666", plan: "500", prepaga: "DoctoRed", status: "cumplidas", seller: "Maca", entryDate: "2025-01-20", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'empleado', origen: 'Google Ads', hijos: [] },
-    { id: "d4", clientName: "María González", dni: "27.987.654", plan: "220", prepaga: "Galeno", status: "cumplidas", seller: "Agus", entryDate: "2025-01-10", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'voluntario', origen: 'Referido', hijos: [] },
-    { id: "d5", clientName: "Ana López", dni: "23.444.222", plan: "PMO", prepaga: "AMPF", status: "cumplidas", seller: "Agus", entryDate: "2025-01-28", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'monotributo', origen: 'Referido Personal', hijos: [] },
-    { id: "d6", clientName: "Lucía F", dni: "40.111.222", plan: "A1", prepaga: "Prevención Salud", status: "cumplidas", seller: "Eve", entryDate: "2024-12-05", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'monotributo', origen: 'Google Ads', hijos: [] },
+    { id: "d1", clientName: "Juan Pérez", dni: "20.123.456", plan: "A2", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-15", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
+    { id: "d2", clientName: "Pedro Pendiente", dni: "33.111.222", plan: "A4", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-29", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
+    { id: "d3", clientName: "Carlos Ruiz", dni: "20.555.666", plan: "500", prepaga: "DoctoRed", status: "cumplidas", seller: "Maca", entryDate: "2025-01-20", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
+    { id: "d4", clientName: "María González", dni: "27.987.654", plan: "220", prepaga: "Galeno", status: "cumplidas", seller: "Agus", entryDate: "2025-01-10", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
+    { id: "d5", clientName: "Ana López", dni: "23.444.222", plan: "PMO", prepaga: "AMPF", status: "cumplidas", seller: "Agus", entryDate: "2025-01-28", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
+    { id: "d6", clientName: "Lucía F", dni: "40.111.222", plan: "A1", prepaga: "Prevención Salud", status: "cumplidas", seller: "Eve", entryDate: "2024-12-05", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
 ]
 
 const DEFAULT_RULES = {
@@ -125,6 +125,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             val = priceOverrides[op.id]
             formula = "Manual (Editado)"
         } else {
+            // Usamos opAny para leer propiedades que quizas no esten en el tipo Operation oficial
             const full = parseFloat(opAny.fullPrice || "0")
             const aportes = parseFloat(opAny.aportes || "0")
             const desc = parseFloat(opAny.descuento || "0")
@@ -141,7 +142,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             } else {
                 let base = full * (1 - rules.taxRate)
                 formula = `(Full - ${rules.taxRate*100}%) * 180%`
-                if (p.includes("doctored") && op.condicionLaboral === 'empleado') {
+                // Usamos condicionLaboral con as any por si acaso
+                if (p.includes("doctored") && (op as any).condicionLaboral === 'empleado') {
                     base = aportes * (1 - rules.taxRate)
                     formula = `(Aportes - ${rules.taxRate*100}%) * 180%`
                 }
@@ -528,10 +530,10 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                         <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {selectedMonth}.</TableCell></TableRow>
                                     ) : pendingOps.map(op => {
                                         const calc = calculate(op)
-                                        const capitasCount = (op.hijos?.length || 0) + 1
                                         
-                                        // Casteo seguro para visualización
+                                        // AQUI LA MAGIA: as any para que no chille TypeScript
                                         const opAny = op as any;
+                                        const capitasCount = (opAny.hijos?.length || 0) + 1
 
                                         return (
                                             <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors ${getPrepagaColor(op.prepaga)}`}>
@@ -539,8 +541,9 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     <div className="font-bold text-slate-800">{op.clientName}</div>
                                                     <div className="text-[11px] font-mono text-slate-400">{op.dni}</div>
                                                     <div className="flex gap-2 mt-1">
+                                                        {/* Usamos opAny para propiedades 'extra' */}
                                                         <Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">
-                                                            {getSourceIcon(op.origen || "")} {op.origen || "Dato"}
+                                                            {getSourceIcon(opAny.origen || "")} {opAny.origen || "Dato"}
                                                         </Badge>
                                                         <Popover>
                                                             <PopoverTrigger asChild>
@@ -551,7 +554,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                             <PopoverContent className="w-64 p-0 shadow-xl border-slate-200">
                                                                 <div className="bg-slate-50 p-2 border-b text-xs font-bold text-slate-500 uppercase flex items-center justify-between">
                                                                     <div className="flex items-center gap-2"><Users size={12}/> Grupo Familiar</div>
-                                                                    {op.condicionLaboral?.toLowerCase().includes('voluntario') 
+                                                                    {opAny.condicionLaboral?.toLowerCase().includes('voluntario') 
                                                                         ? <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-[10px] border-0">VOL</Badge> 
                                                                         : <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-[10px] border-0">OBL</Badge>
                                                                     }
@@ -561,7 +564,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                                         <span className="font-bold text-slate-700">👑 {op.clientName}</span>
                                                                         <span className="font-mono text-slate-400">{op.dni}</span>
                                                                     </div>
-                                                                    {op.hijos?.map((h: any, i: number) => (
+                                                                    {opAny.hijos?.map((h: any, i: number) => (
                                                                         <div key={i} className="flex justify-between text-xs pl-2 border-l-2 border-slate-100">
                                                                             <span className="text-slate-600">{h.nombre}</span>
                                                                             <span className="font-mono text-slate-400">{h.dni}</span>

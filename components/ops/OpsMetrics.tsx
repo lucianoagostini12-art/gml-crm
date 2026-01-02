@@ -235,7 +235,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                                     <XAxis type="number" hide />
                                     <YAxis dataKey="name" type="category" width={70} tick={{fontSize: 10, fontWeight: 'bold', fill: '#64748b'}} axisLine={false} tickLine={false}/>
                                     <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '8px'}}/>
-                                    <Bar dataKey="cantidad" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={24} background={{ fill: '#e2e8f0', radius: [0, 4, 4, 0] }} onClick={(data) => handleFilter('status', data.name.toLowerCase())} className="cursor-pointer">
+                                    <Bar dataKey="cantidad" fill="#6366f1" radius={[0, 4, 4, 0] as any} barSize={24} background={{ fill: 'transparent' }} />
                                     </Bar>
                                 </BarChart>
                             </ResponsiveContainer>

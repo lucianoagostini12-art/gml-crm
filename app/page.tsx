@@ -82,7 +82,7 @@ export default function Page() {
                 <div className="absolute top-4 right-20 z-50">
                      {/* Botón de emergencia por si OpsManager tapa el logout */}
                 </div>
-                <OpsManager role={userRole} userName={userName} />
+                <OpsManager role={userRole as any} userName={userName} />
             </div>
         )
     }

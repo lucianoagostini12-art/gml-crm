@@ -10,7 +10,8 @@ import { SetterDashboard } from "@/components/setter/SetterDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
 import { SellerManager } from "@/components/crm/SellerManager" // <--- ACÁ ESTÁ LA MAGIA
 
-export default function Page() {
+// Forzamos actualización de Vercel
+export default function HomePage() {
     const supabase = createClient()
     
     // Estado de Sesión

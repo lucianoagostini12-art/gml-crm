@@ -146,7 +146,7 @@ export function WikiView() {
                                     <CardHeader className="py-3 px-5 cursor-pointer bg-slate-50/50 dark:bg-slate-900/50 rounded-t-lg">
                                         <CardTitle className="text-base font-bold flex justify-between items-center text-slate-800 dark:text-slate-100">
                                             {item.title}
-                                            {item.tag && <Badge variant="secondary" className="bg-white dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 shadow-sm">{item.tag}</Badge>}
+                                           {(item as any).tag && <Badge variant="secondary" className="bg-white dark:bg-slate-800 font-normal text-slate-500">{(item as any).tag}</Badge>}
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent className="px-5 pb-5 pt-4 text-[15px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">

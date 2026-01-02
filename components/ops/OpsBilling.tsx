@@ -49,15 +49,8 @@ const COMMISSION_RULES = {
     }
 }
 
-// --- 2. DATOS DEMO BLINDADOS (Sin propiedades ilegales) ---
-const DEMO_DATA: Operation[] = [
-    { id: "d1", clientName: "Juan Pérez", dni: "20.123.456", plan: "A2", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-15", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
-    { id: "d2", clientName: "Pedro Pendiente", dni: "33.111.222", plan: "A4", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-29", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
-    { id: "d3", clientName: "Carlos Ruiz", dni: "20.555.666", plan: "500", prepaga: "DoctoRed", status: "cumplidas", seller: "Maca", entryDate: "2025-01-20", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
-    { id: "d4", clientName: "María González", dni: "27.987.654", plan: "220", prepaga: "Galeno", status: "cumplidas", seller: "Agus", entryDate: "2025-01-10", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
-    { id: "d5", clientName: "Ana López", dni: "23.444.222", plan: "PMO", prepaga: "AMPF", status: "cumplidas", seller: "Agus", entryDate: "2025-01-28", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
-    { id: "d6", clientName: "Lucía F", dni: "40.111.222", plan: "A1", prepaga: "Prevención Salud", status: "cumplidas", seller: "Eve", entryDate: "2024-12-05", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '' },
-]
+// --- 2. DATOS DEMO (LIMPIEZA TOTAL: Lista vacía para evitar errores) ---
+const DEMO_DATA: Operation[] = []
 
 const DEFAULT_RULES = {
     taxRate: 0.10,
@@ -111,6 +104,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     // Seller Detail Modal
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
     
+    // Combinamos operaciones reales con la lista vacía de demo (seguridad total)
     const allOps = [...operations, ...DEMO_DATA]
 
     // --- CALCULADORA ---

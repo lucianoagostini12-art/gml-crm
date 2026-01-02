@@ -44,7 +44,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     
     const [currentStageFilter, setCurrentStageFilter] = useState<string | null>(null)
     
-    // --- ESTADO PRINCIPAL (YA NO ES MOCK) ---
+    // --- ESTADO PRINCIPAL ---
     const [operations, setOperations] = useState<Operation[]>([])
     
     const [selectedOp, setSelectedOp] = useState<Operation | null>(null)
@@ -79,11 +79,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [isBellOpen, setIsBellOpen] = useState(false) 
     const unreadCount = notifications.filter(n => !n.read).length
 
-    // --- 1. FUNCIÓN MAESTRA DE CARGA DE DATOS (CONEXIÓN ABSOLUTA) ---
+    // --- 1. FUNCIÓN MAESTRA DE CARGA DE DATOS ---
     const fetchOperations = async () => {
         setIsLoading(true)
-        // Traemos leads que NO sean "nuevos" ni "contactados" (eso es de vendedores), 
-        // A MENOS que ya estén vendidos. Ops ve desde 'ingresado' (o 'vendido' que lo transformamos a ingresado).
         const { data, error } = await supabase
             .from('leads')
             .select('*')
@@ -91,27 +89,30 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             .order('last_update', { ascending: false })
 
         if (data) {
+            // ARREGLO: 'any' para evitar que TS se queje de propiedades que faltan
             const mappedOps: any = data.map((op: any) => ({
                 id: op.id,
-                clientName: op.name,
+                clientName: op.name || "Sin Nombre", // Protección contra nulos
                 dni: op.dni || "S/D",
                 plan: op.plan || op.quoted_plan || "-",
                 prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
-                // Si viene como 'vendido' de ventas, para Ops es 'ingresado'
                 status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
                 subState: op.sub_state || "Pendiente",
                 seller: op.agent_name || "Desconocido",
-                operator: op.operator, // Si es null, está en el Pool
+                operator: op.operator, 
                 entryDate: new Date(op.created_at).toISOString().split('T')[0],
                 lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
                 type: op.type || "alta",
                 phone: op.phone || "",
-                // Mapeo simple para history/chat ya que DB tiene texto plano por ahora
                 history: op.notes ? [{ date: "Historial", user: "Sistema", action: op.notes }] : [],
                 chat: [],
                 adminNotes: [],
                 reminders: [],
-                daysInStatus: 0 // Calcular real si es necesario
+                daysInStatus: 0,
+                // Agregamos campos opcionales para evitar errores en otros componentes
+                origen: op.source || "Dato",
+                hijos: [],
+                condicionLaboral: "Monotributo" // Default
             }))
             setOperations(mappedOps)
         }
@@ -122,17 +123,16 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     useEffect(() => {
         fetchOperations()
         
-        // Suscripción Realtime (Opcional, para ver ventas entrar en vivo)
         const channel = supabase.channel('ops-realtime')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads' }, (payload) => {
                 if(payload.new.status === 'vendido') {
                     addNotification(`¡Nueva Venta Ingresada! ${payload.new.name}`, 'sale')
                     setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
-                    fetchOperations() // Recargar tabla
+                    fetchOperations() 
                 }
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' }, () => {
-                fetchOperations() // Recargar si alguien cambia algo
+                fetchOperations() 
             })
             .subscribe()
 
@@ -180,44 +180,34 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000) }
 
-    // --- 2. FUNCIÓN DE UPDATE A SUPABASE (El corazón de la conexión) ---
+    // --- 2. FUNCIÓN DE UPDATE A SUPABASE ---
     const updateOpInDb = async (id: string, updates: any) => {
-        // 1. Actualizamos Optimista (para que se vea instantáneo)
         setOperations(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o))
         
-        // 2. Mapeamos campos UI -> DB (snake_case)
         const dbUpdates: any = {}
         if (updates.status) dbUpdates.status = updates.status
         if (updates.subState) dbUpdates.sub_state = updates.subState
-        if (updates.operator !== undefined) dbUpdates.operator = updates.operator // Permite null
+        if (updates.operator !== undefined) dbUpdates.operator = updates.operator 
         if (updates.adminNotes) {
-             // Concatenamos la última nota al campo notes de DB
              const lastNote = updates.adminNotes[0]?.action || ""
-             // No sobrescribimos todo para no perder info, lo ideal seria concatenar en SQL o traer todo y sumar
-             // Por simplicidad ahora actualizamos el campo notes
              dbUpdates.notes = lastNote 
         }
         dbUpdates.last_update = new Date().toISOString()
 
-        // 3. Enviamos a Supabase
         const { error } = await supabase.from('leads').update(dbUpdates).eq('id', id)
         
         if (error) {
             console.error("Error actualizando:", error)
             showToast("Error al guardar cambios", "error")
-            fetchOperations() // Revertimos cambios recargando
+            fetchOperations() 
         }
     }
 
-    // Wrappers para mantener tu lógica UI
     const updateOp = (newOp: Operation) => { 
-        // Identificamos qué cambió comparando con el estado actual
-        // Por simplicidad, mandamos los campos clave a la función updateOpInDb
         updateOpInDb(newOp.id, {
             status: newOp.status,
             subState: newOp.subState,
             operator: newOp.operator
-            // Agregar otros campos si se editan
         })
         
         if (selectedOp && selectedOp.id === newOp.id) setSelectedOp(newOp); 
@@ -227,8 +217,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const addHistory = (op: Operation, action: string) => [...op.history, { date: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), user: userName, action }]
     const handleCardClick = (op: Operation) => { if (op.status === 'ingresado' && !op.operator) { setAssigningOp(op) } else { setSelectedOp(op) } }
 
+    // ARREGLO: Protección contra Nulos en el filtro
     const filteredOps = operations.filter(op => {
-        if (searchTerm && !op.clientName.toLowerCase().includes(searchTerm.toLowerCase()) && !op.dni.includes(searchTerm)) return false
+        const cName = op.clientName || "" // Evitar error si viene null
+        if (searchTerm && !cName.toLowerCase().includes(searchTerm.toLowerCase()) && !op.dni.includes(searchTerm)) return false
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'mine' && op.operator !== userName) return false
@@ -241,14 +233,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         return true
     })
 
-    // --- ACCIONES CONECTADAS A DB ---
-
     const confirmAssignment = async (operator: string) => { 
         if (!assigningOp) return; 
-        // Actualizamos DB
         await updateOpInDb(assigningOp.id, { operator })
         setAssigningOp(null); 
-        setSelectedOp({ ...assigningOp, operator }); // Actualizar modal si estuviera abierto
+        setSelectedOp({ ...assigningOp, operator }); 
         showToast(`👍 Asignado a ${operator}.`, 'success'); 
     }
 
@@ -256,7 +245,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     
     const confirmAdvanceAction = async () => { 
         if(!confirmingAdvance) return; 
-        // Actualizamos DB
         await updateOpInDb(confirmingAdvance.op.id, { status: confirmingAdvance.nextStage })
         
         if (confirmingAdvance.nextStage === 'cumplidas') setShowCelebration(true); 
@@ -268,7 +256,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     
     const confirmBackAction = async () => { 
         if(!confirmingBack) return; 
-        // Actualizamos DB
         await updateOpInDb(confirmingBack.op.id, { status: confirmingBack.prevStage })
         showToast(`⏪ Retrocedió`, 'success'); 
         setConfirmingBack(null); 
@@ -287,7 +274,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     
     const confirmReleaseAction = async () => { 
         if(!confirmingRelease) return; 
-        await updateOpInDb(confirmingRelease.id, { operator: null }) // Enviar null explícito
+        await updateOpInDb(confirmingRelease.id, { operator: null }) 
         setSelectedOp(null); 
         setConfirmingRelease(null); 
         showToast("🔓 Caso liberado", 'success'); 
@@ -299,7 +286,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const handleCreateManualSale = async () => {
         if (!manualLoadData.clientName || !manualLoadData.dni) return;
 
-        // INSERT REAL
         const { error } = await supabase.from('leads').insert({
             name: manualLoadData.clientName, 
             dni: manualLoadData.dni, 
@@ -308,7 +294,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             status: "ingresado", 
             sub_state: "Carga Manual", 
             agent_name: manualLoadData.source === 'Vendedor' ? manualLoadData.specificSeller : manualLoadData.source, 
-            // operator: null, // Default
             created_at: new Date().toISOString(), 
             last_update: new Date().toISOString(), 
             type: "alta",
@@ -319,7 +304,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             setIsManualLoadOpen(false)
             setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "Oficina", specificSeller: "" }) 
             showToast("✅ Operación guardada en Base de Datos", 'success')
-            fetchOperations() // Recargar para verla
+            fetchOperations() 
         } else {
             showToast("Error al guardar", "error")
             console.error(error)
@@ -432,7 +417,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
             <OpsModal op={selectedOp} isOpen={!!selectedOp} onClose={()=>setSelectedOp(null)} onUpdateOp={updateOp} currentUser={userName} role={role} onStatusChange={handleStatusChange} onRelease={handleRelease} requestAdvance={requestAdvance} requestBack={requestBack} onSubStateChange={(id: string, s: string) => updateOpInDb(id, { subState: s })} onAddNote={(t:string)=>updateOpInDb(selectedOp!.id, { adminNotes: [{action: t}] })} onSendChat={(t:string)=>console.log("Chat pendiente integración DB", t)} onAddReminder={(id:string, d:string, t:string, n:string, type:any)=>console.log("Reminder pendiente integración DB")} getStatusColor={getStatusColor} getSubStateStyle={getSubStateStyle} />
             
-            {/* ... DIALOGS EXISTENTES (ASIGNAR, AVANZAR, ETC) CONECTADOS A DB ... */}
+            {/* ... DIALOGS EXISTENTES ... */}
             <Dialog open={!!assigningOp} onOpenChange={(open) => !open && setAssigningOp(null)}><DialogContent className="max-w-[400px] w-full p-0 overflow-hidden border-0 shadow-2xl rounded-2xl gap-0"><div className="bg-slate-900 p-6 relative flex flex-col items-center justify-center text-center"><button onClick={() => setAssigningOp(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"><X size={20}/></button><div className="h-12 w-12 bg-blue-500/20 rounded-full flex items-center justify-center mb-3 animate-pulse"><ShieldCheck className="h-6 w-6 text-blue-400"/></div><DialogTitle className="text-white text-xl font-black tracking-tight">¿Quién toma el caso?</DialogTitle><DialogDescription className="text-slate-400 text-xs mt-1">Seleccioná una operadora.</DialogDescription></div><div className="p-6 bg-white grid grid-cols-2 gap-4"><div onClick={() => confirmAssignment("Iara")} className="group cursor-pointer border border-slate-200 rounded-xl p-4 flex flex-col items-center hover:border-blue-500 hover:bg-blue-50 hover:shadow-lg transition-all active:scale-95 duration-200"><Avatar className="h-12 w-12 mb-2 border-2 border-white shadow-sm group-hover:scale-110 transition-transform"><AvatarFallback className="bg-purple-600 text-white font-bold">IA</AvatarFallback></Avatar><span className="font-bold text-slate-700 group-hover:text-blue-700">Iara</span><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Admin</span></div><div onClick={() => confirmAssignment("Maca")} className="group cursor-pointer border border-slate-200 rounded-xl p-4 flex flex-col items-center hover:border-blue-500 hover:bg-blue-50 hover:shadow-lg transition-all active:scale-95 duration-200"><Avatar className="h-12 w-12 mb-2 border-2 border-white shadow-sm group-hover:scale-110 transition-transform"><AvatarFallback className="bg-pink-600 text-white font-bold">MA</AvatarFallback></Avatar><span className="font-bold text-slate-700 group-hover:text-blue-700">Maca</span><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Admin</span></div></div></DialogContent></Dialog>
             <Dialog open={!!confirmingAdvance} onOpenChange={(open) => !open && setConfirmingAdvance(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-blue-100 p-3 rounded-full mb-2"><Sparkles className="h-8 w-8 text-blue-600 animate-pulse"/></div><DialogTitle className="text-xl">¡Avanzar Etapa!</DialogTitle><DialogDescription>¿Avanzar caso a la siguiente etapa?</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmAdvanceAction} className="bg-blue-600 hover:bg-blue-700 w-full">Confirmar Avance</Button></DialogFooter></DialogContent></Dialog>
             <Dialog open={!!confirmingBack} onOpenChange={(open) => !open && setConfirmingBack(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-orange-100 p-3 rounded-full mb-2"><Undo2 className="h-8 w-8 text-orange-600"/></div><DialogTitle className="text-xl">Retroceder</DialogTitle><DialogDescription>El caso volverá a la etapa anterior.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmBackAction} variant="secondary" className="w-full border-orange-200 text-orange-700">Confirmar Retroceso</Button></DialogFooter></DialogContent></Dialog>
@@ -457,7 +442,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         {/* DATOS PLAN */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Prepaga</Label><Select value={manualLoadData.prepaga} onValueChange={(v) => setManualLoadData({...manualLoadData, prepaga: v})}><SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger><SelectContent>{Object.keys(PLANES_POR_EMPRESA).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
-                            <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Plan</Label><Select value={manualLoadData.plan} onValueChange={(v) => setManualLoadData({...manualLoadData, plan: v})}><SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger><SelectContent>{(PLANES_POR_EMPRESA[manualLoadData.prepaga] || []).map((p:string) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
+                            <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Plan</Label><Select value={manualLoadData.plan} onValueChange={(v) => setManualLoadData({...manualLoadData, plan: v})}><SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger><SelectContent>{((PLANES_POR_EMPRESA as any)[manualLoadData.prepaga] || []).map((p:string) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
                         </div>
                         
                         <Separator className="bg-slate-100"/>

@@ -294,7 +294,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     }
 
     const uniqueSellers = Array.from(new Set(allOps.map(o => o.seller)))
-    // *** AQUÍ ESTÁ EL ARREGLO: Filtramos para que solo pasen Strings reales (no vacíos) ***
+    // FILTRO PARA QUE SOLO SE MUESTREN PREPAGAS QUE TENGAN NOMBRE (Evita el error 'undefined')
     const uniquePrepagas = Array.from(new Set(allOps.map(o => o.prepaga).filter((p): p is string => !!p)))
 
     // --- HELPER PARA DETALLE ---
@@ -491,7 +491,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                         const capitasCount = (opAny.hijos?.length || 0) + 1
 
                                         return (
-                                            <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors ${getPrepagaColor(op.prepaga)}`}>
+                                            // AQUI ESTABA EL ERROR CORREGIDO: getPrepagaColor(op.prepaga || "")
+                                            <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors ${getPrepagaColor(op.prepaga || "")}`}>
                                                 <TableCell>
                                                     <div className="font-bold text-slate-800">{op.clientName}</div>
                                                     <div className="text-[11px] font-mono text-slate-400">{op.dni}</div>

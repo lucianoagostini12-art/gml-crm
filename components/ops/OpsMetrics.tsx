@@ -272,7 +272,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-sm font-black text-slate-800">{s.ok} OK</p>
-                                        <p className={`text-[10px] font-bold ${parseInt(s.rate) > 50 ? 'text-green-600' : 'text-orange-500'}`}>{s.rate}% Cierre</p>
+                                        <p className={`text-[10px] font-bold ${Number(s.rate) > 50 ? 'text-green-600' : 'text-orange-500'}`}>{s.rate}% Cierre</p>
                                     </div>
                                 </div>
                             ))}

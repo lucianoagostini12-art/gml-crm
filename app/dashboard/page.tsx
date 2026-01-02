@@ -1,79 +1,84 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase" 
 
-// 1. ADMIN
-import { AdminDashboard } from "@/components/admin/AdminDashboard" 
-
-// 2. OPS (Maca)
+// --- COMPONENTES PRINCIPALES ---
+import { AdminDashboard } from "@/components/admin/AdminDashboard"
+import { SetterDashboard } from "@/components/setter/SetterDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
-
-// 3. SELLER (¡AHORA SÍ! Importamos el archivo que acabamos de crear)
-import { SellerManager } from "@/components/crm/SellerManager"
+import { SellerManager } from "@/components/crm/SellerManager" 
+import { LoginView } from "@/components/auth/LoginView" // Por si se vence la sesión
 
 export default function DashboardPage() {
-    const router = useRouter()
     const supabase = createClient()
+    const router = useRouter()
     
+    // Estado de Sesión
     const [userRole, setUserRole] = useState<string | null>(null)
-    const [userName, setUserName] = useState<string | null>(null)
+    const [userName, setUserName] = useState("")
     const [loading, setLoading] = useState(true)
 
+    // 1. CHEQUEO DE SESIÓN AL CARGAR
     useEffect(() => {
-        const checkUser = async () => {
-            const { data: { user }, error } = await supabase.auth.getUser()
-            
-            if (error || !user) {
-                router.push("/login")
-                return
-            }
+        const checkSession = async () => {
+            // Recuperamos datos guardados en el login
+            const cachedRole = localStorage.getItem("gml_user_role")
+            const cachedName = localStorage.getItem("gml_user_name")
 
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('role, full_name')
-                .eq('id', user.id)
-                .single()
-
-            if (profile) {
-                setUserRole(profile.role)
-                setUserName(profile.full_name)
+            if (cachedRole && cachedName) {
+                setUserRole(cachedRole)
+                setUserName(cachedName)
+                setLoading(false)
+            } else {
+                // Si no hay datos, lo mandamos al login
+                router.push("/")
             }
-            setLoading(false)
         }
-        checkUser()
+        checkSession()
     }, [])
 
+    // Función de Salir
     const handleLogout = async () => {
         await supabase.auth.signOut()
         localStorage.clear()
-        router.push("/login")
+        router.push("/") 
     }
 
-    if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400">Cargando GML System...</div>
+    if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400 animate-pulse">Cargando Sistema GML...</div>
 
-    // CASO 1: ADMIN
-    if (userRole === 'admin' || userRole === 'supervisor') {
+    // --- 2. ROUTER DE VISTAS (SEGÚN ROL) ---
+
+    // A. GERENCIA / ADMIN
+    if (userRole === 'admin' || userRole === 'admin_god' || userRole === 'supervisor') {
         return <AdminDashboard onLogout={handleLogout} />
     }
 
-    // CASO 2: OPS
-    if (userRole === 'ops' || userRole === 'administracion') {
-        return <OpsManager />
+    // B. OPERACIONES (MACA)
+    // *** ACÁ ESTABA EL ERROR: AHORA LE PASAMOS LAS PROPS QUE PIDE ***
+    if (userRole === 'ops' || userRole === 'admin_ops') {
+        return (
+            <div className="relative h-screen w-full">
+                <OpsManager role={userRole} userName={userName} />
+            </div>
+        )
     }
 
-    // CASO 3: VENDEDOR
-    // Ahora le pasamos el control a SellerManager, que tiene tu sidebar original
-    if (userRole === 'seller' || userRole === 'vendedor') {
-        return <SellerManager userName={userName} onLogout={handleLogout} />
+    // C. SETTER
+    if (userRole === 'setter') {
+        return (
+            <div className="relative h-screen w-full">
+                <div className="absolute top-4 right-4 z-50">
+                    <button onClick={handleLogout} className="bg-white/90 px-3 py-1 text-xs font-bold text-red-500 rounded border shadow-sm hover:bg-red-50 transition-colors">
+                        Cerrar Sesión
+                    </button>
+                </div>
+                <SetterDashboard />
+            </div>
+        )
     }
 
-    // Fallback
-    return (
-        <div className="h-screen w-full flex flex-col items-center justify-center gap-4">
-            <p>Rol detectado: {userRole}. No tenés panel asignado.</p>
-            <button onClick={handleLogout} className="text-blue-500 underline">Salir</button>
-        </div>
-    )
+    // D. VENDEDOR (SELLER)
+    return <SellerManager userName={userName} onLogout={handleLogout} />
 }

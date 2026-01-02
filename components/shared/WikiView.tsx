@@ -111,7 +111,7 @@ export function WikiView() {
         items: section.items.filter(item => 
             item.title.toLowerCase().includes(search.toLowerCase()) || 
             item.content.toLowerCase().includes(search.toLowerCase()) ||
-            (item.tag && item.tag.toLowerCase().includes(search.toLowerCase()))
+            ((item as any).tag && (item as any).tag.toLowerCase().includes(search.toLowerCase()))
         )
     })).filter(section => section.items.length > 0)
 

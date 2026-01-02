@@ -49,14 +49,14 @@ const COMMISSION_RULES = {
     }
 }
 
-// --- 2. DATOS DEMO ---
+// --- 2. DATOS DEMO (CORREGIDOS: Se eliminaron propiedades conflictivas) ---
 const DEMO_DATA: Operation[] = [
-    { id: "d1", clientName: "Juan Pérez", dni: "20.123.456", plan: "A2", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-15", fullPrice: "150000", descuento: "50000", aportes: "0", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'monotributo', origen: 'Meta Ads', hijos: [] },
-    { id: "d2", clientName: "Pedro Pendiente", dni: "33.111.222", plan: "A4", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-29", fullPrice: "250000", descuento: "0", aportes: "0", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'monotributo', origen: 'Otros', hijos: [] },
-    { id: "d3", clientName: "Carlos Ruiz", dni: "20.555.666", plan: "500", prepaga: "DoctoRed", status: "cumplidas", seller: "Maca", entryDate: "2025-01-20", fullPrice: "180000", descuento: "0", aportes: "95000", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'empleado', origen: 'Google Ads', hijos: [] },
-    { id: "d4", clientName: "María González", dni: "27.987.654", plan: "220", prepaga: "Galeno", status: "cumplidas", seller: "Agus", entryDate: "2025-01-10", fullPrice: "200000", descuento: "0", aportes: "0", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'voluntario', origen: 'Referido', hijos: [] },
-    { id: "d5", clientName: "Ana López", dni: "23.444.222", plan: "PMO", prepaga: "AMPF", status: "cumplidas", seller: "Agus", entryDate: "2025-01-28", fullPrice: "10000", descuento: "0", aportes: "0", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'monotributo', origen: 'Referido Personal', hijos: [] },
-    { id: "d6", clientName: "Lucía F", dni: "40.111.222", plan: "A1", prepaga: "Prevención Salud", status: "cumplidas", seller: "Eve", entryDate: "2024-12-05", fullPrice: "120000", descuento: "20000", aportes: "0", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'monotributo', origen: 'Google Ads', hijos: [] },
+    { id: "d1", clientName: "Juan Pérez", dni: "20.123.456", plan: "A2", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-15", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'monotributo', origen: 'Meta Ads', hijos: [] },
+    { id: "d2", clientName: "Pedro Pendiente", dni: "33.111.222", plan: "A4", prepaga: "Prevención Salud", status: "cumplidas", seller: "Maca", entryDate: "2025-01-29", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'monotributo', origen: 'Otros', hijos: [] },
+    { id: "d3", clientName: "Carlos Ruiz", dni: "20.555.666", plan: "500", prepaga: "DoctoRed", status: "cumplidas", seller: "Maca", entryDate: "2025-01-20", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'empleado', origen: 'Google Ads', hijos: [] },
+    { id: "d4", clientName: "María González", dni: "27.987.654", plan: "220", prepaga: "Galeno", status: "cumplidas", seller: "Agus", entryDate: "2025-01-10", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Iara', phone: '', condicionLaboral: 'voluntario', origen: 'Referido', hijos: [] },
+    { id: "d5", clientName: "Ana López", dni: "23.444.222", plan: "PMO", prepaga: "AMPF", status: "cumplidas", seller: "Agus", entryDate: "2025-01-28", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'monotributo', origen: 'Referido Personal', hijos: [] },
+    { id: "d6", clientName: "Lucía F", dni: "40.111.222", plan: "A1", prepaga: "Prevención Salud", status: "cumplidas", seller: "Eve", entryDate: "2024-12-05", history: [], chat: [], adminNotes: [], reminders: [], type: 'alta', daysInStatus: 0, subState: '', lastUpdate: '', operator: 'Maca', phone: '', condicionLaboral: 'monotributo', origen: 'Google Ads', hijos: [] },
 ]
 
 const DEFAULT_RULES = {
@@ -99,7 +99,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     
     // Manual Portfolio
     const [manualPortfolio, setManualPortfolio] = useState<any[]>([]) 
-    const [portfolioOverrides, setPortfolioOverrides] = useState<Record<string, number>>({}) // NUEVO: Para editar valor cartera
+    const [portfolioOverrides, setPortfolioOverrides] = useState<Record<string, number>>({}) 
     const [isAddingClient, setIsAddingClient] = useState(false)
     const [newClient, setNewClient] = useState({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] as {name: string, dni: string}[] })
     const [newFamilyMember, setNewFamilyMember] = useState({ name: "", dni: "" })
@@ -118,13 +118,16 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         // Calculo Base
         let val = 0, formula = ""
         
+        // Uso de 'as any' para evitar errores de TypeScript si el campo no existe en la interfaz
+        const opAny = op as any;
+
         if (priceOverrides[op.id] !== undefined) {
             val = priceOverrides[op.id]
             formula = "Manual (Editado)"
         } else {
-            const full = parseFloat(op.fullPrice || "0")
-            const aportes = parseFloat(op.aportes || "0")
-            const desc = parseFloat(op.descuento || "0")
+            const full = parseFloat(opAny.fullPrice || "0")
+            const aportes = parseFloat(opAny.aportes || "0")
+            const desc = parseFloat(opAny.descuento || "0")
             const p = op.prepaga?.toLowerCase() || ""
 
             if (p.includes("preven")) {
@@ -147,14 +150,11 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
 
-        // Calculo Portfolio (Aquí aplicamos el override si existe)
+        // Calculo Portfolio
         let portfolioVal = 0
         if (portfolioOverrides[op.id] !== undefined) {
              portfolioVal = portfolioOverrides[op.id]
         } else {
-             // Por defecto el 5% del valor liquidado (o valor manual si existiera lógica compleja, pero acá simplificamos)
-             // OJO: El portfolio suele ser sobre lo que paga el cliente, no lo que liquidamos nosotros.
-             // En la lógica anterior usabas val * rate. Voy a mantener esa lógica base pero editable.
              portfolioVal = Math.round(val * rules.portfolioRate)
         }
 
@@ -197,7 +197,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     // --- PORTFOLIO ---
     const portfolioOps = approvedOps.reduce((acc, op) => op.prepaga?.toLowerCase().includes('preven') ? acc + calculate(op).portfolio : acc, 0)
     
-    // Para manuales tambien permitimos override (usando IDs timestamp)
+    // Para manuales tambien permitimos override
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => {
          if (portfolioOverrides[item.id] !== undefined) return acc + portfolioOverrides[item.id]
          return acc + (parseFloat(item.calculatedLiquidation) * rules.portfolioRate)
@@ -248,11 +248,9 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
 
             // 4. Calcular Comisión Variable
             if (payableCount > 0) {
-                // Buscamos el % basado en el TOTAL DE VENTAS VARIABLES (según imagen)
                 const tier = shiftRules.tiers.find(t => totalVariableCount >= t.min && totalVariableCount <= t.max)
                 scalePercentage = tier ? tier.pct : 0
                 
-                // Aplicamos ese % solo a las ventas PAGABLES (Excedente)
                 const totalLiquidatedPayable = payableOps.reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedPayable * scalePercentage
             }
@@ -280,7 +278,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         if (!isNaN(num)) setPriceOverrides(prev => ({ ...prev, [id]: num }))
     }
     
-    // NUEVO HANDLER PARA CARTERA
     const handlePortfolioChange = (id: string, newVal: string) => {
         const num = parseFloat(newVal)
         if (!isNaN(num)) setPortfolioOverrides(prev => ({ ...prev, [id]: num }))
@@ -320,10 +317,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     const getSellerOpsDetail = (sellerName: string | null) => {
         if (!sellerName) return []
         
-        // Obtenemos todas las aprobadas de este vendedor
         const ops = approvedOps.filter(op => op.seller === sellerName)
         
-        // Replicamos la logica para marcar cuales fueron absorbidas visualmente
         const variableOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""
             return !COMMISSION_RULES.special.plans.some(p => plan.includes(p))
@@ -332,7 +327,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
         const absorbLimit = COMMISSION_RULES.scales[sellerInfo.shift].absorbable
 
-        // Mapeamos ID -> Estado (Especial, Absorbida, Pagada)
         const statusMap: Record<string, string> = {}
         
         ops.forEach(op => {
@@ -535,6 +529,10 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                     ) : pendingOps.map(op => {
                                         const calc = calculate(op)
                                         const capitasCount = (op.hijos?.length || 0) + 1
+                                        
+                                        // Casteo seguro para visualización
+                                        const opAny = op as any;
+
                                         return (
                                             <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors ${getPrepagaColor(op.prepaga)}`}>
                                                 <TableCell>
@@ -585,8 +583,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     <div className="text-xs font-bold text-slate-500">{op.plan}</div>
                                                 </TableCell>
                                                 <TableCell className="text-right text-xs font-mono text-slate-500">
-                                                    <div>FP: ${parseInt(op.fullPrice).toLocaleString()}</div>
-                                                    {op.aportes!=="0" && <div>Ap: ${parseInt(op.aportes).toLocaleString()}</div>}
+                                                    <div>FP: ${parseInt(opAny.fullPrice || "0").toLocaleString()}</div>
+                                                    {opAny.aportes!=="0" && <div>Ap: ${parseInt(opAny.aportes || "0").toLocaleString()}</div>}
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="text-[10px] bg-slate-100 p-1 rounded font-mono text-slate-500 truncate" title={calc.formula}>{calc.formula}</div>
@@ -658,6 +656,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                         <TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">Aprobá ventas desde la pestaña "Mesa de Entrada".</TableCell></TableRow>
                                     ) : approvedOps.map(op => {
                                         const calc = calculate(op)
+                                        const opAny = op as any;
+
                                         return (
                                             <TableRow key={op.id} className="hover:bg-slate-50 transition-colors">
                                                 <TableCell>
@@ -668,7 +668,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-xs text-slate-600 font-medium">{op.seller}</TableCell>
-                                                <TableCell className="text-right font-mono text-xs text-slate-500">${parseInt(op.fullPrice).toLocaleString()}</TableCell>
+                                                <TableCell className="text-right font-mono text-xs text-slate-500">${parseInt(opAny.fullPrice || "0").toLocaleString()}</TableCell>
                                                 <TableCell className="text-center">
                                                     <div className="bg-slate-100 text-[9px] px-2 py-0.5 rounded text-slate-500 truncate inline-block max-w-[150px]" title={calc.formula}>{calc.formula}</div>
                                                 </TableCell>
@@ -745,7 +745,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                 <TableCell><Badge variant="outline">{op.prepaga}</Badge></TableCell>
                                                 <TableCell>${liq.val.toLocaleString()}</TableCell>
                                                 <TableCell className="text-right bg-blue-50/50 p-2">
-                                                     {/* AQUÍ ESTÁ EL CAMBIO: INPUT EDITABLE PARA CARTERA */}
                                                     <div className="relative">
                                                         <span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span>
                                                         <Input 
@@ -760,7 +759,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                         )
                                     })}
                                     {manualPortfolio.map(item => {
-                                        // Para los manuales también permitimos editar. Usamos el ID del item manual.
                                         const currentVal = portfolioOverrides[item.id] !== undefined 
                                             ? portfolioOverrides[item.id] 
                                             : Math.round(parseFloat(item.calculatedLiquidation) * rules.portfolioRate)
@@ -772,7 +770,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                 <TableCell><Badge variant="outline">{item.prepaga}</Badge></TableCell>
                                                 <TableCell>${parseFloat(item.calculatedLiquidation).toLocaleString()}</TableCell>
                                                 <TableCell className="text-right bg-blue-50/50 p-2">
-                                                     {/* AQUÍ TAMBIÉN: INPUT EDITABLE PARA MANUALES */}
                                                     <div className="relative">
                                                         <span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span>
                                                         <Input 

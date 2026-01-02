@@ -15,7 +15,7 @@ import { DollarSign, TrendingUp, Calculator, Save, Lock, AlertTriangle, Settings
 import { Operation } from "./data"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
-// --- 1. CONFIGURACIÓN (SIMULA CONEXIÓN CON SUPERVISIÓN) ---
+// --- 1. CONFIGURACIÓN ---
 const SELLERS_DB: Record<string, { shift: '5hs' | '8hs', photo: string }> = {
     "Maca": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Maca" },
     "Agus": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Agus" },
@@ -49,7 +49,7 @@ const COMMISSION_RULES = {
     }
 }
 
-// --- 2. DATOS DEMO (LIMPIEZA TOTAL: Lista vacía para evitar errores) ---
+// --- 2. DATOS DEMO VACÍOS (Para evitar conflictos de tipos) ---
 const DEMO_DATA: Operation[] = []
 
 const DEFAULT_RULES = {
@@ -104,22 +104,17 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     // Seller Detail Modal
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
     
-    // Combinamos operaciones reales con la lista vacía de demo (seguridad total)
     const allOps = [...operations, ...DEMO_DATA]
 
     // --- CALCULADORA ---
     const calculate = (op: Operation) => {
-        // Calculo Base
         let val = 0, formula = ""
-        
-        // Uso de 'as any' para evitar errores de TypeScript si el campo no existe en la interfaz
         const opAny = op as any;
 
         if (priceOverrides[op.id] !== undefined) {
             val = priceOverrides[op.id]
             formula = "Manual (Editado)"
         } else {
-            // Usamos opAny para leer propiedades que quizas no esten en el tipo Operation oficial
             const full = parseFloat(opAny.fullPrice || "0")
             const aportes = parseFloat(opAny.aportes || "0")
             const desc = parseFloat(opAny.descuento || "0")
@@ -136,7 +131,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             } else {
                 let base = full * (1 - rules.taxRate)
                 formula = `(Full - ${rules.taxRate*100}%) * 180%`
-                // Usamos condicionLaboral con as any por si acaso
                 if (p.includes("doctored") && (op as any).condicionLaboral === 'empleado') {
                     base = aportes * (1 - rules.taxRate)
                     formula = `(Aportes - ${rules.taxRate*100}%) * 180%`
@@ -146,7 +140,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
 
-        // Calculo Portfolio
         let portfolioVal = 0
         if (portfolioOverrides[op.id] !== undefined) {
              portfolioVal = portfolioOverrides[op.id]
@@ -193,7 +186,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     // --- PORTFOLIO ---
     const portfolioOps = approvedOps.reduce((acc, op) => op.prepaga?.toLowerCase().includes('preven') ? acc + calculate(op).portfolio : acc, 0)
     
-    // Para manuales tambien permitimos override
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => {
          if (portfolioOverrides[item.id] !== undefined) return acc + portfolioOverrides[item.id]
          return acc + (parseFloat(item.calculatedLiquidation) * rules.portfolioRate)
@@ -201,7 +193,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     
     const totalPortfolio = portfolioOps + portfolioManualTotal
 
-    // --- COMISIONES VENDEDORAS (CON LOGICA ABSORBIBLE) ---
+    // --- COMISIONES VENDEDORAS ---
     const sellersCommissions = useMemo(() => {
         const result: any[] = []
         const grouped: Record<string, Operation[]> = {}
@@ -218,7 +210,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             
             const variableOps: Operation[] = []
             
-            // 1. Separar
             ops.forEach(op => {
                 const plan = op.plan?.toUpperCase() || ""
                 const isSpecial = COMMISSION_RULES.special.plans.some(p => plan.includes(p))
@@ -231,18 +222,14 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                 }
             })
 
-            // 2. Ordenar Variables por Fecha (para absorber las primeras)
             variableOps.sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
 
-            // 3. Aplicar Absorción
             const totalVariableCount = variableOps.length
             const absorbableCount = shiftRules.absorbable
-            const payableOps = variableOps.slice(absorbableCount) // Quedan solo las que superan la absorción
-            const payableCount = payableOps.length // Cantidad a pagar
+            const payableOps = variableOps.slice(absorbableCount) 
+            const payableCount = payableOps.length
 
             let scalePercentage = 0
-
-            // 4. Calcular Comisión Variable
             if (payableCount > 0) {
                 const tier = shiftRules.tiers.find(t => totalVariableCount >= t.min && totalVariableCount <= t.max)
                 scalePercentage = tier ? tier.pct : 0
@@ -307,14 +294,14 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     }
 
     const uniqueSellers = Array.from(new Set(allOps.map(o => o.seller)))
-    const uniquePrepagas = Array.from(new Set(allOps.map(o => o.prepaga)))
+    // *** AQUÍ ESTÁ EL ARREGLO: Filtramos para que solo pasen Strings reales (no vacíos) ***
+    const uniquePrepagas = Array.from(new Set(allOps.map(o => o.prepaga).filter((p): p is string => !!p)))
 
-    // --- HELPER PARA DETALLE DE COMISIONES (MODAL) ---
+    // --- HELPER PARA DETALLE ---
     const getSellerOpsDetail = (sellerName: string | null) => {
         if (!sellerName) return []
         
         const ops = approvedOps.filter(op => op.seller === sellerName)
-        
         const variableOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""
             return !COMMISSION_RULES.special.plans.some(p => plan.includes(p))
@@ -324,14 +311,12 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         const absorbLimit = COMMISSION_RULES.scales[sellerInfo.shift].absorbable
 
         const statusMap: Record<string, string> = {}
-        
         ops.forEach(op => {
             const plan = op.plan?.toUpperCase() || ""
             if (COMMISSION_RULES.special.plans.some(p => plan.includes(p))) {
                 statusMap[op.id] = "special"
             }
         })
-
         variableOps.forEach((op, index) => {
             if (index < absorbLimit) statusMap[op.id] = "absorbed"
             else statusMap[op.id] = "paid"
@@ -342,7 +327,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
 
     return (
         <div className="p-6 h-full flex flex-col gap-6 overflow-hidden max-w-[1900px] mx-auto pb-20">
-            
             {/* 1. HEADER */}
             <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-slate-200 shadow-sm shrink-0">
                 <div className="flex items-center gap-4 px-2">
@@ -355,7 +339,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                         </div>
                     </div>
                 </div>
-
                 <div className="flex items-center gap-2">
                     <div className="flex items-center bg-slate-50 rounded-lg border border-slate-200 px-3 py-1.5 gap-3">
                         <History size={16} className="text-slate-400"/>
@@ -396,7 +379,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                         </div>
                     </CardContent>
                 </Card>
-
                 <Card className="bg-white border-l-4 border-l-blue-500 shadow-md">
                     <CardContent className="p-5">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Cartera Nueva</p>
@@ -404,7 +386,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                         <p className="text-xs text-blue-600 mt-2 font-bold">Proyección a 60 días</p>
                     </CardContent>
                 </Card>
-
                 <Card className="bg-white border-l-4 border-l-pink-500 shadow-md">
                     <CardContent className="p-5">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Pago Comisiones</p>
@@ -414,7 +395,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                         <p className="text-xs text-pink-600 mt-2 font-bold">Total equipo de ventas</p>
                     </CardContent>
                 </Card>
-
                 <Card className="bg-slate-50 border-dashed border-2 border-slate-200 shadow-none hover:bg-slate-100 transition-colors cursor-pointer flex items-center justify-center group">
                     <div className="text-center">
                         <div className="h-10 w-10 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-2 text-slate-500 group-hover:bg-slate-300 group-hover:text-slate-700 transition-colors">
@@ -425,25 +405,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                 </Card>
             </div>
 
-            {/* CONFIGURACIÓN */}
-            {showConfig && (
-                <Card className="border-slate-300 bg-slate-50 animate-in slide-in-from-top-2 shrink-0">
-                    <CardHeader className="pb-3 border-b border-slate-200 py-3 bg-slate-100/50">
-                        <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-700"><Calculator size={16}/> Reglas de Facturación</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid grid-cols-5 gap-6 pt-4 pb-4">
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-500">Desc. Base (Tax Rate)</label><div className="flex items-center"><Input value={rules.taxRate} onChange={e=>setRules({...rules, taxRate: parseFloat(e.target.value)})} type="number" step="0.01" className="h-8 bg-white font-mono"/><span className="ml-2 text-xs font-bold text-slate-400">%</span></div></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-pink-600">IVA Prevención</label><div className="flex items-center"><Input value={rules.prevencionVat} onChange={e=>setRules({...rules, prevencionVat: parseFloat(e.target.value)})} type="number" step="0.01" className="h-8 bg-white font-mono border-pink-200"/><span className="ml-2 text-xs font-bold text-slate-400">%</span></div></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-500">Mult. Docto/Galeno</label><Input value={rules.doctoRed.base} onChange={e=>setRules({...rules, doctoRed: {...rules.doctoRed, base: parseFloat(e.target.value)}})} type="number" step="0.1" className="h-8 bg-white font-mono"/></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-500">Mult. AMPF</label><Input value={rules.ampf.multiplier} onChange={e=>setRules({...rules, ampf: {multiplier: parseFloat(e.target.value)}})} type="number" step="0.1" className="h-8 bg-white font-mono"/></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-500">% Cartera</label><Input value={rules.portfolioRate} onChange={e=>setRules({...rules, portfolioRate: parseFloat(e.target.value)})} type="number" step="0.01" className="h-8 bg-white font-mono"/></div>
-                    </CardContent>
-                </Card>
-            )}
-
             {/* TABS PRINCIPALES */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-                
                 <div className="flex justify-between items-end border-b border-slate-200 mb-4 px-1">
                     <TabsList className="bg-transparent gap-6 p-0 h-auto">
                         <TabsTrigger value="audit" className="rounded-none border-b-4 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-700 px-4 py-2 text-slate-400 font-bold uppercase tracking-widest transition-all">
@@ -524,8 +487,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                         <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {selectedMonth}.</TableCell></TableRow>
                                     ) : pendingOps.map(op => {
                                         const calc = calculate(op)
-                                        
-                                        // AQUI LA MAGIA: as any para que no chille TypeScript
                                         const opAny = op as any;
                                         const capitasCount = (opAny.hijos?.length || 0) + 1
 
@@ -535,7 +496,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     <div className="font-bold text-slate-800">{op.clientName}</div>
                                                     <div className="text-[11px] font-mono text-slate-400">{op.dni}</div>
                                                     <div className="flex gap-2 mt-1">
-                                                        {/* Usamos opAny para propiedades 'extra' */}
                                                         <Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">
                                                             {getSourceIcon(opAny.origen || "")} {opAny.origen || "Dato"}
                                                         </Badge>

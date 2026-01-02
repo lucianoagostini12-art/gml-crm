@@ -21,7 +21,7 @@ export function AdminPipelineHealth() {
 
     // CONTADORES INTELIGENTES
     // 30 Condenados (Simulados para el ejemplo visual)
-    const warnedCount = 30 
+    const warnedCount: number = 30
     // 12 Frescos (Simulados)
     const freshCount: number = 12
     const totalZombies = warnedCount + freshCount

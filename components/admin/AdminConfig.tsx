@@ -2,9 +2,6 @@
 
 import { useState, useRef, useEffect } from "react"
 import { createClient } from "@/lib/supabase"
-// Importamos cliente para crear usuarios (Auth)
-import { createClient as createSupabaseJS } from "@supabase/supabase-js"
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Sliders, PhoneCall, Globe, Plus, Trash2, Clock, UserPlus, Lock, Mail, Camera, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase } from "lucide-react"
+// Se agregó 'Globe' que faltaba y 'Headset' para el rol de Setter
+import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export function AdminConfig() {
@@ -33,18 +31,8 @@ export function AdminConfig() {
     const [showPassword, setShowPassword] = useState(false)
 
     // Estados de Comisiones (Se guardan en DB)
-    const [ranges5hs, setRanges5hs] = useState([
-        { id: 1, min: 9, max: 14, percent: 15 },
-        { id: 2, min: 15, max: 20, percent: 20 },
-        { id: 3, min: 21, max: 24, percent: 25 },
-        { id: 4, min: 25, max: 999, percent: 30 },
-    ])
-    const [ranges8hs, setRanges8hs] = useState([
-        { id: 1, min: 13, max: 18, percent: 15 },
-        { id: 2, min: 19, max: 24, percent: 20 },
-        { id: 3, min: 25, max: 30, percent: 25 },
-        { id: 4, min: 31, max: 999, percent: 30 },
-    ])
+    const [ranges5hs, setRanges5hs] = useState<any[]>([])
+    const [ranges8hs, setRanges8hs] = useState<any[]>([])
     const [absorb5, setAbsorb5] = useState("8")
     const [absorb8, setAbsorb8] = useState("12")
 
@@ -94,22 +82,34 @@ export function AdminConfig() {
             const a5 = data.find(c => c.key === 'absorb_5hs')?.value
             const a8 = data.find(c => c.key === 'absorb_8hs')?.value
             
-            if (r5) setRanges5hs(r5)
-            if (r8) setRanges8hs(r8)
+            // Si hay datos en DB los usamos, sino usamos defaults vacíos para no romper
+            if (r5) setRanges5hs(r5); else setRanges5hs([{ id: 1, min: 0, max: 999, percent: 0 }])
+            if (r8) setRanges8hs(r8); else setRanges8hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (a5) setAbsorb5(a5)
             if (a8) setAbsorb8(a8)
         }
     }
 
-    // --- GUARDAR CONFIGURACIÓN GENERAL ---
+    // --- GUARDAR CONFIGURACIÓN GENERAL (REAL) ---
     const saveGeneralConfig = async () => {
         setLoading(true)
-        await supabase.from('system_config').upsert({ key: 'ranges_5hs', value: ranges5hs })
-        await supabase.from('system_config').upsert({ key: 'ranges_8hs', value: ranges8hs })
-        await supabase.from('system_config').upsert({ key: 'absorb_5hs', value: absorb5 })
-        await supabase.from('system_config').upsert({ key: 'absorb_8hs', value: absorb8 })
+        
+        // Upsert masivo para asegurar persistencia
+        const updates = [
+            { key: 'ranges_5hs', value: ranges5hs },
+            { key: 'ranges_8hs', value: ranges8hs },
+            { key: 'absorb_5hs', value: absorb5 },
+            { key: 'absorb_8hs', value: absorb8 }
+        ]
+
+        const { error } = await supabase.from('system_config').upsert(updates)
+
         setLoading(false)
-        alert("✅ Configuración de comisiones guardada.")
+        if (error) {
+            alert("❌ Error al guardar: " + error.message)
+        } else {
+            alert("✅ Configuración de comisiones guardada correctamente en Base de Datos.")
+        }
     }
 
     // --- GESTIÓN DE TRAMOS ---
@@ -119,7 +119,7 @@ export function AdminConfig() {
         setList(newList)
     }
     const addRange = (list: any[], setList: any) => {
-        const newId = Math.max(...list.map(i => i.id)) + 1
+        const newId = list.length > 0 ? Math.max(...list.map(i => i.id)) + 1 : 1
         setList([...list, { id: newId, min: 0, max: 999, percent: 0 }])
     }
     const removeRange = (list: any[], setList: any, id: number) => {
@@ -140,7 +140,7 @@ export function AdminConfig() {
             email: user.email, 
             password: "", 
             role: user.role, 
-            work_hours: user.work_hours.toString(),
+            work_hours: user.work_hours?.toString() || "5",
             avatar: user.avatar 
         })
         setIsUserModalOpen(true)
@@ -165,29 +165,28 @@ export function AdminConfig() {
             const profileData = {
                 full_name: formData.name,
                 email: formData.email, 
-                role: formData.role,
+                role: formData.role, // Aquí viaja 'setter' si se selecciona
                 work_hours: parseInt(formData.work_hours),
                 avatar_url: formData.avatar
             }
 
             if (editingUserId) {
-                // UPDATE
+                // UPDATE PERFIL EXISTENTE
                 const { error } = await supabase.from('profiles').update(profileData).eq('id', editingUserId)
                 if (error) throw error
-
-                if (formData.password) {
-                     alert("⚠️ ATENCIÓN: Se actualizó el perfil visual. Para cambiar la clave real, usar API de Admin o 'Olvidé mi contraseña'.")
-                } else {
-                    alert("Usuario actualizado correctamente.")
-                }
+                if (formData.password) alert("Nota: La contraseña solo se actualiza si el usuario la cambia personalmente o vía email de recuperación.")
+                else alert("Usuario actualizado correctamente.")
 
             } else {
-                // CREATE
-                if (!formData.password) throw new Error("La contraseña es obligatoria para nuevos usuarios.")
-                const { error } = await supabase.from('profiles').upsert(profileData)
-                if (error) console.log("Nota: Error de Auth ignorado si es gestión de perfil.")
+                // CREAR NUEVO (Nota: Crear usuario Auth requiere API Admin o Signup, aquí guardamos el perfil)
+                const { error } = await supabase.from('profiles').insert([profileData])
                 
-                alert("Usuario creado/guardado.")
+                if (error) {
+                    console.error(error)
+                    alert("Error guardando perfil: " + error.message)
+                } else {
+                    alert("Perfil de usuario creado. El usuario deberá registrarse con este email.")
+                }
             }
 
             await fetchUsers()
@@ -222,7 +221,7 @@ export function AdminConfig() {
         fetchLossReasons()
     }
 
-    // --- LÓGICA DE ROLES VISUAL ---
+    // --- LÓGICA DE ROLES VISUAL (Incluye Setter) ---
     const getRoleBadge = (role: string) => {
         switch(role) {
             case 'supervisor_god': 
@@ -231,6 +230,8 @@ export function AdminConfig() {
                 return <Badge className="bg-purple-600 hover:bg-purple-700 text-white font-bold border-0 shadow-sm gap-1"><ShieldAlert size={12}/> Admin GOD</Badge>
             case 'admin_common': 
                 return <Badge className="bg-pink-500 hover:bg-pink-600 text-white font-medium border-0 gap-1"><Briefcase size={12}/> Administrativa</Badge>
+            case 'setter': 
+                return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white font-medium border-0 gap-1"><Headset size={12}/> Gestora Leads</Badge>
             case 'seller': 
                 return <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50 font-medium">Vendedora</Badge>
             default: 
@@ -402,8 +403,8 @@ export function AdminConfig() {
                 </TabsContent>
             </Tabs>
             <div className="flex justify-end pt-4">
-                <Button onClick={saveGeneralConfig} className="bg-slate-900 text-white px-8 h-12 text-lg shadow-xl hover:bg-slate-800 gap-2">
-                    <Save className="h-5 w-5"/> Guardar Configuración
+                <Button onClick={saveGeneralConfig} disabled={loading} className="bg-slate-900 text-white px-8 h-12 text-lg shadow-xl hover:bg-slate-800 gap-2">
+                    <Save className="h-5 w-5"/> {loading ? "Guardando..." : "Guardar Configuración"}
                 </Button>
             </div>
 
@@ -438,6 +439,7 @@ export function AdminConfig() {
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="seller">Vendedora</SelectItem>
+                                        <SelectItem value="setter">Gestora de Leads (Setter)</SelectItem> {/* Opción Setter agregada */}
                                         <SelectItem value="admin_common">Administrativa Común</SelectItem>
                                         <SelectItem value="admin_god">Administrativa GOD</SelectItem>
                                         <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>

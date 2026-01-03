@@ -1,33 +1,27 @@
 "use client"
 
 import { useState, useEffect } from "react"
-// 1. IMPORTAMOS SUPABASE
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Loader2, Eye, EyeOff } from "lucide-react" // Importamos los íconos del ojo
+import { Loader2, Eye, EyeOff } from "lucide-react" 
 
 const BRAND_COLOR = "#28315b"
 
-interface LoginViewProps {
-    onLogin: (role: any, name: string) => void
-}
-
-export function LoginView({ onLogin }: LoginViewProps) {
+export function LoginView() {
     const supabase = createClient()
     
     // Estados
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [rememberMe, setRememberMe] = useState(false)
-    const [showPassword, setShowPassword] = useState(false) // Estado para el ojito
+    const [showPassword, setShowPassword] = useState(false) 
     
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
 
-    // Lógica para recuperar email guardado
     useEffect(() => {
         const savedEmail = localStorage.getItem("gml_user_email_remember")
         if (savedEmail) {
@@ -41,7 +35,6 @@ export function LoginView({ onLogin }: LoginViewProps) {
         setLoading(true)
         setError(null)
 
-        // Guardar o borrar email
         if (rememberMe) {
             localStorage.setItem("gml_user_email_remember", email)
         } else {
@@ -49,30 +42,14 @@ export function LoginView({ onLogin }: LoginViewProps) {
         }
 
         try {
-            // 1. LOGIN CON SUPABASE AUTH
-            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            // LOGIN CON SUPABASE (Sin llamar a props externas)
+            const { error: authError } = await supabase.auth.signInWithPassword({
                 email: email,
                 password: password
             })
 
             if (authError) throw new Error("Credenciales inválidas.")
-
-            if (authData.user) {
-                // 2. BUSCAR EL PERFIL REAL EN LA BASE DE DATOS
-                const { data: profile, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('role, full_name')
-                    .eq('id', authData.user.id)
-                    .single()
-
-                if (profileError || !profile) {
-                    throw new Error("Usuario sin perfil asignado.")
-                }
-
-                // 3. PASAR EL CONTROL AL PADRE (Page.tsx)
-                // El componente padre se encarga de mostrar el dashboard correcto según el rol
-                onLogin(profile.role, profile.full_name || "Usuario")
-            }
+            // El observador en page.tsx hará el resto
 
         } catch (err: any) {
             console.error(err)
@@ -84,7 +61,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
     return (
         <div className="min-h-screen w-full flex flex-col md:flex-row font-sans overflow-hidden">
             
-            {/* --- IZQUIERDA: AZUL GML (Centrado Total) --- */}
+            {/* IZQUIERDA: AZUL GML */}
             <div 
                 className="w-full md:w-1/2 p-10 flex flex-col justify-center items-center relative text-white text-center order-1"
                 style={{ backgroundColor: BRAND_COLOR }}
@@ -97,11 +74,9 @@ export function LoginView({ onLogin }: LoginViewProps) {
                     <p className="text-blue-100 text-lg font-light">
                         Sistema de Gestión Integral
                     </p>
-                    {/* Línea decorativa centrada */}
                     <div className="w-16 h-1 bg-blue-400 rounded mt-6"></div>
                 </div>
                 
-                {/* Decoración de fondo */}
                 <div className="absolute top-0 right-0 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl translate-x-10 -translate-y-10"></div>
                 <div className="absolute bottom-0 left-0 w-60 h-60 bg-blue-400 opacity-5 rounded-full blur-3xl -translate-x-10 translate-y-10"></div>
                 
@@ -110,11 +85,9 @@ export function LoginView({ onLogin }: LoginViewProps) {
                 </div>
             </div>
 
-            {/* --- DERECHA: FORMULARIO (Blanco) --- */}
+            {/* DERECHA: FORMULARIO */}
             <div className="w-full md:w-1/2 bg-white p-8 md:p-12 flex flex-col justify-center items-center order-2">
-                
                 <div className="w-full max-w-[320px] space-y-6">
-                    
                     <div className="text-center md:text-left mb-2">
                         <h3 className="text-xl font-bold text-slate-800">Iniciar Sesión</h3>
                         <p className="text-xs text-slate-500">Ingresá tu email y contraseña.</p>
@@ -137,14 +110,13 @@ export function LoginView({ onLogin }: LoginViewProps) {
                             <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Contraseña</Label>
                             <div className="relative">
                                 <Input 
-                                    type={showPassword ? "text" : "password"} // Cambia tipo según estado
+                                    type={showPassword ? "text" : "password"} 
                                     className="h-10 bg-slate-50 border-slate-200 focus:border-[#28315b] focus:ring-1 focus:ring-[#28315b] transition-all rounded pr-10" 
                                     placeholder="••••••"
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     required
                                 />
-                                {/* BOTÓN OJITO */}
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword(!showPassword)}

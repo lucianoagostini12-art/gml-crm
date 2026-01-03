@@ -165,27 +165,38 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const supabase = createClient()
   const [view, setView] = useState("overview")
   const [incomingAlert, setIncomingAlert] = useState<any>(null)
-  const [userData, setUserData] = useState<{ name: string; email: string; avatar?: string }>({
-    name: "Admin",
+  
+  // ESTADO PARA DATOS DEL USUARIO (Nombre y Foto Real)
+  const [userData, setUserData] = useState<{ name: string; email: string; avatar?: string; role?: string }>({
+    name: "Cargando...",
     email: "",
+    avatar: undefined,
+    role: "Admin"
   })
 
   useEffect(() => {
-    // 1. Cargar datos iniciales y suscribirse a cambios del perfil
+    // 1. Cargar datos del perfil REAL desde Supabase
     const initUserData = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      // a) Obtener usuario autenticado
+      const { data: { user } } = await supabase.auth.getUser()
 
       if (user) {
-        // Carga inicial
+        // b) Buscar su perfil en la tabla 'profiles'
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name, avatar_url, role')
+            .eq('id', user.id)
+            .single()
+
+        // c) Setear estado con los datos reales de la DB
         setUserData({
-          name: user.user_metadata?.full_name || user.email?.split("@")[0] || "Admin",
+          name: profile?.full_name || user.email?.split("@")[0] || "Admin",
           email: user.email || "",
-          avatar: user.user_metadata?.avatar_url,
+          avatar: profile?.avatar_url, // URL de la foto real
+          role: profile?.role || "Admin God"
         })
 
-        // Escuchar cambios en la tabla 'profiles' para este usuario
+        // d) Escuchar cambios en la tabla 'profiles' para actualizar foto/nombre en tiempo real
         const profileChannel = supabase
           .channel("admin_profile_changes")
           .on(
@@ -198,7 +209,6 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             },
             (payload) => {
               const newProfile = payload.new as any
-              // Actualizamos el estado del sidebar en vivo
               setUserData((prev) => ({
                 ...prev,
                 name: newProfile.full_name || prev.name,
@@ -216,7 +226,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
     initUserData()
 
-    // 2. Alertas de Leads
+    // 2. Alertas de Leads (Esto sigue igual)
     const leadsChannel = supabase
       .channel("god_mode_alerts")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, (payload) => {
@@ -268,7 +278,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           GML <span className="text-white ml-1 italic">GOD MODE</span>
         </div>
 
-        {/* NAV - SCROLLABLE (Reemplazado ScrollArea por div nativo para asegurar flex-1) */}
+        {/* NAV - SCROLLABLE */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           <nav className="space-y-1">
             <Button variant={view === "overview" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("overview")}>
@@ -299,7 +309,6 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               <Banknote className="h-4 w-4 text-green-400" /> Liquidación
             </Button>
 
-            {/* ✅ RESTAURADOS */}
             <Button variant={view === "health" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("health")}>
               <LifeBuoy className="h-4 w-4 text-green-400" /> Salud del Tubo
             </Button>
@@ -312,7 +321,6 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               <BookOpen className="h-4 w-4 text-pink-400" /> Recursos
             </Button>
 
-            {/* ✅ RESTAURADOS */}
             <Button
               variant={view === "announcements" ? "secondary" : "ghost"}
               className="w-full justify-start gap-3"
@@ -344,7 +352,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           </nav>
         </div>
 
-        {/* FOOTER - FIXED (Siempre visible) */}
+        {/* FOOTER - PERFIL DE USUARIO REAL */}
         <div className="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
           <div className="flex items-center gap-3 mb-4 px-2">
             <Avatar className="h-10 w-10 border-2 border-blue-500 shadow-sm">
@@ -353,7 +361,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             </Avatar>
             <div className="overflow-hidden">
               <p className="font-bold text-sm text-white truncate capitalize">{userData.name}</p>
-              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Gerencia</p>
+              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">{userData.role || "Gerencia"}</p>
             </div>
           </div>
 
@@ -378,8 +386,6 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           {view === "commissions" && <AdminCommissions />}
           {view === "resources" && <AdminResources />}
           {view === "setter" && <AdminSetterManager />}
-
-          {/* ✅ RESTAURADOS */}
           {view === "health" && <AdminPipelineHealth />}
           {view === "announcements" && <AdminAnnouncements />}
         </ScrollArea>

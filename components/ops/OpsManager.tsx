@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useMemo } from "react"
+// 1. IMPORTAMOS SUPABASE
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -13,7 +14,7 @@ import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Label } from "@/components/ui/label" 
 
-// DATOS (NOTA: Se quitó PLANES_POR_EMPRESA del import porque ya no existe en data.ts)
+// DATOS (Sin datos fake)
 import { Operation, OpStatus, Reminder, getStatusColor, getSubStateStyle, FLOW_STATES } from "./data"
 
 // MODULOS
@@ -96,7 +97,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [isBellOpen, setIsBellOpen] = useState(false) 
     const unreadCount = notifications.filter(n => !n.read).length
 
-    // --- 0. CARGAR USUARIOS, PERMISOS Y CONFIGURACIÓN ---
+    // --- LOGOUT REAL ---
+    const handleLogout = async () => {
+        await supabase.auth.signOut()
+        window.location.href = "/" // Redirige al login limpio
+    }
+
+    // --- CARGA DE DATOS ---
     const fetchProfiles = async () => {
         const { data } = await supabase.from('profiles').select('*')
         if (data) setProfiles(data)
@@ -117,10 +124,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
-    // --- 1. FUNCIÓN MAESTRA DE CARGA DE DATOS ---
     const fetchOperations = async () => {
         setIsLoading(true)
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('leads')
             .select('*')
             .not('status', 'in', '("nuevo","contactado","cotizacion","perdido")') 
@@ -178,11 +184,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         setIsLoading(false)
     }
 
-    // Cargar datos al iniciar
     useEffect(() => {
         fetchProfiles()
         fetchPermissions()
-        fetchSystemConfig() // <--- CARGAMOS LA CONFIG REAL
+        fetchSystemConfig() 
         fetchOperations()
         
         const channel = supabase.channel('ops-realtime')
@@ -195,7 +200,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {
                 fetchPermissions()
-                fetchSystemConfig() // Recargar config si cambia en tiempo real
+                fetchSystemConfig() 
             })
             .subscribe()
 
@@ -226,7 +231,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (filterSeller !== 'all' && op.seller !== filterSeller) return false
         if (dateFilter.start && op.entryDate < dateFilter.start) return false
         if (dateFilter.end && op.entryDate > dateFilter.end) return false
-        
         return true
     })
 
@@ -425,6 +429,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 currentStage={currentStageFilter} 
                 setStage={setCurrentStageFilter}
                 permissions={permissions}
+                // PASAMOS LA FUNCION LOGOUT REAL
+                onLogout={handleLogout} 
                 currentUser={{ 
                     name: userName, 
                     avatar: profiles.find(p => p.full_name === userName)?.avatar_url || "" 
@@ -438,6 +444,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                             {viewMode.replace('_', ' ')}
                              <Button variant="ghost" size="icon" onClick={fetchOperations} title="Recargar"><RefreshCw className={`h-4 w-4 text-slate-400 ${isLoading ? 'animate-spin' : ''}`}/></Button>
                         </h2>
+                        {/* BUSCADOR ADAPTATIVO */}
                         <div className="relative group w-[380px]">
                             <div className="absolute left-0 top-0 bottom-0 w-10 flex items-center justify-center pointer-events-none z-10"><Search className="h-5 w-5 text-slate-400/80" strokeWidth={2}/></div>
                             <Input 
@@ -462,9 +469,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     ) : (
                         <ScrollArea className="flex-1 h-full">
                             <div className="p-6">
-                                {viewMode === 'dashboard' && <><OpsDashboard operations={operations} activeFilter={currentStageFilter} setActiveFilter={setCurrentStageFilter} /><div className="mt-8 border-t border-slate-200 pt-6"><OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} /></div></>}
+                                {viewMode === 'dashboard' && <><OpsDashboard operations={operations} activeFilter={currentStageFilter} setActiveFilter={setCurrentStageFilter} /><div className="mt-8 border-t border-slate-200 pt-6"><OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} /></div></>}
                                 
-                                {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} />}
+                                {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} />}
                                 
                                 {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics operations={filteredOps} />}
                                 {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling operations={operations} />}
@@ -500,7 +507,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 onAddReminder={handleAddReminder} 
                 getStatusColor={getStatusColor} 
                 getSubStateStyle={getSubStateStyle}
-                // *** PROP NUEVA: Pasamos la configuración real al Modal ***
                 globalConfig={globalConfig}
             />
             

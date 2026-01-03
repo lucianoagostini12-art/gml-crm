@@ -1,103 +1,122 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-// IMPORTANTE: Ruta de importación corregida
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Phone, Linkedin, Facebook, MessageCircle, Plus, Search, ChevronLeft, ChevronRight, LogOut, GripVertical, CalendarDays, Archive, RefreshCw, Loader2 } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-
-const supabase = createClient()
+import { Phone, Linkedin, Facebook, Plus, Search, ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Loader2, Globe, Megaphone } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 export function SetterDashboard() {
+    const supabase = createClient()
     const today = new Date().toISOString().split('T')[0]
     
-    // ESTADOS UI
+    // UI STATES
     const [currentDate, setCurrentDate] = useState(today)
     const [viewMonth, setViewMonth] = useState(new Date())
-    const [currentTimeLine, setCurrentTimeLine] = useState("")
     const [isCalendarExpanded, setIsCalendarExpanded] = useState(false) 
     const [searchQuery, setSearchQuery] = useState("") 
 
-    // ESTADOS DATOS REALES
+    // DATA STATES
     const [items, setItems] = useState<any[]>([]) 
     const [loading, setLoading] = useState(true)
     const [selectedItem, setSelectedItem] = useState<any>(null)
     const [draggedItem, setDraggedItem] = useState<any>(null)
     
-    // INPUTS Y MODALES
+    // CONFIG STATES (Desde Supabase)
+    const [origins, setOrigins] = useState<string[]>([]) 
+    
+    // MODALS & FORMS
     const [newNoteText, setNewNoteText] = useState("")
     const [isCreateOpen, setIsCreateOpen] = useState(false)
     const [isScheduleOpen, setIsScheduleOpen] = useState(false)
     const [isDiscardOpen, setIsDiscardOpen] = useState(false)
     
-    const [createData, setCreateData] = useState({ title: "", source: "linkedin", note: "", phone: "" })
+    const [createData, setCreateData] = useState({ title: "", source: "Linkedin", note: "", phone: "" })
     const [manualDate, setManualDate] = useState(currentDate)
     const [manualTime, setManualTime] = useState("10:00")
     const [discardReason, setDiscardReason] = useState("")
 
-    // --- CARGA DE DATOS REALES ---
+    // --- 1. CARGA INICIAL DE DATOS Y CONFIGURACIÓN ---
+    const fetchConfig = async () => {
+        const { data } = await supabase.from('system_config').select('*').eq('key', 'sales_origins').single()
+        if (data) setOrigins(data.value || ["Linkedin", "Facebook", "Instagram", "Llamador"])
+    }
+
     const fetchItems = async () => {
         setLoading(true)
-        // Traemos leads que no estén cerrados (vendidos/perdidos)
+        // Solo traemos leads que NO estén cerrados (vendidos o perdidos) para mantener el panel limpio
+        // Y que sean de tipo 'prospecto' (para diferenciar de ventas ya cargadas)
         const { data } = await supabase
             .from('leads')
             .select('*')
             .not('status', 'in', '("vendido","perdido")')
             .order('created_at', { ascending: false })
         
-        if (data) setItems(data)
+        if (data) {
+            const mappedItems = data.map((i: any) => ({
+                id: i.id,
+                name: i.name,
+                source: i.source,
+                phone: i.phone,
+                notes: i.comments ? i.comments.map((c:any) => `[${new Date(c.date).toLocaleDateString()}]: ${c.text}`).join('\n') : '', // Aplanamos chat para vista simple
+                scheduled_for: i.scheduled_for, // Fecha ISO de la cita
+                status: i.status
+            }))
+            setItems(mappedItems)
+        }
         setLoading(false)
     }
 
     useEffect(() => {
+        fetchConfig()
         fetchItems()
+
         const channel = supabase.channel('setter_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchItems())
             .subscribe()
             
-        const t = setInterval(() => {
-            setCurrentTimeLine(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}))
-        }, 60000)
-        
-        return () => {
-            clearInterval(t)
-            supabase.removeChannel(channel)
-        }
+        return () => { supabase.removeChannel(channel) }
     }, [])
 
     // --- FILTROS COMPUTADOS ---
-    const inboxItems = items.filter(i => 
+    const inboxItems = useMemo(() => items.filter(i => 
         !i.scheduled_for && 
         i.name.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    ), [items, searchQuery])
 
-    const agendaItems = items.filter(i => {
+    const agendaItems = useMemo(() => items.filter(i => {
         if (!i.scheduled_for) return false
         return i.scheduled_for.startsWith(currentDate)
-    }).sort((a, b) => new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime())
+    }).sort((a, b) => new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime()), [items, currentDate])
 
     // --- ACCIONES DB ---
     const handleCreate = async () => {
         if (!createData.title) return
+        
+        const initialComment = createData.note ? [{
+            text: createData.note,
+            author: 'Setter',
+            date: new Date().toISOString()
+        }] : []
+
         const { error } = await supabase.from('leads').insert({
             name: createData.title,
             source: createData.source,
             phone: createData.phone,
-            notes: createData.note ? `[NOTA INICIAL]: ${createData.note}` : '',
-            status: 'nuevo',
+            comments: initialComment,
+            status: 'nuevo', // Estado inicial para que Admin lo vea como ingreso
+            type: 'prospecto', // Marcamos que es un prospecto crudo
             last_update: new Date().toISOString()
         })
+
         if (!error) {
             setIsCreateOpen(false)
-            setCreateData({ title: "", source: "linkedin", note: "", phone: "" })
+            setCreateData({ title: "", source: "Linkedin", note: "", phone: "" })
         }
     }
 
@@ -108,6 +127,7 @@ export function SetterDashboard() {
 
         await supabase.from('leads').update({
             scheduled_for: isoDateTime,
+            status: 'contactado', // Cambia estado al agendar
             last_update: new Date().toISOString()
         }).eq('id', idToUpdate)
 
@@ -117,32 +137,56 @@ export function SetterDashboard() {
 
     const handleDiscard = async () => {
         if (!selectedItem) return
+        
+        // Agregar nota de descarte al historial
+        const { data: current } = await supabase.from('leads').select('comments').eq('id', selectedItem.id).single()
+        const newComments = [...(current?.comments || []), {
+            text: `[DESCARTADO]: ${discardReason}`,
+            author: 'Setter',
+            date: new Date().toISOString()
+        }]
+
         await supabase.from('leads').update({
             status: 'perdido',
-            notes: (selectedItem.notes || '') + `\n[DESCARTADO]: ${discardReason}`,
+            comments: newComments,
             last_update: new Date().toISOString()
         }).eq('id', selectedItem.id)
+
         setSelectedItem(null)
         setIsDiscardOpen(false)
     }
 
     const addNote = async () => {
         if (!selectedItem || !newNoteText.trim()) return
-        const newNoteString = (selectedItem.notes || "") + `\n[${new Date().toLocaleDateString()}]: ${newNoteText}`
+        
+        const { data: current } = await supabase.from('leads').select('comments').eq('id', selectedItem.id).single()
+        const newComments = [...(current?.comments || []), {
+            text: newNoteText,
+            author: 'Setter',
+            date: new Date().toISOString()
+        }]
+
         await supabase.from('leads').update({
-            notes: newNoteString,
+            comments: newComments,
             last_update: new Date().toISOString()
         }).eq('id', selectedItem.id)
+
+        // Actualizamos vista local para feedback inmediato
+        setSelectedItem((prev: any) => ({
+            ...prev,
+            notes: (prev.notes || '') + `\n[HOY]: ${newNoteText}`
+        }))
         setNewNoteText("")
     }
 
     // --- UTILS ---
     const getSourceIcon = (src: string) => {
-        switch(src?.toLowerCase()) {
-            case 'linkedin': return <Linkedin className="h-4 w-4 text-blue-700" />
-            case 'facebook': return <Facebook className="h-4 w-4 text-indigo-600" />
-            default: return <Phone className="h-4 w-4 text-orange-600" />
-        }
+        const s = src?.toLowerCase() || ""
+        if (s.includes('linkedin')) return <Linkedin className="h-4 w-4 text-blue-700" />
+        if (s.includes('facebook') || s.includes('meta')) return <Facebook className="h-4 w-4 text-blue-600" />
+        if (s.includes('instagram')) return <Megaphone className="h-4 w-4 text-pink-600" />
+        if (s.includes('web') || s.includes('google')) return <Globe className="h-4 w-4 text-green-600" />
+        return <Phone className="h-4 w-4 text-orange-600" />
     }
 
     const calendarWeeks = useMemo(() => {
@@ -176,7 +220,7 @@ export function SetterDashboard() {
             </header>
 
             <div className="flex-1 grid grid-cols-12 overflow-hidden">
-                {/* BANDEJA */}
+                {/* BANDEJA DE ENTRADA (LEADS SIN AGENDAR) */}
                 <div className="col-span-3 bg-white border-r border-slate-200 flex flex-col">
                     <div className="p-4 border-b bg-white">
                         <div className="flex justify-between items-center mb-3">
@@ -185,26 +229,27 @@ export function SetterDashboard() {
                         </div>
                         <div className="relative">
                             <Search className="absolute left-2 top-2 h-4 w-4 text-slate-400"/>
-                            <Input className="pl-8 h-8 text-xs bg-slate-50" placeholder="Buscar..." value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} />
+                            <Input className="pl-8 h-8 text-xs bg-slate-50" placeholder="Buscar por nombre..." value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} />
                         </div>
                     </div>
                     <ScrollArea className="flex-1 p-3 bg-slate-50/50">
                         <div className="space-y-2">
                             {inboxItems.map(item => (
                                 <div key={item.id} draggable onDragStart={() => setDraggedItem(item)} onClick={() => setSelectedItem(item)} 
-                                    className={`bg-white p-3 rounded-lg border shadow-sm cursor-grab transition-all ${selectedItem?.id === item.id ? 'ring-2 ring-slate-800' : 'border-slate-200'}`}>
+                                    className={`bg-white p-3 rounded-lg border shadow-sm cursor-grab transition-all ${selectedItem?.id === item.id ? 'ring-2 ring-slate-800 border-slate-800' : 'border-slate-200 hover:border-slate-300'}`}>
                                     <div className="flex justify-between items-center mb-1">
                                         <span className="font-bold text-slate-800 text-sm truncate">{item.name}</span>
                                         {getSourceIcon(item.source)}
                                     </div>
-                                    <p className="text-[11px] text-slate-500 truncate">{item.notes?.split('\n')[0] || "Sin historial"}</p>
+                                    <p className="text-[10px] text-slate-400 truncate mt-1">{item.phone}</p>
                                 </div>
                             ))}
+                            {inboxItems.length === 0 && <p className="text-center text-xs text-slate-400 mt-10">No hay leads pendientes.</p>}
                         </div>
                     </ScrollArea>
                 </div>
 
-                {/* AGENDA */}
+                {/* AGENDA CENTRAL */}
                 <div className="col-span-5 flex flex-col bg-slate-50 border-r relative">
                     <div className="h-14 border-b bg-white flex items-center justify-between px-4 z-20">
                         <div className="flex items-center gap-3">
@@ -213,37 +258,48 @@ export function SetterDashboard() {
                                 {new Date(currentDate).toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long'})}
                             </h2>
                         </div>
+                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCurrentDate(today)}>Hoy</Button>
                     </div>
 
                     {isCalendarExpanded && (
-                        <div className="absolute top-14 left-0 w-full bg-white border-b shadow-xl p-4 z-50">
+                        <div className="absolute top-14 left-0 w-full bg-white border-b shadow-xl p-4 z-50 animate-in slide-in-from-top-5">
                              <div className="flex justify-between items-center mb-4">
                                 <Button variant="ghost" size="sm" onClick={() => setViewMonth(new Date(viewMonth.setMonth(viewMonth.getMonth()-1)))}><ChevronLeft className="h-4 w-4"/></Button>
                                 <span className="font-bold text-sm uppercase">{viewMonth.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}</span>
                                 <Button variant="ghost" size="sm" onClick={() => setViewMonth(new Date(viewMonth.setMonth(viewMonth.getMonth()+1)))}><ChevronRight className="h-4 w-4"/></Button>
                             </div>
                             <div className="grid grid-cols-7 gap-1">
-                                {calendarWeeks.flat().map((d, i) => d && (
+                                {['D','L','M','M','J','V','S'].map(d => <div key={d} className="text-center text-[10px] font-bold text-slate-400">{d}</div>)}
+                                {calendarWeeks.flat().map((d, i) => d ? (
                                     <div key={i} onClick={() => {setCurrentDate(d.toISOString().split('T')[0]); setIsCalendarExpanded(false)}} 
-                                        className={`h-8 w-8 mx-auto rounded-full flex items-center justify-center text-xs cursor-pointer ${d.toISOString().split('T')[0] === currentDate ? 'bg-slate-800 text-white' : 'hover:bg-slate-100'}`}>
+                                        className={`h-8 w-8 mx-auto rounded-full flex items-center justify-center text-xs cursor-pointer transition-colors ${d.toISOString().split('T')[0] === currentDate ? 'bg-slate-900 text-white font-bold' : 'hover:bg-slate-100 text-slate-600'}`}>
                                         {d.getDate()}
                                     </div>
-                                ))}
+                                ) : <div key={i}></div>)}
                             </div>
                         </div>
                     )}
 
                     <ScrollArea className="flex-1">
-                        <div className="relative min-h-[800px]">
+                        <div className="relative min-h-[800px] bg-white">
                             {Array.from({length: 13}, (_, i) => i + 8).map(hour => {
                                 const hourItems = agendaItems.filter(i => new Date(i.scheduled_for).getHours() === hour)
+                                const isDragTarget = draggedItem !== null
                                 return (
-                                    <div key={hour} className="flex min-h-[90px] border-b group" onDrop={(e) => {e.preventDefault(); handleReschedule(currentDate, `${hour}:00`)}} onDragOver={(e)=>e.preventDefault()}>
-                                        <div className="w-14 border-r flex justify-center pt-3 text-[10px] font-bold text-slate-400">{hour}:00</div>
+                                    <div key={hour} 
+                                        className={`flex min-h-[90px] border-b group transition-colors ${isDragTarget ? 'hover:bg-blue-50/50' : ''}`}
+                                        onDrop={(e) => {e.preventDefault(); handleReschedule(currentDate, `${String(hour).padStart(2,'0')}:00`)}} 
+                                        onDragOver={(e)=>e.preventDefault()}
+                                    >
+                                        <div className="w-14 border-r flex justify-center pt-3 text-[10px] font-bold text-slate-400 bg-slate-50/30">{hour}:00</div>
                                         <div className="flex-1 p-2 space-y-1">
                                             {hourItems.map(item => (
-                                                <div key={item.id} onClick={() => setSelectedItem(item)} className="p-2 rounded-lg border bg-white shadow-sm cursor-pointer hover:ring-1 ring-slate-400">
-                                                    <p className="text-xs font-bold truncate">{item.name}</p>
+                                                <div key={item.id} onClick={() => setSelectedItem(item)} className="p-2 rounded-lg border bg-blue-50/50 border-blue-100 shadow-sm cursor-pointer hover:ring-1 ring-blue-400">
+                                                    <div className="flex justify-between">
+                                                        <p className="text-xs font-bold text-blue-900 truncate">{item.name}</p>
+                                                        <span className="text-[10px] text-blue-400 font-mono">{new Date(item.scheduled_for).getMinutes() === 0 ? "00" : new Date(item.scheduled_for).getMinutes()} min</span>
+                                                    </div>
+                                                    <p className="text-[10px] text-blue-600 truncate mt-0.5">{item.phone}</p>
                                                 </div>
                                             ))}
                                         </div>
@@ -254,77 +310,111 @@ export function SetterDashboard() {
                     </ScrollArea>
                 </div>
 
-                {/* MESA DE TRABAJO */}
+                {/* MESA DE TRABAJO (DETALLE) */}
                 <div className="col-span-4 bg-white flex flex-col border-l">
                     {selectedItem ? (
                         <>
-                            <div className="p-6 border-b">
-                                <Badge className="mb-2 uppercase text-[10px]">{selectedItem.source}</Badge>
-                                <h2 className="text-2xl font-black text-slate-800">{selectedItem.name}</h2>
-                                <div className="grid grid-cols-2 gap-2 mt-4">
-                                    <Button className="bg-slate-900 text-white font-bold" onClick={() => window.open(`tel:${selectedItem.phone}`)}>LLAMAR</Button>
-                                    <Button variant="outline" className="font-bold" onClick={() => window.open(`https://wa.me/${selectedItem.phone}`)}>WHATSAPP</Button>
+                            <div className="p-6 border-b bg-slate-50/50">
+                                <Badge className="mb-2 uppercase text-[10px] bg-white border-slate-200 text-slate-600 hover:bg-white">{selectedItem.source}</Badge>
+                                <h2 className="text-2xl font-black text-slate-800 leading-tight">{selectedItem.name}</h2>
+                                <p className="text-sm text-slate-500 font-mono mt-1">{selectedItem.phone}</p>
+                                <div className="grid grid-cols-2 gap-3 mt-5">
+                                    <Button className="bg-slate-900 text-white font-bold h-10 shadow-lg hover:bg-slate-800" onClick={() => window.open(`tel:${selectedItem.phone}`)}>
+                                        <Phone className="mr-2 h-4 w-4"/> LLAMAR
+                                    </Button>
+                                    <Button variant="outline" className="font-bold h-10 border-green-200 text-green-700 hover:bg-green-50 hover:text-green-800" onClick={() => window.open(`https://wa.me/${selectedItem.phone.replace(/[^0-9]/g, '')}`, '_blank')}>
+                                        WHATSAPP
+                                    </Button>
                                 </div>
                             </div>
-                            <ScrollArea className="flex-1 p-6 bg-slate-50/30">
-                                <div className="bg-white p-3 rounded-xl border shadow-sm mb-4">
-                                    <Textarea value={newNoteText} onChange={(e)=>setNewNoteText(e.target.value)} placeholder="Escribir avance..." className="min-h-[80px] border-0 resize-none text-sm"/>
-                                    <Button size="sm" className="w-full mt-2 bg-slate-800 text-white text-xs h-8" onClick={addNote}>GUARDAR NOTA</Button>
+                            <ScrollArea className="flex-1 p-6">
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
+                                    <Textarea value={newNoteText} onChange={(e)=>setNewNoteText(e.target.value)} placeholder="Escribir avance o resultado..." className="min-h-[80px] border-0 resize-none text-sm focus-visible:ring-0 p-0"/>
+                                    <div className="flex justify-end mt-2 pt-2 border-t border-slate-100">
+                                        <Button size="sm" className="bg-blue-600 text-white text-xs h-8 px-4 font-bold" onClick={addNote}>GUARDAR</Button>
+                                    </div>
                                 </div>
-                                <div className="p-4 bg-white rounded-xl border text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
-                                    {selectedItem.notes || "No hay registros previos."}
+                                <div className="space-y-4">
+                                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Historial</h4>
+                                    <div className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed font-mono bg-slate-50 p-4 rounded-lg border border-slate-100">
+                                        {selectedItem.notes || "Sin registros previos."}
+                                    </div>
                                 </div>
                             </ScrollArea>
-                            <div className="p-4 border-t grid grid-cols-2 gap-2 bg-white">
-                                <Button onClick={() => setIsScheduleOpen(true)} variant="outline" className="col-span-2 font-bold h-11 border-slate-300">AGENDAR / REPROGRAMAR</Button>
-                                <Button onClick={() => setIsDiscardOpen(true)} variant="ghost" className="col-span-2 text-slate-400 hover:text-red-600 text-xs">DESCARTAR PROSPECTO</Button>
+                            <div className="p-4 border-t grid grid-cols-2 gap-3 bg-white">
+                                <Button onClick={() => setIsScheduleOpen(true)} variant="outline" className="col-span-2 font-bold h-11 border-slate-300 hover:bg-slate-50">
+                                    <CalendarDays className="mr-2 h-4 w-4"/> REPROGRAMAR CITA
+                                </Button>
+                                <Button onClick={() => setIsDiscardOpen(true)} variant="ghost" className="col-span-2 text-slate-400 hover:text-red-600 hover:bg-red-50 text-xs h-9">
+                                    DESCARTAR PROSPECTO
+                                </Button>
                             </div>
                         </>
                     ) : (
                         <div className="flex-1 flex flex-col items-center justify-center text-slate-300 p-10 text-center">
-                            <Search className="h-12 w-12 mb-4 opacity-20"/>
-                            <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Mesa de Trabajo Libre</p>
+                            <div className="h-20 w-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                                <Search className="h-8 w-8 text-slate-300"/>
+                            </div>
+                            <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Seleccioná un lead para trabajar</p>
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* MODALES MANTENIENDO ESTÉTICA */}
+            {/* MODAL CREAR */}
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                 <DialogContent>
                     <DialogHeader><DialogTitle>Nuevo Prospecto</DialogTitle></DialogHeader>
-                    <div className="space-y-4">
+                    <div className="space-y-4 py-2">
                         <Input placeholder="Nombre Completo" value={createData.title} onChange={(e)=>setCreateData({...createData, title:e.target.value})}/>
                         <Input placeholder="Teléfono" value={createData.phone} onChange={(e)=>setCreateData({...createData, phone:e.target.value})}/>
                         <Select value={createData.source} onValueChange={(v)=>setCreateData({...createData, source:v})}>
                             <SelectTrigger><SelectValue placeholder="Origen"/></SelectTrigger>
-                            <SelectContent><SelectItem value="linkedin">LinkedIn</SelectItem><SelectItem value="facebook">Facebook</SelectItem><SelectItem value="llamador">Llamador</SelectItem></SelectContent>
+                            <SelectContent>
+                                {origins.length > 0 ? origins.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>) : <SelectItem value="Linkedin">Linkedin</SelectItem>}
+                            </SelectContent>
                         </Select>
                         <Textarea placeholder="Comentario inicial..." value={createData.note} onChange={(e)=>setCreateData({...createData, note:e.target.value})}/>
                     </div>
-                    <Button onClick={handleCreate} className="w-full bg-slate-900 text-white mt-4">CREAR LEAD</Button>
+                    <Button onClick={handleCreate} className="w-full bg-slate-900 text-white mt-2">CREAR LEAD</Button>
                 </DialogContent>
             </Dialog>
 
+            {/* MODAL AGENDAR */}
              <Dialog open={isScheduleOpen} onOpenChange={setIsScheduleOpen}>
                 <DialogContent>
                     <DialogHeader><DialogTitle>Agendar Seguimiento</DialogTitle></DialogHeader>
-                    <div className="grid grid-cols-2 gap-2">
-                        <input type="date" className="h-10 border rounded px-2" value={manualDate} onChange={(e)=>setManualDate(e.target.value)}/>
-                        <input type="time" className="h-10 border rounded px-2" value={manualTime} onChange={(e)=>setManualTime(e.target.value)}/>
+                    <div className="grid grid-cols-2 gap-4 py-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500">Fecha</label>
+                            <input type="date" className="w-full h-10 border rounded px-2 text-sm" value={manualDate} onChange={(e)=>setManualDate(e.target.value)}/>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500">Hora</label>
+                            <input type="time" className="w-full h-10 border rounded px-2 text-sm" value={manualTime} onChange={(e)=>setManualTime(e.target.value)}/>
+                        </div>
                     </div>
-                    <Button className="w-full mt-4 bg-slate-900 text-white" onClick={() => handleReschedule(manualDate, manualTime)}>CONFIRMAR CITA</Button>
+                    <Button className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold" onClick={() => handleReschedule(manualDate, manualTime)}>CONFIRMAR CITA</Button>
                 </DialogContent>
             </Dialog>
 
+            {/* MODAL DESCARTAR */}
             <Dialog open={isDiscardOpen} onOpenChange={setIsDiscardOpen}>
                 <DialogContent>
-                    <DialogHeader><DialogTitle>Descartar Lead</DialogTitle></DialogHeader>
-                    <Select onValueChange={setDiscardReason}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar motivo..." /></SelectTrigger>
-                        <SelectContent><SelectItem value="no_interesa">No le interesa</SelectItem><SelectItem value="numero_mal">Número erróneo</SelectItem><SelectItem value="competencia">Ya tiene cobertura</SelectItem></SelectContent>
-                    </Select>
-                    <Button onClick={handleDiscard} className="w-full mt-4 bg-red-600 text-white">CONFIRMAR BAJA DEFINITIVA</Button>
+                    <DialogHeader><DialogTitle className="text-red-600">Descartar Lead</DialogTitle></DialogHeader>
+                    <div className="py-4">
+                        <Select onValueChange={setDiscardReason}>
+                            <SelectTrigger><SelectValue placeholder="Seleccionar motivo..." /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="No le interesa">No le interesa</SelectItem>
+                                <SelectItem value="Número erróneo">Número erróneo</SelectItem>
+                                <SelectItem value="Ya tiene cobertura">Ya tiene cobertura</SelectItem>
+                                <SelectItem value="Fuera de zona">Fuera de zona</SelectItem>
+                                <SelectItem value="Precio alto">Precio alto</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <Button onClick={handleDiscard} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold">CONFIRMAR BAJA DEFINITIVA</Button>
                 </DialogContent>
             </Dialog>
         </div>

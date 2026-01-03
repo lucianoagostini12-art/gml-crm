@@ -2,10 +2,10 @@
 import { useState } from "react"
 import { LayoutGrid, Inbox, UserCheck, CalendarDays, BarChart3, LogOut, PanelLeftClose, FileText, ShieldAlert, Lock, AlertTriangle, CheckCircle2, XCircle, MessageSquare, Database, Settings, Megaphone, ChevronDown, ChevronRight, DollarSign, HeartHandshake } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar" // Necesitamos esto para la foto
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
-// Agregamos 'currentUser' a las props
-export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, currentStage, setStage, currentUser, permissions }: any) {
+// Agregamos 'onLogout' a las props
+export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, currentStage, setStage, currentUser, permissions, onLogout }: any) {
     
     const [sections, setSections] = useState({
         general: true,
@@ -43,7 +43,6 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
         )
     }
 
-    // Lógica Permisos (Para ocultar botones si no tiene acceso)
     const canSeeMetrics = role === 'admin_god' || permissions?.accessMetrics;
     const canSeeBilling = role === 'admin_god' || permissions?.accessBilling;
     const canSeePostSale = role === 'admin_god' || permissions?.accessPostSale;
@@ -119,7 +118,6 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
                     {/* INFO USUARIO */}
                     <div className={`flex items-center gap-3 px-3 mb-3 transition-all duration-300 ${open ? 'justify-start' : 'justify-center'}`}>
                         <Avatar className="h-8 w-8 border border-slate-600">
-                            {/* Usa el avatar si existe, o genera uno random con el nombre */}
                             <AvatarImage src={currentUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser?.name || 'User'}`} />
                             <AvatarFallback className="bg-slate-700 text-xs font-bold">{currentUser?.name?.substring(0,2).toUpperCase()}</AvatarFallback>
                         </Avatar>
@@ -135,7 +133,8 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
                         <SidebarBtn active={viewMode === 'settings'} onClick={() => {setViewMode('settings'); setStage(null)}} icon={<Settings size={18} className="text-slate-400"/>} label="Configuración" />
                     )}
                     
-                    <SidebarBtn onClick={() => window.location.reload()} icon={<LogOut size={18} className="text-red-400"/>} label="Salir" />
+                    {/* BOTÓN SALIR CONECTADO */}
+                    <SidebarBtn onClick={onLogout} icon={<LogOut size={18} className="text-red-400"/>} label="Salir" />
                 </div>
             </nav>
         </aside>

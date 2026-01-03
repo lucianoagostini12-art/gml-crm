@@ -411,7 +411,8 @@ export function OpsModal({
                                         <div className="flex-1 overflow-y-auto p-6 space-y-4">
                                             {op.adminNotes && op.adminNotes.length > 0 ? op.adminNotes.map((note: AdminNote, i: number) => (
                                                 <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 relative group">
-                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.text || note.action}</p>
+                                                    {/* FIX: Use only 'text' instead of trying 'action' which does not exist on type AdminNote */}
+                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.text}</p>
                                                     <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50"><span className="text-[10px] text-slate-400 font-bold uppercase">{note.user || "Sistema"} • {note.date || "Hoy"}</span></div>
                                                 </div>
                                             )) : <div className="text-center p-8 text-slate-400 text-xs italic">No hay notas guardadas aún.</div>}

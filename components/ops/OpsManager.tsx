@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Label } from "@/components/ui/label" 
 
 // DATOS (Sin datos fake)
-import { Operation, OpStatus, Reminder, getStatusColor, getSubStateStyle, FLOW_STATES } from "./data"
+import { Operation, OpStatus, Reminder, getStatusColor, getSubStateStyle, FLOW_STATES, ChatMsg } from "./data"
 
 // MODULOS
 import { OpsSidebar } from "./OpsSidebar"
@@ -291,7 +291,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
         if (!error) {
-            const uiMsg = { message: text, user: userName, time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), isMe: true }
+            // FIX: Explicitly cast the new message object to satisfy TypeScript
+            const uiMsg: ChatMsg = { 
+                message: text, 
+                user: userName, 
+                time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
+                isMe: true 
+            }
             setSelectedOp(prev => prev ? {...prev, chat: [...prev.chat, uiMsg]} : null)
         } else {
             showToast("Error al enviar mensaje", "error")

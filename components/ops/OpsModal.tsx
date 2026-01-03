@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -9,14 +10,16 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { 
   User, MapPin, Briefcase, StickyNote, ArrowLeft, ArrowRight, 
   Phone, UploadCloud, MessageSquare, Calendar as CalendarIcon, 
   FileUp, MessageCircle, UserPlus, ArrowRightLeft, Plus, ImageIcon, 
   Users, CheckSquare, Save, Clock, FileText, DollarSign, Wallet, Percent,
-  Eye, Download, X, AlertTriangle, Send
+  Eye, Download, X, AlertTriangle, Send, UserCog
 } from "lucide-react"
-import { PLANES_POR_EMPRESA, SUB_STATES, OpStatus, ChatMsg, AuditLog, AdminNote, getStatusColor, getSubStateStyle } from "./data"
+// NOTA: Se quitaron PLANES_POR_EMPRESA y SUB_STATES del import porque ahora vienen de DB
+import { OpStatus, ChatMsg, AuditLog, AdminNote, getStatusColor, getSubStateStyle } from "./data"
 
 // --- COMPONENTES UI INTERNOS ---
 
@@ -94,35 +97,66 @@ function ChatBubble({ user, text, time, isMe, file, onFileClick }: any) {
 export function OpsModal({ 
     op, isOpen, onClose, onRelease, onStatusChange, requestAdvance, requestBack, onPick, 
     onSendChat, onAddNote, onAddReminder, currentUser, role, onUpdateOp, 
-    onSubStateChange, getSubStateStyle, getStatusColor 
+    onSubStateChange, getSubStateStyle, getStatusColor,
+    globalConfig // <--- RECIBIMOS LA CONFIG REAL DESDE OPSMANAGER
 }: any) {
-    
+    const supabase = createClient()
     const [activeTab, setActiveTab] = useState("chat")
     const [chatInput, setChatInput] = useState("")
+    
+    // Estados Agenda
     const [reminderDate, setReminderDate] = useState("")
     const [reminderTime, setReminderTime] = useState("")
     const [reminderNote, setReminderNote] = useState("")
     const [reminderType, setReminderType] = useState<string>("call")
+    
     const [newNoteInput, setNewNoteInput] = useState("")
     const [previewFile, setPreviewFile] = useState<any>(null)
 
-    // --- ESTADOS PARA SOLICITUD DE CORRECCIÓN ---
+    // Estados Corrección
     const [isCorrectionOpen, setIsCorrectionOpen] = useState(false)
     const [correctionReason, setCorrectionReason] = useState("")
     const [correctionComment, setCorrectionComment] = useState("")
 
+    // Estado Cambio Vendedora
+    const [isSellerChangeOpen, setIsSellerChangeOpen] = useState(false)
+    const [newSeller, setNewSeller] = useState("")
+    const [sellersList, setSellersList] = useState<any[]>([])
+
+    // Cargar vendedores al abrir
+    useEffect(() => {
+        if(isOpen) {
+            const fetchSellers = async () => {
+                const { data } = await supabase.from('profiles').select('full_name').eq('role', 'seller')
+                if(data) setSellersList(data)
+            }
+            fetchSellers()
+        }
+    }, [isOpen])
+
     if (!op) return null
 
+    // Archivos Demo (Mientras no tengamos storage real para archivos)
     const demoFiles = [
         { id: 1, name: "DNI_Titular_Frente.jpg", type: "IMG", size: "2.4 MB", url: "https://via.placeholder.com/600x400?text=DNI+Frente" },
         { id: 2, name: "Recibo_Sueldo_Sept.pdf", type: "PDF", size: "1.1 MB", url: "https://via.placeholder.com/600x800?text=PDF+Document" }, 
         { id: 3, name: "Formulario_Alta_Firmado.pdf", type: "PDF", size: "0.5 MB", url: "https://via.placeholder.com/600x800?text=Formulario" },
     ]
 
-    const availablePlans = PLANES_POR_EMPRESA[op.prepaga || "Otra"] || []
+    // --- LOGICA DE PLANES REALES DESDE DB ---
+    // Usamos globalConfig en lugar de la constante borrada
+    const prepagasList = globalConfig?.prepagas || []
+    const availablePlans = prepagasList.find((p: any) => p.name === (op.prepaga || "Otra"))?.plans || []
+    const subStatesList = globalConfig?.subStates?.[op.status] || []
+
+    const handleSellerChange = () => {
+        if(!newSeller) return
+        onUpdateOp({...op, seller: newSeller})
+        setIsSellerChangeOpen(false)
+    }
 
     const openWhatsApp = () => {
-        const cleanPhone = op.phone.replace(/[^0-9]/g, '')
+        const cleanPhone = op.phone?.replace(/[^0-9]/g, '') || ""
         window.open(`https://wa.me/${cleanPhone}`, '_blank')
     }
 
@@ -132,28 +166,21 @@ export function OpsModal({
         setNewNoteInput("")
     }
 
+    const handleSubmitCorrection = () => {
+        if (!correctionReason) return
+        onStatusChange(op.id, 'rechazado')
+        onSendChat(`⚠️ Se solicita corrección: ${correctionReason}. ${correctionComment ? `(${correctionComment})` : ''}`)
+        setCorrectionReason("")
+        setCorrectionComment("")
+        setIsCorrectionOpen(false)
+        setActiveTab("chat") 
+    }
+
     const handleDownload = (file: any) => {
         alert(`Descargando archivo: ${file.name}`)
     }
 
-    // FUNCIÓN PARA PROCESAR LA CORRECCIÓN
-    const handleSubmitCorrection = () => {
-        if (!correctionReason) return
-
-        // 1. Cambiar estado a Rechazado
-        onStatusChange(op.id, 'rechazado')
-
-        // 2. Enviar mensaje automático al chat
-        const msg = `⚠️ Se solicita corrección: ${correctionReason}. ${correctionComment ? `(${correctionComment})` : ''}`
-        onSendChat(msg)
-
-        // 3. Resetear y cerrar
-        setCorrectionReason("")
-        setCorrectionComment("")
-        setIsCorrectionOpen(false)
-        setActiveTab("chat") // Llevar al chat para ver el mensaje enviado
-    }
-
+    // Agenda Helpers
     const today = new Date().toISOString().split('T')[0]
     const sortedReminders = [...(op.reminders || [])].sort((a: any, b: any) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime())
     const todayReminders = sortedReminders.filter((r: any) => r.date === today)
@@ -185,6 +212,7 @@ export function OpsModal({
         <>
             <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
                 <DialogContent style={{ maxWidth: '1200px', width: '95%', height: '90vh' }} className="flex flex-col p-0 gap-0 bg-white border-0 shadow-2xl overflow-hidden rounded-2xl text-slate-900">
+                    
                     {/* CABECERA */}
                     <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between shrink-0">
                         <div className="flex items-center gap-6">
@@ -202,18 +230,43 @@ export function OpsModal({
                                     </Button>
                                 </div>
                                 <div className="flex items-center gap-3 mt-2">
+                                    {/* SELECTOR PREPAGA (REAL) */}
                                     <Select value={op.prepaga} onValueChange={(val) => onUpdateOp({...op, prepaga: val})}>
                                         <SelectTrigger className="h-8 text-xs font-bold bg-white border-slate-300 w-[160px] shadow-sm"><SelectValue placeholder="Prepaga"/></SelectTrigger>
-                                        <SelectContent>{Object.keys(PLANES_POR_EMPRESA).map((p:string)=><SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                                        <SelectContent>{prepagasList.map((p: any)=><SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>)}</SelectContent>
                                     </Select>
+                                    
+                                    {/* SELECTOR PLAN (REAL) */}
                                     <Select value={op.plan} onValueChange={(val) => onUpdateOp({...op, plan: val})}>
                                         <SelectTrigger className="h-8 text-xs font-bold bg-white border-slate-300 w-[120px] shadow-sm"><SelectValue placeholder="Plan"/></SelectTrigger>
                                         <SelectContent>{availablePlans.map((p:string)=><SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                                     </Select>
+
+                                    {/* CAMBIO DE VENDEDORA */}
+                                    <Popover open={isSellerChangeOpen} onOpenChange={setIsSellerChangeOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button variant="outline" size="sm" className="h-8 gap-2 border-dashed border-slate-300 text-slate-500 hover:text-blue-600 hover:border-blue-300 ml-2">
+                                                <UserCog size={14}/> {op.seller || "Sin Vendedor"}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-56 p-3">
+                                            <p className="text-xs font-bold text-slate-500 mb-2 uppercase">Reasignar Venta</p>
+                                            <Select value={newSeller} onValueChange={setNewSeller}>
+                                                <SelectTrigger className="h-8 text-xs mb-2"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                <SelectContent>
+                                                    {sellersList.map((s:any) => <SelectItem key={s.full_name} value={s.full_name}>{s.full_name}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button size="sm" className="w-full bg-blue-600 text-white h-7 text-xs" onClick={handleSellerChange}>Confirmar Cambio</Button>
+                                        </PopoverContent>
+                                    </Popover>
+                                    
                                     <Badge variant="outline" className="ml-2 bg-slate-100 text-slate-500 font-medium"><CalendarIcon size={12} className="mr-1"/> Ingreso: {op.entryDate}</Badge>
                                 </div>
                             </div>
                         </div>
+
+                        {/* ESTADO Y SUB-ESTADO (REAL) */}
                         <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-bold text-slate-400 uppercase">Etapa:</span>
@@ -235,11 +288,13 @@ export function OpsModal({
                             </div>
                             
                             <div className="flex items-center gap-2">
-                                <Select value={op.subState} onValueChange={(val) => onSubStateChange(op.id, val)}>
+                                <Select value={op.subState || ""} onValueChange={(val) => onSubStateChange(op.id, val)}>
                                     <SelectTrigger className={`h-9 w-[260px] text-xs font-bold text-right justify-between shadow-sm border-2 ${getSubStateStyle(op.subState)}`}>
-                                        <SelectValue />
+                                        <SelectValue placeholder="Estado..." />
                                     </SelectTrigger>
-                                    <SelectContent align="end">{SUB_STATES[op.status as OpStatus]?.map((s: string)=><SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                                    <SelectContent align="end">
+                                        {subStatesList.map((s: string)=><SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                    </SelectContent>
                                 </Select>
                             </div>
                         </div>
@@ -247,23 +302,23 @@ export function OpsModal({
 
                     <div className="flex-1 flex overflow-hidden">
                         <ScrollArea style={{ width: '55%' }} className="border-r border-slate-100 bg-white shrink-0">
-                            {/* ... (SE MANTIENE EL CONTENIDO DE DATOS IGUAL) ... */}
                             <div className="p-8 space-y-10">
                                 {/* SECCIÓN 1: DATOS TITULAR */}
                                 <section className="space-y-5">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><User size={14}/> 1. Datos Titular</h4>
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-6">
                                         <EditableField label="Nombre Completo" value={op.clientName} onChange={(v: string) => onUpdateOp({...op, clientName: v})} />
-                                        <EditableField label="CUIL/CUIT" value={op.cuit || op.dni} onChange={(v: string) => onUpdateOp({...op, cuit: v})} />
+                                        <EditableField label="CUIL/CUIT" value={op.dni} onChange={(v: string) => onUpdateOp({...op, dni: v})} />
                                         <EditableField label="Nacimiento" value={op.dob} onChange={(v: string) => onUpdateOp({...op, dob: v})} />
                                         <EditableField label="Email" value={op.email} onChange={(v: string) => onUpdateOp({...op, email: v})} />
                                         <EditableField label="Teléfono" value={op.phone} onChange={(v: string) => onUpdateOp({...op, phone: v})} />
+                                        
                                         <div className="col-span-2 pt-1">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={10}/> Domicilio Completo</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={10}/> Domicilio</p>
                                             <div className="grid grid-cols-3 gap-2">
-                                                <Input className="text-xs h-8" placeholder="Calle y Nro" value={op.domicilio} onChange={e => onUpdateOp({...op, domicilio: e.target.value})} />
-                                                <Input className="text-xs h-8" placeholder="Localidad" value={op.localidad} onChange={e => onUpdateOp({...op, localidad: e.target.value})} />
-                                                <Input className="text-xs h-8" placeholder="CP" value={op.cp} onChange={e => onUpdateOp({...op, cp: e.target.value})} />
+                                                <Input className="text-xs h-8" placeholder="Calle y Nro" value={op.address_street} onChange={e => onUpdateOp({...op, address_street: e.target.value})} />
+                                                <Input className="text-xs h-8" placeholder="Localidad" value={op.address_city} onChange={e => onUpdateOp({...op, address_city: e.target.value})} />
+                                                <Input className="text-xs h-8" placeholder="CP" value={op.address_zip} onChange={e => onUpdateOp({...op, address_zip: e.target.value})} />
                                             </div>
                                         </div>
                                     </div>
@@ -274,16 +329,15 @@ export function OpsModal({
                                     <div className="flex justify-between items-center border-b pb-3">
                                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={14}/> 2. Grupo Familiar</h4>
                                         <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600 hover:bg-blue-50" onClick={() => onUpdateOp({...op, hijos: [...(op.hijos || []), {nombre: "", dni: ""}]})}>
-                                            <Plus size={12} className="mr-1"/> Agregar Integrante
+                                            <Plus size={12} className="mr-1"/> Agregar
                                         </Button>
                                     </div>
                                     <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-100">
                                         <div className="grid grid-cols-2 gap-4 mb-4">
-                                            <EditableField label="Tipo Afiliación" value={op.tipoGrupo} onChange={(v: string) => onUpdateOp({...op, tipoGrupo: v})} color="text-purple-600 font-bold" />
+                                            <EditableField label="Tipo Afiliación" value={op.affiliation_type} onChange={(v: string) => onUpdateOp({...op, affiliation_type: v})} color="text-purple-600 font-bold" />
                                             <EditableField label="Cápitas Total" value={op.capitas} onChange={(v: any) => onUpdateOp({...op, capitas: v})} />
                                         </div>
                                         <div className="pt-3 border-t border-slate-200 space-y-2">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Integrantes</p>
                                             {op.hijos && op.hijos.length > 0 ? op.hijos.map((h: any, i: number) => (
                                                 <div key={i} className="flex gap-2 items-center">
                                                     <Input className="h-7 text-xs bg-white" placeholder="Nombre" value={h.nombre} onChange={(e) => { const newHijos = [...op.hijos!]; newHijos[i].nombre = e.target.value; onUpdateOp({...op, hijos: newHijos}) }}/>
@@ -312,7 +366,7 @@ export function OpsModal({
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><DollarSign size={14}/> 4. Valores Económicos</h4>
                                     <div className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="grid grid-cols-3 gap-6">
-                                            <EditableField label="Full Price" value={op.fullPrice} onChange={(v: string) => onUpdateOp({...op, fullPrice: v})} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-800" />
+                                            <EditableField label="Full Price" value={op.fullPrice || op.price} onChange={(v: string) => onUpdateOp({...op, fullPrice: v})} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-800" />
                                             <EditableField label="Aportes" value={op.aportes} onChange={(v: string) => onUpdateOp({...op, aportes: v})} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
                                             <EditableField label="Descuento" value={op.descuento} onChange={(v: string) => onUpdateOp({...op, descuento: v})} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
                                         </div>
@@ -321,7 +375,7 @@ export function OpsModal({
                             </div>
                         </ScrollArea>
 
-                        {/* COLUMNA DERECHA */}
+                        {/* COLUMNA DERECHA (Chat, Notas, etc.) */}
                         <div className="flex-1 flex flex-col bg-slate-50/50 overflow-hidden">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
                                 <div className="px-8 pt-4 border-b border-slate-100 bg-white">
@@ -337,12 +391,14 @@ export function OpsModal({
                                     {/* TAB CHAT */}
                                     <TabsContent value="chat" className="flex-1 flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900">
                                         <ScrollArea className="flex-1 p-8 text-slate-900 bg-slate-50/50">
+                                            {/* Historial */}
                                             <div className="space-y-4 mb-6">
-                                                {op.history.map((h: AuditLog, i: number) => (
+                                                {(op.history || []).map((h: AuditLog, i: number) => (
                                                     <div key={i} className="flex gap-3 text-xs text-slate-500 items-center justify-center opacity-60"><span>{h.date}</span> • <span>{h.user} {h.action}</span></div>
                                                 ))}
                                             </div>
-                                            {op.chat.map((msg: ChatMsg, i: number) => <ChatBubble key={i} {...msg} onFileClick={() => {}} />)}
+                                            {/* Mensajes */}
+                                            {(op.chat || []).map((msg: ChatMsg, i: number) => <ChatBubble key={i} {...msg} onFileClick={() => {}} />)}
                                         </ScrollArea>
                                         <div className="p-4 bg-white border-t flex gap-3 shadow-lg z-10">
                                             <Input className="h-11 text-sm shadow-sm" placeholder="Escribir mensaje..." value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter' && onSendChat(chatInput) && setChatInput("")}/>
@@ -350,13 +406,13 @@ export function OpsModal({
                                         </div>
                                     </TabsContent>
 
-                                    {/* ... OTRAS TABS SE MANTIENEN IGUAL ... */}
+                                    {/* TAB NOTAS */}
                                     <TabsContent value="notes" className="flex-1 flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 bg-yellow-50/30">
                                         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                                            {op.adminNotes && op.adminNotes.length > 0 ? op.adminNotes.map((note: AdminNote) => (
-                                                <div key={note.id} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 relative group">
-                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.text}</p>
-                                                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50"><span className="text-[10px] text-slate-400 font-bold uppercase">{note.user} • {note.date}</span></div>
+                                            {op.adminNotes && op.adminNotes.length > 0 ? op.adminNotes.map((note: AdminNote, i: number) => (
+                                                <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 relative group">
+                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.text || note.action}</p>
+                                                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50"><span className="text-[10px] text-slate-400 font-bold uppercase">{note.user || "Sistema"} • {note.date || "Hoy"}</span></div>
                                                 </div>
                                             )) : <div className="text-center p-8 text-slate-400 text-xs italic">No hay notas guardadas aún.</div>}
                                         </div>
@@ -366,6 +422,7 @@ export function OpsModal({
                                         </div>
                                     </TabsContent>
 
+                                    {/* TAB ARCHIVOS */}
                                     <TabsContent value="files" className="p-8 flex flex-col gap-4 m-0 overflow-y-auto h-full content-start text-slate-900">
                                         <div className="flex justify-between items-center mb-2">
                                             <h4 className="text-xs font-bold text-slate-400 uppercase">Documentación Cargada</h4>
@@ -385,6 +442,7 @@ export function OpsModal({
                                         </div>
                                     </TabsContent>
 
+                                    {/* TAB AGENDA */}
                                     <TabsContent value="agenda" className="flex-1 flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900">
                                         <div className="flex h-full">
                                             <div className="w-[40%] p-6 border-r border-slate-100 overflow-y-auto bg-white">
@@ -414,14 +472,12 @@ export function OpsModal({
                                                         <Save size={16}/> CONFIRMAR AGENDA
                                                     </Button>
                                                 </div>
-                                                {/* CALENDARIO MINI */}
                                                 <div className="mt-8 pt-6 border-t border-slate-100">
                                                      <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3 text-center">Calendario {new Date().toLocaleString('default', { month: 'long' })}</h4>
                                                      <div className="grid grid-cols-7 gap-1 text-center mb-1">{['D','L','M','M','J','V','S'].map((d, i) => <div key={i} className="text-[10px] text-slate-300 font-bold">{d}</div>)}</div>
                                                      <div className="grid grid-cols-7 gap-1">{[...Array(30)].map((_, i) => (<div key={i} className={`h-6 w-6 flex items-center justify-center rounded-full text-[10px] ${i+1 === new Date().getDate() ? 'bg-blue-600 text-white font-bold' : 'text-slate-500 hover:bg-slate-100'} ${hasEvent(i+1) && !(i+1 === new Date().getDate()) ? 'border border-blue-400 text-blue-600 font-bold' : ''}`}>{i+1}</div>))}</div>
                                                 </div>
                                             </div>
-                                            
                                             <div className="w-[60%] p-6 overflow-y-auto bg-slate-50/50">
                                                 <h4 className="text-xs font-bold text-slate-400 uppercase mb-4">Línea de Tiempo</h4>
                                                 <div className="space-y-8">
@@ -448,7 +504,6 @@ export function OpsModal({
                         <div className="flex gap-3">
                             <Button variant="ghost" className="text-xs font-bold text-slate-400 hover:text-red-500 hover:bg-red-50" onClick={onRelease}>Liberar Caso</Button>
                             
-                            {/* NUEVO BOTÓN: SOLICITAR CORRECCIÓN */}
                             {(op.operator === currentUser || role === 'admin_god') && op.status !== 'rechazado' && (
                                 <Button variant="outline" className="text-xs font-bold text-red-600 border-red-200 bg-red-50 hover:bg-red-100 hover:border-red-300 gap-2" onClick={() => setIsCorrectionOpen(true)}>
                                     <AlertTriangle size={14}/> Solicitar Corrección
@@ -471,59 +526,35 @@ export function OpsModal({
                 </DialogContent>
             </Dialog>
 
-            {/* --- MODAL FLOTANTE DE CORRECCIÓN --- */}
+            {/* MODAL CORRECCIÓN */}
             <Dialog open={isCorrectionOpen} onOpenChange={setIsCorrectionOpen}>
-                <DialogContent className="max-w-[400px] p-6 bg-white rounded-2xl border-0 shadow-2xl">
+                <DialogContent className="max-w-[400px]">
                     <DialogHeader>
                         <DialogTitle className="text-lg font-black text-red-600 flex items-center gap-2">
                             <AlertTriangle className="h-5 w-5"/> Solicitar Corrección
                         </DialogTitle>
-                        <DialogDescription className="text-xs text-slate-500">
-                            Esto cambiará el estado a <b>RECHAZADO</b> y notificará al vendedor.
-                        </DialogDescription>
+                        <DialogDescription>Cambiará el estado a <b>RECHAZADO</b>.</DialogDescription>
                     </DialogHeader>
-                    
                     <div className="py-4 space-y-4">
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Motivo Principal</label>
-                            <Select value={correctionReason} onValueChange={setCorrectionReason}>
-                                <SelectTrigger><SelectValue placeholder="Seleccionar motivo..."/></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="DNI Ilegible / Borroso">DNI Ilegible / Borroso</SelectItem>
-                                    <SelectItem value="Falta Recibo de Sueldo">Falta Recibo de Sueldo</SelectItem>
-                                    <SelectItem value="Formulario Incompleto">Formulario Incompleto</SelectItem>
-                                    <SelectItem value="Firma Faltante">Firma Faltante</SelectItem>
-                                    <SelectItem value="Datos Incorrectos">Datos Incorrectos</SelectItem>
-                                    <SelectItem value="Otro">Otro</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Comentario Adicional (Opcional)</label>
-                            <Textarea 
-                                placeholder="Detalles específicos para el vendedor..." 
-                                className="text-xs resize-none" 
-                                value={correctionComment}
-                                onChange={(e) => setCorrectionComment(e.target.value)}
-                            />
-                        </div>
+                        <Select value={correctionReason} onValueChange={setCorrectionReason}>
+                            <SelectTrigger><SelectValue placeholder="Motivo..."/></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="DNI Ilegible">DNI Ilegible</SelectItem>
+                                <SelectItem value="Falta Documentación">Falta Documentación</SelectItem>
+                                <SelectItem value="Datos Incorrectos">Datos Incorrectos</SelectItem>
+                                <SelectItem value="Otro">Otro</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Textarea placeholder="Comentario opcional..." value={correctionComment} onChange={e => setCorrectionComment(e.target.value)}/>
                     </div>
-
                     <DialogFooter>
-                        <Button variant="ghost" onClick={() => setIsCorrectionOpen(false)} className="text-slate-500">Cancelar</Button>
-                        <Button 
-                            className="bg-red-600 hover:bg-red-700 text-white gap-2 font-bold"
-                            disabled={!correctionReason}
-                            onClick={handleSubmitCorrection}
-                        >
-                            <Send size={14}/> Enviar Solicitud
-                        </Button>
+                        <Button variant="ghost" onClick={() => setIsCorrectionOpen(false)}>Cancelar</Button>
+                        <Button className="bg-red-600 text-white" disabled={!correctionReason} onClick={handleSubmitCorrection}>Enviar</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* --- VISOR DE ARCHIVOS --- */}
+            {/* VISOR DE ARCHIVOS */}
             {previewFile && (
                 <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
                     <DialogContent className="max-w-4xl bg-black border-slate-800 p-0 overflow-hidden flex flex-col justify-center items-center shadow-2xl">

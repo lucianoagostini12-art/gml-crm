@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Sliders, PhoneCall, Globe, Plus, Trash2, Clock, UserPlus, Lock, Mail, Camera, Upload, Pencil, XCircle, Save, Eye, EyeOff } from "lucide-react"
+import { Sliders, PhoneCall, Globe, Plus, Trash2, Clock, UserPlus, Lock, Mail, Camera, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export function AdminConfig() {
@@ -73,7 +73,7 @@ export function AdminConfig() {
             setUsers(data.map(u => ({
                 id: u.id,
                 name: u.full_name || "Sin Nombre",
-                email: u.email, // Email visual del perfil
+                email: u.email, 
                 role: u.role || "seller",
                 work_hours: u.work_hours || 5,
                 avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`
@@ -101,7 +101,7 @@ export function AdminConfig() {
         }
     }
 
-    // --- GUARDAR CONFIGURACIÓN GENERAL (Comisiones) ---
+    // --- GUARDAR CONFIGURACIÓN GENERAL ---
     const saveGeneralConfig = async () => {
         setLoading(true)
         await supabase.from('system_config').upsert({ key: 'ranges_5hs', value: ranges5hs })
@@ -138,7 +138,7 @@ export function AdminConfig() {
         setFormData({ 
             name: user.name, 
             email: user.email, 
-            password: "", // Limpio por seguridad
+            password: "", 
             role: user.role, 
             work_hours: user.work_hours.toString(),
             avatar: user.avatar 
@@ -164,33 +164,28 @@ export function AdminConfig() {
         try {
             const profileData = {
                 full_name: formData.name,
-                email: formData.email, // Actualizamos email visible
+                email: formData.email, 
                 role: formData.role,
                 work_hours: parseInt(formData.work_hours),
                 avatar_url: formData.avatar
             }
 
             if (editingUserId) {
-                // --- UPDATE ---
-                // 1. Actualizar Perfil
+                // UPDATE
                 const { error } = await supabase.from('profiles').update(profileData).eq('id', editingUserId)
                 if (error) throw error
 
-                // 2. Nota sobre Auth
                 if (formData.password) {
-                     alert("⚠️ ATENCIÓN: Se actualizó el perfil visual. Para cambiar la contraseña de acceso real, el usuario debe usar 'Olvidé mi contraseña' o se requiere una API de Admin.")
+                     alert("⚠️ ATENCIÓN: Se actualizó el perfil visual. Para cambiar la clave real, usar API de Admin o 'Olvidé mi contraseña'.")
                 } else {
                     alert("Usuario actualizado correctamente.")
                 }
 
             } else {
-                // --- CREATE ---
-                // Creamos usuario en Auth (requiere configuración) o guardamos solo perfil si usamos otra lógica
+                // CREATE
                 if (!formData.password) throw new Error("La contraseña es obligatoria para nuevos usuarios.")
-                
-                // Intentamos guardar perfil (Asumiendo que el ID se genera o usamos un trigger)
                 const { error } = await supabase.from('profiles').upsert(profileData)
-                if (error) console.log("Nota: Si no usas Auth integrado, ignorá este error de Auth.")
+                if (error) console.log("Nota: Error de Auth ignorado si es gestión de perfil.")
                 
                 alert("Usuario creado/guardado.")
             }
@@ -227,12 +222,19 @@ export function AdminConfig() {
         fetchLossReasons()
     }
 
+    // --- LÓGICA DE ROLES VISUAL ---
     const getRoleBadge = (role: string) => {
         switch(role) {
-            case 'admin_god': return <Badge className="bg-purple-600 border-purple-700">Administración GOD</Badge>
-            case 'admin': return <Badge className="bg-amber-500 border-amber-600">Supervisión</Badge>
-            case 'ops': return <Badge className="bg-pink-500 border-pink-600">Operaciones</Badge>
-            default: return <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">Vendedor</Badge>
+            case 'supervisor_god': 
+                return <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold border-0 shadow-sm gap-1"><Crown size={12}/> Supervisión GOD</Badge>
+            case 'admin_god': 
+                return <Badge className="bg-purple-600 hover:bg-purple-700 text-white font-bold border-0 shadow-sm gap-1"><ShieldAlert size={12}/> Admin GOD</Badge>
+            case 'admin_common': 
+                return <Badge className="bg-pink-500 hover:bg-pink-600 text-white font-medium border-0 gap-1"><Briefcase size={12}/> Administrativa</Badge>
+            case 'seller': 
+                return <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50 font-medium">Vendedora</Badge>
+            default: 
+                return <Badge variant="secondary">Sin Rol</Badge>
         }
     }
 
@@ -272,7 +274,7 @@ export function AdminConfig() {
                                     </Avatar>
                                     <div className="flex-1 overflow-hidden">
                                         <h4 className="font-bold truncate text-base">{user.name}</h4>
-                                        <div className="flex gap-2 mb-1">
+                                        <div className="flex gap-2 mb-1 flex-wrap">
                                             {getRoleBadge(user.role)}
                                             {user.role === 'seller' && (
                                                 <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-slate-100">
@@ -324,7 +326,7 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
-                {/* 3. COMISIONES (RESTAURADO) */}
+                {/* 3. COMISIONES */}
                 <TabsContent value="commissions" className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <Card className="border-t-4 border-t-blue-500">
@@ -435,10 +437,10 @@ export function AdminConfig() {
                                 <Select value={formData.role} onValueChange={(v) => setFormData({...formData, role: v})}>
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="seller">Vendedor</SelectItem>
-                                        <SelectItem value="admin">Supervisión</SelectItem>
-                                        <SelectItem value="ops">Administración</SelectItem>
-                                        <SelectItem value="admin_god">Admin GOD</SelectItem>
+                                        <SelectItem value="seller">Vendedora</SelectItem>
+                                        <SelectItem value="admin_common">Administrativa Común</SelectItem>
+                                        <SelectItem value="admin_god">Administrativa GOD</SelectItem>
+                                        <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

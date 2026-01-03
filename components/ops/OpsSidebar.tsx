@@ -1,10 +1,11 @@
 "use client"
 import { useState } from "react"
-// AGREGADO: HeartHandshake
 import { LayoutGrid, Inbox, UserCheck, CalendarDays, BarChart3, LogOut, PanelLeftClose, FileText, ShieldAlert, Lock, AlertTriangle, CheckCircle2, XCircle, MessageSquare, Database, Settings, Megaphone, ChevronDown, ChevronRight, DollarSign, HeartHandshake } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar" // Necesitamos esto para la foto
 
-export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, currentStage, setStage }: any) {
+// Agregamos 'currentUser' a las props
+export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, currentStage, setStage, currentUser, permissions }: any) {
     
     const [sections, setSections] = useState({
         general: true,
@@ -22,9 +23,10 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
             className={`w-full flex items-center ${open ? 'justify-start px-3' : 'justify-center'} py-2 rounded-md text-xs font-medium transition-all duration-200 
             ${active ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}
             ${isSubItem && open ? 'pl-6' : ''}`}
+            title={!open ? label : undefined}
         >
             <div className="mr-3">{icon}</div>
-            {open && <span className="flex-1 text-left">{label}</span>}
+            {open && <span className="flex-1 text-left truncate">{label}</span>}
         </button>
     )
 
@@ -41,12 +43,18 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
         )
     }
 
+    // Lógica Permisos (Para ocultar botones si no tiene acceso)
+    const canSeeMetrics = role === 'admin_god' || permissions?.accessMetrics;
+    const canSeeBilling = role === 'admin_god' || permissions?.accessBilling;
+    const canSeePostSale = role === 'admin_god' || permissions?.accessPostSale;
+    const canEditSettings = role === 'admin_god' || permissions?.editSettings;
+
     return (
         <aside className={`${open ? 'w-[220px]' : 'w-[60px]'} transition-all duration-300 bg-slate-900 text-white flex flex-col shrink-0 z-50 shadow-xl overflow-hidden h-screen sticky top-0`}>
             {/* HEADER */}
             <div className="h-14 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
                 {open && <span className="font-black text-lg tracking-tighter text-blue-400">GML OPS</span>}
-                <Button variant="ghost" size="icon" onClick={() => setOpen(!open)} className="text-slate-400 hover:text-white h-8 w-8"><PanelLeftClose size={16}/></Button>
+                <Button variant="ghost" size="icon" onClick={() => setOpen(!open)} className="text-slate-400 hover:text-white h-8 w-8 ml-auto"><PanelLeftClose size={16}/></Button>
             </div>
             
             <nav className="p-2 space-y-0.5 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
@@ -62,14 +70,16 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
                         <SidebarBtn active={viewMode === 'mine'} onClick={() => {setViewMode('mine'); setStage(null)}} icon={<UserCheck size={18}/>} label="Mis Casos" />
                         <SidebarBtn active={viewMode === 'agenda'} onClick={() => {setViewMode('agenda'); setStage(null)}} icon={<CalendarDays size={18}/>} label="Agendas" />
                         
-                        {/* NUEVO BOTON POSVENTA */}
-                        <SidebarBtn active={viewMode === 'post_sale'} onClick={() => {setViewMode('post_sale'); setStage(null)}} icon={<HeartHandshake size={18} className="text-pink-400"/>} label="Posventa" />
+                        {canSeePostSale && (
+                            <SidebarBtn active={viewMode === 'post_sale'} onClick={() => {setViewMode('post_sale'); setStage(null)}} icon={<HeartHandshake size={18} className="text-pink-400"/>} label="Posventa" />
+                        )}
 
-                        {role === 'admin_god' && (
-                            <>
-                                <SidebarBtn active={viewMode === 'metrics'} onClick={() => {setViewMode('metrics'); setStage(null)}} icon={<BarChart3 size={18}/>} label="Métricas" />
-                                <SidebarBtn active={viewMode === 'billing'} onClick={() => {setViewMode('billing'); setStage(null)}} icon={<DollarSign size={18} className="text-green-500"/>} label="Facturación" />
-                            </>
+                        {canSeeMetrics && (
+                            <SidebarBtn active={viewMode === 'metrics'} onClick={() => {setViewMode('metrics'); setStage(null)}} icon={<BarChart3 size={18}/>} label="Métricas" />
+                        )}
+                        
+                        {canSeeBilling && (
+                            <SidebarBtn active={viewMode === 'billing'} onClick={() => {setViewMode('billing'); setStage(null)}} icon={<DollarSign size={18} className="text-green-500"/>} label="Facturación" />
                         )}
                     </div>
                 )}
@@ -103,9 +113,28 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
                     </div>
                 )}
 
-                {/* FOOTER */}
-                <div className="mt-auto border-t border-slate-800 pt-2 pb-2 space-y-1">
-                    <SidebarBtn active={viewMode === 'settings'} onClick={() => {setViewMode('settings'); setStage(null)}} icon={<Settings size={18} className="text-slate-400"/>} label="Configuración" />
+                {/* FOOTER - USUARIO Y SALIR */}
+                <div className="mt-auto border-t border-slate-800 pt-3 pb-2 space-y-1">
+                    
+                    {/* INFO USUARIO */}
+                    <div className={`flex items-center gap-3 px-3 mb-3 transition-all duration-300 ${open ? 'justify-start' : 'justify-center'}`}>
+                        <Avatar className="h-8 w-8 border border-slate-600">
+                            {/* Usa el avatar si existe, o genera uno random con el nombre */}
+                            <AvatarImage src={currentUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser?.name || 'User'}`} />
+                            <AvatarFallback className="bg-slate-700 text-xs font-bold">{currentUser?.name?.substring(0,2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        {open && (
+                            <div className="flex flex-col overflow-hidden">
+                                <span className="text-xs font-bold text-slate-200 truncate">{currentUser?.name || "Usuario"}</span>
+                                <span className="text-[10px] text-slate-500 truncate uppercase tracking-wider font-bold">{role?.replace('_', ' ')}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {canEditSettings && (
+                        <SidebarBtn active={viewMode === 'settings'} onClick={() => {setViewMode('settings'); setStage(null)}} icon={<Settings size={18} className="text-slate-400"/>} label="Configuración" />
+                    )}
+                    
                     <SidebarBtn onClick={() => window.location.reload()} icon={<LogOut size={18} className="text-red-400"/>} label="Salir" />
                 </div>
             </nav>

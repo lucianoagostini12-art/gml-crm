@@ -1,108 +1,114 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase"
+import { Loader2 } from "lucide-react"
 
-// --- COMPONENTES PRINCIPALES (LOS "GERENTES") ---
-import { LoginView } from "@/components/auth/LoginView"
+// --- IMPORTACIONES CORREGIDAS ---
+import { LoginView } from "@/components/auth/LoginView" // <--- CAMBIADO DE AuthLogin A LoginView
 import { AdminDashboard } from "@/components/admin/AdminDashboard"
-import { SetterDashboard } from "@/components/setter/SetterDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
-import { SellerManager } from "@/components/crm/SellerManager" // <--- ACÁ ESTÁ LA MAGIA
+import { MySalesView } from "@/components/seller/MySalesView"
 
-// Forzamos actualización de Vercel
-export default function HomePage() {
-    const supabase = createClient()
-    
-    // Estado de Sesión
-    const [userRole, setUserRole] = useState<string | null>(null)
-    const [userName, setUserName] = useState("")
-    const [loading, setLoading] = useState(true)
+export default function Home() {
+  const supabase = createClient()
+  const [session, setSession] = useState<any>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [userName, setUserName] = useState("")
+  const [loading, setLoading] = useState(true)
 
-    // 1. CHEQUEO DE SESIÓN AL CARGAR
-    useEffect(() => {
-        const checkSession = async () => {
-            // Intentamos recuperar sesión rápida del navegador
-            const cachedRole = localStorage.getItem("gml_user_role")
-            const cachedName = localStorage.getItem("gml_user_name")
-
-            if (cachedRole && cachedName) {
-                setUserRole(cachedRole)
-                setUserName(cachedName)
-            }
-
-            // Verificamos con Supabase que la sesión siga válida
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) {
-                // Si no hay sesión real, borramos lo cacheado por seguridad (opcional)
-                // localStorage.clear() 
-                // setUserRole(null)
-            }
-            setLoading(false)
-        }
-        checkSession()
-    }, [])
-
-    // Callback cuando el Login es exitoso
-    const handleLoginSuccess = (role: string, name: string) => {
-        localStorage.setItem("gml_user_role", role)
-        localStorage.setItem("gml_user_name", name)
-        setUserRole(role)
-        setUserName(name)
+  useEffect(() => {
+    // 1. Verificar sesión activa al cargar
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setSession(session)
+      
+      if (session) {
+        await fetchProfile(session.user.id)
+      } else {
+        setLoading(false)
+      }
     }
 
-    // Función de Salir
-    const handleLogout = async () => {
-        await supabase.auth.signOut()
-        localStorage.clear()
-        setUserRole(null)
+    checkSession()
+
+    // 2. Escuchar cambios (login/logout) en tiempo real
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      if (session) {
+        fetchProfile(session.user.id)
+      } else {
+        setRole(null)
         setUserName("")
-        // Forzamos recarga para limpiar estados de memoria
-        window.location.href = "/" 
+        setLoading(false)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // 3. Buscar el Rol REAL en la tabla 'profiles'
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role, full_name")
+        .eq("id", userId)
+        .single()
+
+      if (data) {
+        setRole(data.role) 
+        setUserName(data.full_name || "Usuario")
+      }
+    } catch (error) {
+      console.error("Error fetching profile:", error)
+    } finally {
+      setLoading(false)
     }
+  }
 
-    if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400 animate-pulse">Cargando Sistema GML...</div>
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setRole(null)
+    setSession(null)
+    window.location.href = "/" // Recarga limpia para borrar estados de memoria
+  }
 
-    // --- 2. ROUTER DE VISTAS (SEGÚN ROL) ---
+  // --- PANTALLA DE CARGA ---
+  if (loading) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
+        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+        <p className="text-slate-400 text-sm font-medium animate-pulse">Cargando sistema...</p>
+      </div>
+    )
+  }
 
-    // A. NO LOGUEADO -> LOGIN
-    if (!userRole) {
-        return <LoginView onLogin={handleLoginSuccess} />
-    }
+  // --- 1. LOGIN (Si no hay usuario) ---
+  if (!session) {
+    // Usamos tu componente existente. 
+    // NOTA: Asegurate de que LoginView haga el 'supabase.auth.signInWithPassword'.
+    // Al hacerlo, el 'onAuthStateChange' de arriba detectará el login automáticamente.
+    return <LoginView />
+  }
 
-    // B. GERENCIA / ADMIN
-    if (userRole === 'admin' || userRole === 'admin_god' || userRole === 'supervisor') {
-        return <AdminDashboard onLogout={handleLogout} />
-    }
+  // --- 2. RUTEO SEGÚN ROL (JERARQUÍA REAL) ---
 
-    // C. OPERACIONES (MACA)
-    if (userRole === 'ops' || userRole === 'admin_ops') {
-        // Envolvemos Ops para pasarle el logout si el componente no lo tiene nativo
-        return (
-            <div className="relative h-screen w-full">
-                <div className="absolute top-4 right-20 z-50">
-                     {/* Botón de emergencia por si OpsManager tapa el logout */}
-                </div>
-                <OpsManager role={userRole as any} userName={userName} />
-            </div>
-        )
-    }
+  // A. SUPERVISIÓN GOD -> Torre de Control Total
+  if (role === "supervisor_god") {
+    return <AdminDashboard onLogout={handleLogout} />
+  }
 
-    // D. SETTER
-    if (userRole === 'setter') {
-        return (
-            <div className="relative h-screen w-full">
-                <div className="absolute top-4 right-4 z-50">
-                    <button onClick={handleLogout} className="bg-white/90 px-3 py-1 text-xs font-bold text-red-500 rounded border shadow-sm hover:bg-red-50 transition-colors">
-                        Cerrar Sesión
-                    </button>
-                </div>
-                <SetterDashboard />
-            </div>
-        )
-    }
+  // B. ADMINISTRACIÓN (GOD y COMÚN) -> Tablero Operativo
+  if (role === "admin_god" || role === "admin_common") {
+    return <OpsManager role={role as any} userName={userName} />
+  }
 
-    // E. VENDEDOR (SELLER)
-    // Acá usamos el componente limpio que creamos antes.
-    return <SellerManager userName={userName} onLogout={handleLogout} />
+  // C. VENDEDORAS -> Panel de Ventas
+  if (role === "seller") {
+    return <MySalesView />
+  }
+
+  // D. DEFAULT (Rol nuevo o desconocido) -> Panel Vendedor por seguridad
+  return <MySalesView />
 }

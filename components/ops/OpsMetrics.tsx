@@ -1,15 +1,18 @@
 "use client"
 
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { Badge } from "@/components/ui/badge"
-import { ArrowUpRight, TrendingUp, AlertCircle, Target, Users, Trophy, AlertTriangle, Clock, Filter } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ArrowUpRight, TrendingUp, AlertCircle, Target, Users, Trophy, AlertTriangle, Clock, Filter, X, Calendar } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 // COLORES PARA GRAFICOS
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
-// Props extendidas para aceptar función de filtro del padre
 interface OpsMetricsProps {
     operations: any[];
     onApplyFilter?: (type: string, value: string) => void;
@@ -17,88 +20,192 @@ interface OpsMetricsProps {
 
 export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
     
-    // --- 1. PROCESAMIENTO DE DATOS EXISTENTE ---
+    // --- ESTADO DEL FILTRO DE FECHA ---
+    const [dateRange, setDateRange] = useState({ start: "", end: "" })
+    const [isFilterOpen, setIsFilterOpen] = useState(false)
+
+    // --- 1. PROCESAMIENTO DE DATOS (CON FILTRO APLICADO) ---
     
-    const totalOps = operations.length
-    const cumplidas = operations.filter((o:any) => o.status === 'cumplidas').length
-    const tasaExito = totalOps > 0 ? ((cumplidas / totalOps) * 100).toFixed(1) : 0
+    const { 
+        filteredCount, // Para mostrar cuántos quedan tras el filtro
+        totalOps, 
+        cumplidas, 
+        tasaExito, 
+        dataOrigen, 
+        dataPrepagas, 
+        topPlanes, 
+        bottleneckData, 
+        sellerData, 
+        dataAging,
+        velocidadPromedio 
+    } = useMemo(() => {
+        
+        // 1. APLICAR FILTRO DE FECHAS PRIMERO
+        let filteredOps = operations
+        if (dateRange.start) {
+            filteredOps = filteredOps.filter(o => o.entryDate >= dateRange.start)
+        }
+        if (dateRange.end) {
+            filteredOps = filteredOps.filter(o => o.entryDate <= dateRange.end)
+        }
 
-    // A. DATOS POR ORIGEN
-    const dataOrigen = [
-        { name: 'Google Ads', ingresado: 45, cumplido: 20 },
-        { name: 'Meta Ads', ingresado: 32, cumplido: 10 },
-        { name: 'Referidos', ingresado: 15, cumplido: 12 },
-        { name: 'Base Propia', ingresado: 24, cumplido: 8 },
-        { name: 'Llamador', ingresado: 10, cumplido: 2 },
-    ]
+        // 2. CALCULAR MÉTRICAS SOBRE LOS DATOS FILTRADOS
+        const total = filteredOps.length
+        const closed = filteredOps.filter((o:any) => o.status === 'cumplidas').length
+        const rate = total > 0 ? ((closed / total) * 100).toFixed(1) : "0"
 
-    // B. DATOS POR PREPAGA
-    const prepagasCount: any = {}
-    operations.forEach((op:any) => {
-        const p = op.prepaga || 'Otros'
-        prepagasCount[p] = (prepagasCount[p] || 0) + 1
-    })
-    const dataPrepagas = Object.keys(prepagasCount).map(key => ({
-        name: key, value: prepagasCount[key]
-    })).sort((a:any,b:any) => b.value - a.value)
+        // A. DATOS POR ORIGEN
+        const originMap: Record<string, {name: string, ingresado: number, cumplido: number}> = {}
+        filteredOps.forEach((op: any) => {
+            const source = op.origen || "Desconocido"
+            if (!originMap[source]) originMap[source] = { name: source, ingresado: 0, cumplido: 0 }
+            originMap[source].ingresado += 1
+            if (op.status === 'cumplidas') originMap[source].cumplido += 1
+        })
+        const _dataOrigen = Object.values(originMap).sort((a,b) => b.ingresado - a.ingresado).slice(0, 5)
 
-    // C. TOP PLANES
-    const topPlanes = [
-        { prepaga: 'Sancor', plan: '3000', ventas: 24, efectividad: 85 },
-        { prepaga: 'Swiss', plan: 'SMG20', ventas: 18, efectividad: 70 },
-        { prepaga: 'Galeno', plan: '220', ventas: 15, efectividad: 90 },
-        { prepaga: 'Prevencion', plan: 'A2', ventas: 12, efectividad: 60 },
-        { prepaga: 'Sancor', plan: '1000', ventas: 10, efectividad: 50 },
-    ]
+        // B. DATOS POR PREPAGA
+        const prepagasCount: any = {}
+        filteredOps.forEach((op:any) => {
+            const p = op.prepaga || 'Otros'
+            prepagasCount[p] = (prepagasCount[p] || 0) + 1
+        })
+        const _dataPrepagas = Object.keys(prepagasCount).map(key => ({
+            name: key, value: prepagasCount[key]
+        })).sort((a:any,b:any) => b.value - a.value)
 
-    // D. CUELLO DE BOTELLA
-    const activeStatuses = ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras']
-    const bottleneckData = activeStatuses.map(status => ({
-        name: status.charAt(0).toUpperCase() + status.slice(1),
-        cantidad: operations.filter((o:any) => o.status === status).length
-    }))
+        // C. TOP PLANES
+        const planMap: Record<string, { prepaga: string, plan: string, ventas: number, ok: number }> = {}
+        filteredOps.forEach((op: any) => {
+            const key = `${op.prepaga}-${op.plan}`
+            if(!planMap[key]) planMap[key] = { prepaga: op.prepaga || '?', plan: op.plan || '?', ventas: 0, ok: 0 }
+            planMap[key].ventas += 1
+            if(op.status === 'cumplidas') planMap[key].ok += 1
+        })
+        const _topPlanes = Object.values(planMap)
+            .map(p => ({ ...p, efectividad: p.ventas > 0 ? Math.round((p.ok / p.ventas) * 100) : 0 }))
+            .sort((a,b) => b.ventas - a.ventas)
+            .slice(0, 5)
 
-    // --- 2. NUEVOS DATOS CALCULADOS (SECCION PREMIUM) ---
+        // D. CUELLO DE BOTELLA
+        const activeStatuses = ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras']
+        const _bottleneckData = activeStatuses.map(status => ({
+            name: status.charAt(0).toUpperCase() + status.slice(1),
+            cantidad: filteredOps.filter((o:any) => o.status === status).length
+        }))
 
-    // E. RANKING VENDEDORES (Calculado real sobre operations)
-    // Extraemos vendedores únicos
-    const sellers = Array.from(new Set(operations.map((o:any) => o.seller)))
-    const sellerData = sellers.map(seller => {
-        const ops = operations.filter((o:any) => o.seller === seller)
-        const total = ops.length
-        const ok = ops.filter((o:any) => o.status === 'cumplidas').length
-        const rate = total > 0 ? ((ok / total) * 100).toFixed(0) : 0
-        return { name: seller, total, ok, rate }
-    }).sort((a:any, b:any) => b.ok - a.ok) // Ordenar por ventas OK
+        // E. RANKING VENDEDORES
+        const sellers = Array.from(new Set(filteredOps.map((o:any) => o.seller)))
+        const _sellerData = sellers.map(seller => {
+            const ops = filteredOps.filter((o:any) => o.seller === seller)
+            const totalS = ops.length
+            const okS = ops.filter((o:any) => o.status === 'cumplidas').length
+            const rateS = totalS > 0 ? ((okS / totalS) * 100).toFixed(0) : "0"
+            return { name: seller || "Sin Asignar", total: totalS, ok: okS, rate: rateS }
+        }).sort((a:any, b:any) => b.ok - a.ok).slice(0, 5)
 
-    // F. AGING DE STOCK (Simulado para el ejemplo visual, idealmente usa fechas reales)
-    const dataAging = [
-        { name: '< 7 días', cantidad: 35, color: '#10b981' }, // Verde
-        { name: '7-15 días', cantidad: 12, color: '#f59e0b' }, // Amarillo
-        { name: '15-30 días', cantidad: 8, color: '#f97316' }, // Naranja
-        { name: '> 30 días', cantidad: 4, color: '#ef4444' }, // Rojo
-    ]
+        // F. AGING DE STOCK (Calculado al momento actual vs fecha ingreso filtrada)
+        const now = new Date()
+        const agingBuckets = { '< 7 días': 0, '7-15 días': 0, '15-30 días': 0, '> 30 días': 0 }
+        
+        filteredOps.filter((o:any) => !['cumplidas','rechazado'].includes(o.status)).forEach((op:any) => {
+            const entry = new Date(op.entryDate)
+            const diffTime = Math.abs(now.getTime() - entry.getTime())
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+            
+            if (diffDays < 7) agingBuckets['< 7 días']++
+            else if (diffDays <= 15) agingBuckets['7-15 días']++
+            else if (diffDays <= 30) agingBuckets['15-30 días']++
+            else agingBuckets['> 30 días']++
+        })
 
-    // Helper para clicks
+        const _dataAging = [
+            { name: '< 7 días', cantidad: agingBuckets['< 7 días'], color: '#10b981' },
+            { name: '7-15 días', cantidad: agingBuckets['7-15 días'], color: '#f59e0b' },
+            { name: '15-30 días', cantidad: agingBuckets['15-30 días'], color: '#f97316' },
+            { name: '> 30 días', cantidad: agingBuckets['> 30 días'], color: '#ef4444' },
+        ]
+
+        // G. VELOCIDAD PROMEDIO
+        const closedOps = filteredOps.filter((o:any) => o.status === 'cumplidas')
+        let totalDays = 0
+        closedOps.forEach((op:any) => {
+            const start = new Date(op.entryDate)
+            const end = op.lastUpdate ? new Date(op.lastUpdate) : new Date()
+            const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+            totalDays += diff
+        })
+        const _velocidad = closedOps.length > 0 ? (totalDays / closedOps.length).toFixed(1) : "0"
+
+        return {
+            filteredCount: total,
+            totalOps: total,
+            cumplidas: closed,
+            tasaExito: rate,
+            dataOrigen: _dataOrigen,
+            dataPrepagas: _dataPrepagas,
+            topPlanes: _topPlanes,
+            bottleneckData: _bottleneckData,
+            sellerData: _sellerData,
+            dataAging: _dataAging,
+            velocidadPromedio: _velocidad
+        }
+    }, [operations, dateRange]) // <-- SE RECALCULA CUANDO CAMBIA DATE RANGE
+
+    // Helper para clicks en gráficos
     const handleFilter = (type: string, val: string) => {
         if(onApplyFilter) onApplyFilter(type, val)
     }
 
+    const hasActiveFilter = dateRange.start || dateRange.end
+
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
             
-            {/* HEADER CON FILTRO GLOBAL */}
+            {/* HEADER CON FILTRO REAL */}
             <div className="flex justify-between items-center">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800">Métricas Operativas</h2>
-                    <p className="text-xs text-slate-500">Visión 360° del negocio.</p>
+                    <p className="text-xs text-slate-500">
+                        {hasActiveFilter 
+                            ? `Analizando ${filteredCount} operaciones filtradas.` 
+                            : `Visión 360° del negocio (${operations.length} totales).`}
+                    </p>
                 </div>
-                <Button variant="outline" size="sm" className="gap-2 text-xs font-bold border-slate-300 text-slate-600">
-                    <Filter size={14}/> Filtrar fecha
-                </Button>
+                
+                <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+                    <PopoverTrigger asChild>
+                        <Button variant={hasActiveFilter ? "secondary" : "outline"} size="sm" className={`gap-2 text-xs font-bold border-slate-300 ${hasActiveFilter ? 'text-blue-700 bg-blue-50 border-blue-200' : 'text-slate-600'}`}>
+                            <Filter size={14}/> {hasActiveFilter ? 'Filtro Activo' : 'Filtrar Fecha'}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-4" align="end">
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h4 className="font-bold text-sm flex items-center gap-2"><Calendar size={16}/> Rango de Fechas</h4>
+                                {hasActiveFilter && (
+                                    <Button variant="ghost" size="sm" className="h-6 text-[10px] text-red-500 px-2" onClick={() => setDateRange({start:"", end:""})}>
+                                        <X size={12} className="mr-1"/> Borrar
+                                    </Button>
+                                )}
+                            </div>
+                            <div className="grid gap-2">
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-bold text-slate-500 uppercase">Desde</Label>
+                                    <Input type="date" className="h-8 text-xs" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-bold text-slate-500 uppercase">Hasta</Label>
+                                    <Input type="date" className="h-8 text-xs" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} />
+                                </div>
+                            </div>
+                            <Button className="w-full h-8 text-xs bg-slate-900 text-white" onClick={() => setIsFilterOpen(false)}>Aplicar</Button>
+                        </div>
+                    </PopoverContent>
+                </Popover>
             </div>
 
-            {/* --- KPI CARDS EXISTENTES --- */}
+            {/* --- KPI CARDS --- */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card onClick={() => handleFilter('status', 'all')} className="bg-white border-slate-200 shadow-sm cursor-pointer hover:border-blue-300 transition-colors group">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -108,13 +215,13 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                     <CardContent>
                         <div className="text-2xl font-black text-slate-800">{totalOps}</div>
                         <p className="text-xs text-slate-400 mt-1 flex items-center">
-                            <ArrowUpRight className="h-3 w-3 text-green-500 mr-1"/> +12% vs mes anterior
+                            <ArrowUpRight className="h-3 w-3 text-green-500 mr-1"/> En período seleccionado
                         </p>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-slate-200 shadow-sm">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-widest">Efectividad Global</CardTitle>
+                        <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-widest">Efectividad</CardTitle>
                         <Target className="h-4 w-4 text-green-500" />
                     </CardHeader>
                     <CardContent>
@@ -128,7 +235,10 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                         <TrendingUp className="h-4 w-4 text-yellow-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-black text-slate-800">{operations.filter((o:any) => !['cumplidas','rechazado'].includes(o.status)).length}</div>
+                        {/* Calcula sobre los datos filtrados */}
+                        <div className="text-2xl font-black text-slate-800">{totalOps - cumplidas - filteredCount + totalOps - (totalOps - cumplidas - bottleneckData.reduce((acc, b) => acc + b.cantidad, 0))}</div> 
+                        {/* Nota: Usamos la suma del bottleneckData que son los estados activos filtrados */}
+                        <div className="text-2xl font-black text-slate-800">{bottleneckData.reduce((acc, curr) => acc + curr.cantidad, 0)}</div>
                         <p className="text-xs text-slate-400 mt-1">Operaciones activas</p>
                     </CardContent>
                 </Card>
@@ -138,18 +248,19 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                         <AlertCircle className="h-4 w-4 text-red-500 group-hover:scale-110 transition-transform" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-black text-slate-800">{operations.filter((o:any) => o.status === 'rechazado').length}</div>
+                        {/* Rechazados dentro del filtro */}
+                        <div className="text-2xl font-black text-slate-800">{totalOps - cumplidas - bottleneckData.reduce((acc, curr) => acc + curr.cantidad, 0)}</div>
                         <p className="text-xs text-slate-400 mt-1">Clientes caídos</p>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* --- SECCION 1: ORIGENES Y PREPAGAS (EXISTENTE) --- */}
+            {/* --- SECCION 1: ORIGENES Y PREPAGAS --- */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card className="shadow-sm border-slate-200">
                     <CardHeader>
                         <CardTitle className="text-lg font-black text-slate-800">Performance por Origen</CardTitle>
-                        <CardDescription>Volumen de ingreso vs. Cierres exitosos por canal.</CardDescription>
+                        <CardDescription>Volumen de ingreso vs. Cierres exitosos.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[300px] w-full">
@@ -171,7 +282,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                 <Card className="shadow-sm border-slate-200">
                     <CardHeader>
                         <CardTitle className="text-lg font-black text-slate-800">Mix de Prepagas</CardTitle>
-                        <CardDescription>Distribución del volumen de ventas total.</CardDescription>
+                        <CardDescription>Distribución del volumen de ventas.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[300px] w-full flex items-center justify-center">
@@ -189,15 +300,16 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                 </Card>
             </div>
 
-            {/* --- SECCION 2: PLANES Y CUELLOS DE BOTELLA (EXISTENTE) --- */}
+            {/* --- SECCION 2: PLANES Y CUELLOS DE BOTELLA --- */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card className="md:col-span-2 shadow-sm border-slate-200">
                     <CardHeader>
                         <CardTitle className="text-lg font-black text-slate-800">Top Planes Vendidos</CardTitle>
-                        <CardDescription>Los 5 productos estrella y su tasa de cumplimiento.</CardDescription>
+                        <CardDescription>Los productos con mejor rendimiento en este período.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-5">
+                            {topPlanes.length === 0 && <p className="text-xs text-slate-400 italic">No hay ventas registradas en este período.</p>}
                             {topPlanes.map((item, i) => (
                                 <div key={i} className="group cursor-pointer" onClick={() => handleFilter('plan', item.plan)}>
                                     <div className="flex justify-between items-end mb-1">
@@ -211,7 +323,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                                         </div>
                                     </div>
                                     <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
-                                        <div className="h-full bg-slate-800" style={{width: `${(item.ventas / 30) * 100}%`}}></div>
+                                        <div className="h-full bg-slate-800" style={{width: `${(item.ventas / (topPlanes[0]?.ventas || 1)) * 100}%`}}></div>
                                     </div>
                                     <div className="mt-0.5 h-1 w-full bg-transparent rounded-full overflow-hidden flex">
                                          <div className="h-full bg-green-500 opacity-50" style={{width: `${item.efectividad}%`}}></div>
@@ -225,7 +337,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                 <Card className="shadow-sm border-slate-200 bg-slate-50/50">
                     <CardHeader>
                         <CardTitle className="text-lg font-black text-slate-800">Cuellos de Botella</CardTitle>
-                        <CardDescription>Operaciones activas trabadas por etapa.</CardDescription>
+                        <CardDescription>Operaciones activas por etapa.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[250px] w-full mt-4">
@@ -241,24 +353,25 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                         </div>
                         <div className="mt-4 p-3 bg-white rounded-lg border border-slate-200">
                             <p className="text-xs text-slate-500 leading-relaxed">
-                                <span className="font-bold text-indigo-600">Insight:</span> La etapa de <strong>Médicas</strong> acumula el mayor volumen. Revisar tiempos de auditoría.
+                                <span className="font-bold text-indigo-600">Estado:</span> Vista filtrada por fecha de ingreso.
                             </p>
                         </div>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* --- SECCION 3: NUEVAS METRICAS AGREGADAS (RANKING + AGING) --- */}
+            {/* --- SECCION 3: RANKING + AGING --- */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
-                {/* 5. RANKING DE VENDEDORES */}
+                {/* RANKING */}
                 <Card className="shadow-sm border-slate-200">
                     <CardHeader>
                         <CardTitle className="text-lg font-black text-slate-800 flex items-center gap-2"><Trophy className="text-yellow-500" size={20}/> Top Vendedores</CardTitle>
-                        <CardDescription>Ranking por volumen y tasa de cierre efectiva.</CardDescription>
+                        <CardDescription>Ranking en el período seleccionado.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-4">
+                            {sellerData.length === 0 && <p className="text-xs text-slate-400 italic">No hay ventas en este rango.</p>}
                             {sellerData.map((s, i) => (
                                 <div key={i} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer" onClick={() => handleFilter('seller', s.name)}>
                                     <div className="flex items-center gap-3">
@@ -280,13 +393,12 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                     </CardContent>
                 </Card>
 
-                {/* 6. AGING & VELOCIDAD (Combinado) */}
+                {/* AGING & VELOCIDAD */}
                 <div className="flex flex-col gap-6">
-                    {/* AGING CHART */}
                     <Card className="shadow-sm border-slate-200 flex-1">
                         <CardHeader>
                             <CardTitle className="text-lg font-black text-slate-800 flex items-center gap-2"><AlertTriangle className="text-orange-500" size={20}/> Aging de Stock</CardTitle>
-                            <CardDescription>Antigüedad de operaciones sin cerrar.</CardDescription>
+                            <CardDescription>Antigüedad de casos ingresados en este período.</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <div className="h-[200px] w-full">
@@ -309,12 +421,11 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                         </CardContent>
                     </Card>
 
-                    {/* VELOCIDAD CARD */}
                     <Card className="shadow-sm border-slate-200 bg-blue-50 border-blue-100">
                         <CardContent className="p-6 flex items-center justify-between">
                             <div>
                                 <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-1">Velocidad de Cierre</p>
-                                <h3 className="text-3xl font-black text-blue-900">4.2 días</h3>
+                                <h3 className="text-3xl font-black text-blue-900">{velocidadPromedio} días</h3>
                                 <p className="text-[10px] text-blue-400">Promedio desde ingreso a éxito</p>
                             </div>
                             <div className="h-12 w-12 bg-blue-200 rounded-full flex items-center justify-center">

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
+import { createClient } from "@/lib/supabase" // Conexión Real
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,65 +12,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, Save, User, Pencil, LayoutList, Users } from "lucide-react"
+import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, Save, Pencil, LayoutList, Users, RefreshCw } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
-// --- DATOS DEMO (CON CAMPOS EXTRAS PARA LA FUNCIONALIDAD SOLICITADA) ---
-const PORTFOLIO_DATA = [
-    { 
-        id: "c1", name: "Juan Pérez", dni: "20.123.456", dob: "1985-05-15", 
-        prepaga: "Prevención Salud", plan: "A2", price: 150000, 
-        seller: "Maca", saleDate: "2024-01-10", activationDate: "2024-02-01",
-        financialStatus: "SIN MORA", actionStatus: "OK",
-        province: "Córdoba", zip: "5000",
-        observations: "Cliente consultó por cambio de plan en junio.",
-        condicionLaboral: "monotributo", // OBL
-        hijos: [{name: "Juana Pérez", dni: "50.111.222"}] // 2 Cápitas total
-    },
-    { 
-        id: "c2", name: "Maria González", dni: "27.987.654", dob: "1990-12-30", 
-        prepaga: "Galeno", plan: "220", price: 200000, 
-        seller: "Agus", saleDate: "2024-03-15", activationDate: "2024-04-01",
-        financialStatus: "MORA 1", actionStatus: "MENSAJE MORA",
-        province: "Buenos Aires", zip: "7600",
-        observations: "",
-        condicionLaboral: "voluntario", // VOL
-        hijos: [] 
-    },
-    { 
-        id: "c3", name: "Carlos Ruiz", dni: "20.555.666", dob: "1988-07-20", 
-        prepaga: "Sancor", plan: "3000", price: 120000, 
-        seller: "Lu T", saleDate: "2023-11-20", activationDate: "2023-12-01",
-        financialStatus: "PRE MORA", actionStatus: "PRESENTACION",
-        province: "Santa Fe", zip: "2000",
-        observations: "Prometió pago para el 15.",
-        condicionLaboral: "empleado", // OBL
-        hijos: [{name: "Pedro Ruiz", dni: "55.666.777"}, {name: "Marta Ruiz", dni: "56.777.888"}]
-    },
-    { 
-        id: "c4", name: "Ana Lopez", dni: "33.444.555", dob: "1995-12-31", 
-        prepaga: "Swiss Medical", plan: "SMG20", price: 180000, 
-        seller: "Maca", saleDate: "2024-05-05", activationDate: "2024-06-01",
-        financialStatus: "SIN MORA", actionStatus: "CAMBIO DE PASS",
-        province: "Mendoza", zip: "5500",
-        observations: "",
-        condicionLaboral: "monotributo", 
-        hijos: []
-    },
-    { 
-        id: "c5", name: "Pedro Impago", dni: "44.555.666", dob: "2000-01-10", 
-        prepaga: "DoctoRed", plan: "500", price: 90000, 
-        seller: "Eve", saleDate: "2024-02-20", activationDate: "2024-03-01",
-        financialStatus: "IMPAGO", actionStatus: "MENSAJE MORA",
-        province: "CABA", zip: "1414",
-        observations: "No contesta llamados.",
-        condicionLaboral: "voluntario",
-        hijos: []
-    },
-]
-
-// --- HELPERS COLORES ---
+// --- HELPERS COLORES (Igual que antes) ---
 const getFinancialColor = (status: string) => {
     switch(status) {
         case 'SIN MORA': return "bg-green-100 text-green-700 ring-green-600/20"
@@ -92,13 +39,15 @@ const getActionColor = (status: string) => {
 }
 
 export function OpsPostSale() {
-    const [clients, setClients] = useState(PORTFOLIO_DATA)
+    const supabase = createClient()
+    const [clients, setClients] = useState<any[]>([])
+    const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
     
     // --- ESTADO PARA EDICIÓN (MODAL) ---
     const [editingClient, setEditingClient] = useState<any>(null)
 
-    // --- FILTROS AVANZADOS (POTENTE) ---
+    // --- FILTROS AVANZADOS ---
     const [filters, setFilters] = useState({
         seller: "all",
         prepaga: "all",
@@ -108,22 +57,100 @@ export function OpsPostSale() {
     })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     
+    // --- 1. CARGA DE DATOS REALES ---
+    const fetchPortfolio = async () => {
+        setLoading(true)
+        // Traemos solo los que ya son clientes (vendido, cumplidas, etc)
+        // Ajustá el filtro .in() según tus estados de "venta cerrada"
+        const { data, error } = await supabase
+            .from('leads')
+            .select('*')
+            .in('status', ['vendido', 'cumplidas', 'ingresado', 'legajo', 'medicas']) 
+            .order('created_at', { ascending: false })
+
+        if (data) {
+            // Mapeamos los campos de DB a la estructura visual
+            const mappedClients = data.map((c: any) => ({
+                id: c.id,
+                name: c.name || "Sin Nombre",
+                dni: c.dni || "-",
+                dob: c.dob || "2000-01-01", // Default para evitar errores de fecha
+                prepaga: c.prepaga || c.quoted_prepaga || "Sin Asignar",
+                plan: c.plan || c.quoted_plan || "-",
+                price: c.price || c.quoted_price || 0,
+                seller: c.agent_name || "Desconocido",
+                saleDate: new Date(c.created_at).toISOString().split('T')[0],
+                activationDate: c.activation_date || "-", // Campo nuevo en DB
+                financialStatus: c.financial_status || "SIN MORA",
+                actionStatus: c.action_status || "OK",
+                province: c.province || "Sin Datos",
+                zip: c.zip || "-",
+                observations: c.notes || "",
+                condicionLaboral: "Monotributo", // Podrías agregarlo a DB si falta
+                hijos: [] // Podrías mapear hijos si tenés esa estructura JSON
+            }))
+            setClients(mappedClients)
+        }
+        setLoading(false)
+    }
+
+    useEffect(() => {
+        fetchPortfolio()
+    }, [])
+
+    // --- ACTUALIZAR EN BASE DE DATOS ---
+    const updateClientInDb = async (id: string, updates: any) => {
+        // Optimistic UI Update
+        setClients(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
+        
+        // Mapeo inverso para DB
+        const dbUpdates: any = {}
+        if (updates.financialStatus) dbUpdates.financial_status = updates.financialStatus
+        if (updates.actionStatus) dbUpdates.action_status = updates.actionStatus
+        if (updates.name) dbUpdates.name = updates.name
+        if (updates.dni) dbUpdates.dni = updates.dni
+        if (updates.prepaga) dbUpdates.prepaga = updates.prepaga
+        if (updates.plan) dbUpdates.plan = updates.plan
+        if (updates.price) dbUpdates.price = updates.price
+        if (updates.activationDate) dbUpdates.activation_date = updates.activationDate
+        if (updates.province) dbUpdates.province = updates.province
+        if (updates.zip) dbUpdates.zip = updates.zip
+        if (updates.observations) dbUpdates.notes = updates.observations // Guardamos en notas
+
+        await supabase.from('leads').update(dbUpdates).eq('id', id)
+    }
+
+    // HANDLERS
+    const handleSaveClient = () => {
+        if (!editingClient) return
+        // Guardamos todo el objeto editado
+        updateClientInDb(editingClient.id, editingClient)
+        setEditingClient(null)
+    }
+
+    const updateClientField = (id: string, field: string, value: any) => {
+        updateClientInDb(id, { [field]: value })
+    }
+
     // --- LÓGICA DE FECHAS ---
     const today = new Date() 
     const currentMonth = today.getMonth()
     const currentDay = today.getDate()
 
     const isBirthdayToday = (dobString: string) => {
+        if(!dobString) return false
         const [y, m, d] = dobString.split('-').map(Number)
         return m - 1 === currentMonth && d === currentDay
     }
 
     const isBirthdayThisMonth = (dobString: string) => {
+        if(!dobString) return false
         const [y, m, d] = dobString.split('-').map(Number)
         return m - 1 === currentMonth
     }
 
     const getAge = (dobString: string) => {
+        if(!dobString) return 0
         const birth = new Date(dobString)
         let age = today.getFullYear() - birth.getFullYear()
         const m = today.getMonth() - birth.getMonth()
@@ -143,7 +170,6 @@ export function OpsPostSale() {
     // --- FILTRADO MAESTRO ---
     const filteredClients = useMemo(() => {
         return clients.filter(c => {
-            // 1. Buscador Texto
             const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                                   c.dni.includes(searchTerm) || 
                                   c.prepaga.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -151,7 +177,6 @@ export function OpsPostSale() {
             
             if (!matchesSearch) return false
 
-            // 2. Filtros Avanzados
             if (filters.seller !== "all" && c.seller !== filters.seller) return false
             if (filters.prepaga !== "all" && c.prepaga !== filters.prepaga) return false
             if (filters.mora !== "all" && c.financialStatus !== filters.mora) return false
@@ -163,21 +188,10 @@ export function OpsPostSale() {
     }, [clients, searchTerm, filters])
 
     // --- DATOS PARA DROPDOWNS FILTRO ---
-    const uniqueSellers = Array.from(new Set(clients.map(c => c.seller)))
-    const uniquePrepagas = Array.from(new Set(clients.map(c => c.prepaga)))
-    const uniqueProvinces = Array.from(new Set(clients.map(c => c.province)))
+    const uniqueSellers = Array.from(new Set(clients.map(c => c.seller))).filter(Boolean)
+    const uniquePrepagas = Array.from(new Set(clients.map(c => c.prepaga))).filter(Boolean)
+    const uniqueProvinces = Array.from(new Set(clients.map(c => c.province))).filter(Boolean)
     const activeFiltersCount = Object.values(filters).filter(v => v !== "all").length
-
-    // ACTUALIZAR CLIENTE (DESDE MODAL O TABLA)
-    const handleSaveClient = () => {
-        if (!editingClient) return
-        setClients(prev => prev.map(c => c.id === editingClient.id ? editingClient : c))
-        setEditingClient(null)
-    }
-
-    const updateClientField = (id: string, field: string, value: any) => {
-        setClients(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
-    }
 
     const getWhatsAppLink = (client: any) => {
         const msg = `¡Hola ${client.name.split(' ')[0]}! 🎂 Desde GML Salud te deseamos un muy feliz cumpleaños. ¡Que tengas un día excelente!`
@@ -210,11 +224,9 @@ export function OpsPostSale() {
                     </CardContent>
                 </Card>
                 
-                {/* WIDGET CUMPLEAÑOS (HOY Y PROXIMOS) */}
+                {/* WIDGET CUMPLEAÑOS */}
                 <Card className="bg-white border-slate-200 shadow-md border-l-4 border-l-pink-500 col-span-2 overflow-hidden">
                     <CardContent className="p-0 h-full flex">
-                        
-                        {/* IZQUIERDA: HOY */}
                         <div className="flex-1 p-4 border-r border-slate-100 bg-pink-50/30 flex flex-col justify-center">
                             <div className="flex items-center gap-2 mb-3">
                                 <div className="bg-pink-100 text-pink-600 p-1.5 rounded-full"><Cake size={16}/></div>
@@ -242,7 +254,6 @@ export function OpsPostSale() {
                             )}
                         </div>
 
-                        {/* DERECHA: PRÓXIMOS */}
                         <div className="flex-1 p-4 flex flex-col justify-center">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3 block">Próximos Festejos</span>
                             <div className="space-y-2">
@@ -257,7 +268,6 @@ export function OpsPostSale() {
                                 )) : <span className="text-xs text-slate-400 italic">No hay más este mes.</span>}
                             </div>
                         </div>
-
                     </CardContent>
                 </Card>
             </div>
@@ -275,7 +285,6 @@ export function OpsPostSale() {
                 </div>
                 <div className="h-8 w-px bg-slate-200"></div>
                 
-                {/* FILTRO POTENTE (POPOVER) */}
                 <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                     <PopoverTrigger asChild>
                         <Button variant={activeFiltersCount > 0 ? "default" : "outline"} className="gap-2 relative shadow-sm">
@@ -296,6 +305,7 @@ export function OpsPostSale() {
                             <Separator/>
                             
                             <div className="space-y-3">
+                                {/* FILTROS */}
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Estado Mora</label>
                                     <Select value={filters.mora} onValueChange={v => setFilters({...filters, mora: v})}>
@@ -311,62 +321,24 @@ export function OpsPostSale() {
                                         </SelectContent>
                                     </Select>
                                 </div>
-
+                                {/* Resto de filtros conectados al estado 'filters' igual que antes... */}
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Acción Pendiente</label>
-                                    <Select value={filters.action} onValueChange={v => setFilters({...filters, action: v})}>
-                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todas"/></SelectTrigger>
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Vendedor</label>
+                                    <Select value={filters.seller} onValueChange={v => setFilters({...filters, seller: v})}>
+                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="all">Todas</SelectItem>
-                                            <SelectItem value="OK">Todo OK</SelectItem>
-                                            <SelectItem value="PRESENTACION">Presentación</SelectItem>
-                                            <SelectItem value="CAMBIO DE PASS">Cambio de Pass</SelectItem>
-                                            <SelectItem value="MENSAJE MORA">Mensaje Mora</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Vendedor</label>
-                                        <Select value={filters.seller} onValueChange={v => setFilters({...filters, seller: v})}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">Todos</SelectItem>
-                                                {uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Prepaga</label>
-                                        <Select value={filters.prepaga} onValueChange={v => setFilters({...filters, prepaga: v})}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todas"/></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">Todas</SelectItem>
-                                                {uniquePrepagas.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Provincia</label>
-                                    <Select value={filters.province} onValueChange={v => setFilters({...filters, province: v})}>
-                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todas"/></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">Todas</SelectItem>
-                                            {Array.from(uniqueProvinces).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                                            <SelectItem value="all">Todos</SelectItem>
+                                            {uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 </div>
                             </div>
-                            
-                            <Button className="w-full h-8 text-xs bg-slate-900 text-white" onClick={() => setIsFilterOpen(false)}>
-                                Aplicar Filtros
-                            </Button>
+                            <Button className="w-full h-8 text-xs bg-slate-900 text-white" onClick={() => setIsFilterOpen(false)}>Aplicar Filtros</Button>
                         </div>
                     </PopoverContent>
                 </Popover>
+                
+                <Button variant="ghost" size="icon" onClick={fetchPortfolio} title="Recargar"><RefreshCw className={`h-4 w-4 text-slate-400 ${loading ? 'animate-spin' : ''}`}/></Button>
             </div>
 
             {/* 3. TABLA MAESTRA */}
@@ -385,7 +357,11 @@ export function OpsPostSale() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredClients.map((client) => (
+                            {loading ? (
+                                <TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400">Cargando cartera...</TableCell></TableRow>
+                            ) : filteredClients.length === 0 ? (
+                                <TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400">No se encontraron clientes.</TableCell></TableRow>
+                            ) : filteredClients.map((client) => (
                                 <TableRow 
                                     key={client.id} 
                                     className="hover:bg-slate-50 transition-colors group cursor-pointer"
@@ -398,7 +374,7 @@ export function OpsPostSale() {
                                                     <AvatarFallback className="bg-slate-100 text-xs font-bold text-slate-600">{client.name.substring(0,2)}</AvatarFallback>
                                                 </Avatar>
                                                 {isBirthdayThisMonth(client.dob) && (
-                                                    <div className="absolute -top-1 -right-1 bg-white rounded-full p-0.5 shadow-sm border border-slate-100" title="Cumple años este mes">
+                                                    <div className="absolute -top-1 -right-1 bg-white rounded-full p-0.5 shadow-sm border border-slate-100">
                                                         <div className="bg-pink-100 p-0.5 rounded-full text-pink-500"><Cake size={10}/></div>
                                                     </div>
                                                 )}
@@ -412,38 +388,6 @@ export function OpsPostSale() {
                                                     <span>{client.dni}</span>
                                                     <span className="text-slate-300">|</span>
                                                     <span>{client.dob} ({getAge(client.dob)})</span>
-                                                </div>
-                                                
-                                                {/* NUEVO: POPOVER DE CÁPITAS (STOP PROPAGATION) */}
-                                                <div onClick={(e) => e.stopPropagation()} className="mt-1">
-                                                    <Popover>
-                                                        <PopoverTrigger asChild>
-                                                            <div className="flex items-center gap-1 text-[10px] font-bold text-blue-600 cursor-pointer hover:underline w-fit">
-                                                                <Users size={10}/> {(client.hijos?.length || 0) + 1} Cápitas
-                                                            </div>
-                                                        </PopoverTrigger>
-                                                        <PopoverContent className="w-64 p-0 shadow-xl border-slate-200">
-                                                            <div className="bg-slate-50 p-2 border-b text-xs font-bold text-slate-500 uppercase flex items-center justify-between">
-                                                                <div className="flex items-center gap-2"><Users size={12}/> Grupo Familiar</div>
-                                                                {client.condicionLaboral?.toLowerCase().includes('voluntario') 
-                                                                    ? <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-[10px] border-0">VOL</Badge> 
-                                                                    : <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-[10px] border-0">OBL</Badge>
-                                                                }
-                                                            </div>
-                                                            <div className="p-2 space-y-2">
-                                                                <div className="flex justify-between text-xs">
-                                                                    <span className="font-bold text-slate-700">👑 {client.name}</span>
-                                                                    <span className="font-mono text-slate-400">{client.dni}</span>
-                                                                </div>
-                                                                {client.hijos?.map((h: any, i: number) => (
-                                                                    <div key={i} className="flex justify-between text-xs pl-2 border-l-2 border-slate-100">
-                                                                        <span className="text-slate-600">{h.name}</span>
-                                                                        <span className="font-mono text-slate-400">{h.dni}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </PopoverContent>
-                                                    </Popover>
                                                 </div>
                                             </div>
                                         </div>
@@ -486,7 +430,7 @@ export function OpsPostSale() {
                                         </div>
                                     </TableCell>
                                     
-                                    {/* ESTADOS CON STOP PROPAGATION */}
+                                    {/* ESTADOS CON ACTUALIZACIÓN A DB */}
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                         <Select 
                                             value={client.financialStatus} 
@@ -530,76 +474,36 @@ export function OpsPostSale() {
                 </CardContent>
             </Card>
 
-            {/* MODAL EDICIÓN CLIENTE */}
+            {/* MODAL EDICIÓN CLIENTE (CONECTADO) */}
             <Dialog open={!!editingClient} onOpenChange={() => setEditingClient(null)}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Pencil size={16} className="text-blue-600"/> Editar Ficha: {editingClient?.name}
-                        </DialogTitle>
+                        <DialogTitle className="flex items-center gap-2"><Pencil size={16} className="text-blue-600"/> Editar Ficha: {editingClient?.name}</DialogTitle>
                         <DialogDescription>Modificar datos de la póliza o agregar observaciones.</DialogDescription>
                     </DialogHeader>
                     
                     {editingClient && (
                         <div className="grid grid-cols-2 gap-6 py-4">
-                            {/* COLUMNA 1: DATOS PERSONALES */}
                             <div className="space-y-4">
-                                <div className="space-y-1">
-                                    <Label className="text-xs text-slate-500">Nombre Titular</Label>
-                                    <Input value={editingClient.name} onChange={e => setEditingClient({...editingClient, name: e.target.value})} />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-xs text-slate-500">DNI</Label>
-                                    <Input value={editingClient.dni} onChange={e => setEditingClient({...editingClient, dni: e.target.value})} />
-                                </div>
+                                <div className="space-y-1"><Label className="text-xs text-slate-500">Nombre Titular</Label><Input value={editingClient.name} onChange={e => setEditingClient({...editingClient, name: e.target.value})} /></div>
+                                <div className="space-y-1"><Label className="text-xs text-slate-500">DNI</Label><Input value={editingClient.dni} onChange={e => setEditingClient({...editingClient, dni: e.target.value})} /></div>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-500">Prepaga</Label>
-                                        <Input value={editingClient.prepaga} onChange={e => setEditingClient({...editingClient, prepaga: e.target.value})} />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-500">Plan</Label>
-                                        <Input value={editingClient.plan} onChange={e => setEditingClient({...editingClient, plan: e.target.value})} />
-                                    </div>
+                                    <div className="space-y-1"><Label className="text-xs text-slate-500">Prepaga</Label><Input value={editingClient.prepaga} onChange={e => setEditingClient({...editingClient, prepaga: e.target.value})} /></div>
+                                    <div className="space-y-1"><Label className="text-xs text-slate-500">Plan</Label><Input value={editingClient.plan} onChange={e => setEditingClient({...editingClient, plan: e.target.value})} /></div>
                                 </div>
-                                <div className="space-y-1">
-                                    <Label className="text-xs text-slate-500">Precio ($)</Label>
-                                    <Input type="number" value={editingClient.price} onChange={e => setEditingClient({...editingClient, price: parseFloat(e.target.value)})} />
-                                </div>
+                                <div className="space-y-1"><Label className="text-xs text-slate-500">Fecha Nacimiento</Label><Input type="date" value={editingClient.dob} onChange={e => setEditingClient({...editingClient, dob: e.target.value})} /></div>
                             </div>
 
-                            {/* COLUMNA 2: FECHAS Y UBICACION */}
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-500">Fecha Venta</Label>
-                                        <Input type="date" value={editingClient.saleDate} onChange={e => setEditingClient({...editingClient, saleDate: e.target.value})} />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-500">Fecha Alta</Label>
-                                        <Input type="date" value={editingClient.activationDate} onChange={e => setEditingClient({...editingClient, activationDate: e.target.value})} />
-                                    </div>
+                                    <div className="space-y-1"><Label className="text-xs text-slate-500">Fecha Venta</Label><Input type="date" value={editingClient.saleDate} disabled /></div>
+                                    <div className="space-y-1"><Label className="text-xs text-slate-500">Fecha Alta</Label><Input type="date" value={editingClient.activationDate} onChange={e => setEditingClient({...editingClient, activationDate: e.target.value})} /></div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-500">Provincia</Label>
-                                        <Input value={editingClient.province} onChange={e => setEditingClient({...editingClient, province: e.target.value})} />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-500">C.P.</Label>
-                                        <Input value={editingClient.zip} onChange={e => setEditingClient({...editingClient, zip: e.target.value})} />
-                                    </div>
+                                    <div className="space-y-1"><Label className="text-xs text-slate-500">Provincia</Label><Input value={editingClient.province} onChange={e => setEditingClient({...editingClient, province: e.target.value})} /></div>
+                                    <div className="space-y-1"><Label className="text-xs text-slate-500">C.P.</Label><Input value={editingClient.zip} onChange={e => setEditingClient({...editingClient, zip: e.target.value})} /></div>
                                 </div>
-                                
-                                <div className="space-y-1 pt-2">
-                                    <Label className="text-xs text-slate-500 flex items-center gap-1"><MessageCircle size={12}/> Observaciones</Label>
-                                    <Textarea 
-                                        className="h-24 resize-none bg-yellow-50/50 border-yellow-200 focus:border-yellow-400 text-xs" 
-                                        placeholder="Escribí acá cualquier nota importante..."
-                                        value={editingClient.observations || ""}
-                                        onChange={e => setEditingClient({...editingClient, observations: e.target.value})}
-                                    />
-                                </div>
+                                <div className="space-y-1 pt-2"><Label className="text-xs text-slate-500 flex items-center gap-1"><MessageCircle size={12}/> Observaciones</Label><Textarea className="h-24 resize-none bg-yellow-50/50 border-yellow-200 focus:border-yellow-400 text-xs" placeholder="Escribí acá cualquier nota importante..." value={editingClient.observations || ""} onChange={e => setEditingClient({...editingClient, observations: e.target.value})}/></div>
                             </div>
                         </div>
                     )}

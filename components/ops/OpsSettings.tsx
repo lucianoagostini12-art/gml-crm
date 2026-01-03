@@ -1,132 +1,174 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
+import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail } from "lucide-react"
+import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch" 
 import { Separator } from "@/components/ui/separator"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogTrigger } from "@/components/ui/dialog"
 
-// CONSTANTES DE ETAPAS
+// CONSTANTES ESTÁTICAS (No cambian)
 const STAGES = [
     { value: "ingresado", label: "Ingresado" },
     { value: "precarga", label: "Precarga" },
     { value: "medicas", label: "Médicas" },
     { value: "legajo", label: "Legajo" },
     { value: "demoras", label: "Demoras" },
-    { value: "cumplidas", label: "Aprobadas (Cumplidas)" },
+    { value: "cumplidas", label: "Aprobadas" },
     { value: "rechazado", label: "Rechazadas" }
 ]
 
-// MOCK DATA INICIAL
-const INITIAL_USERS = [
-    { id: 1, name: "Lucho God", role: "ADMIN_GOD", email: "lucho@gml.com", avatar: "https://github.com/shadcn.png" },
-    { id: 2, name: "Maca", role: "ADMIN_OPS", email: "maca@gml.com", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Maca" },
-    { id: 3, name: "Iara", role: "ADMIN_OPS", email: "iara@gml.com", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Iara" },
-]
-
 export function OpsSettings() {
+    const supabase = createClient()
+    const [loading, setLoading] = useState(false)
     const [activeTab, setActiveTab] = useState<'business' | 'users' | 'workflows' | 'permissions'>('business')
 
-    // 1. COMERCIAL
-    const [prepagas, setPrepagas] = useState([
-        { id: 1, name: "Swiss Medical", plans: ["SMG20", "SMG50", "SMG70"] },
-        { id: 2, name: "Galeno", plans: ["220", "330", "440", "550"] },
-        { id: 3, name: "Prevención Salud", plans: ["A1", "A2", "A4", "A6"] },
-        { id: 4, name: "Omint", plans: ["Global", "Clásico", "Premium"] }
-    ])
+    // 1. COMERCIAL (Desde DB)
+    const [prepagas, setPrepagas] = useState<any[]>([])
     const [newPrepaga, setNewPrepaga] = useState("")
     const [selectedPrepagaId, setSelectedPrepagaId] = useState<number | null>(null)
     const [newPlan, setNewPlan] = useState("")
-    const [origins, setOrigins] = useState(["Google Ads", "Meta Ads", "Referidos", "Base Propia", "Llamador"])
+    
+    const [origins, setOrigins] = useState<string[]>([])
     const [newOrigin, setNewOrigin] = useState("")
 
-    // 2. EQUIPO (CON MODAL Y FOTOS)
-    const [users, setUsers] = useState(INITIAL_USERS)
+    // 2. EQUIPO (Desde DB Profiles)
+    const [users, setUsers] = useState<any[]>([])
     const [isUserModalOpen, setIsUserModalOpen] = useState(false)
     const [newUser, setNewUser] = useState({ 
-        name: "", 
-        email: "", 
-        role: "ADMIN_OPS", 
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Nuevo" 
+        name: "", email: "", role: "admin_common", avatar: "" 
     })
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    // 3. WORKFLOWS
+    // 3. WORKFLOWS (Desde DB)
     const [selectedStage, setSelectedStage] = useState("ingresado")
-    const [subStatesByStage, setSubStatesByStage] = useState<Record<string, string[]>>({
-        ingresado: ["Carga de Datos", "Falta DNI", "Validando"],
-        precarga: ["En Cola", "Cargando Web", "Error de Carga"],
-        medicas: ["Auditoría Médica", "Solicitud Estudios", "Aprobado Condicional"],
-        legajo: ["Firma Pendiente", "Validación Teléfonica", "Falta Foto"],
-        demoras: ["Espera Cliente", "Problema Sistema", "Aporte No Impacta"],
-        cumplidas: ["Finalizado", "Liquidado", "Enviado"],
-        rechazado: ["Por Perfil", "Por Zona", "Rechazo Médico", "Cliente Desiste"]
-    })
+    const [subStatesByStage, setSubStatesByStage] = useState<Record<string, string[]>>({})
     const [newSubState, setNewSubState] = useState("")
-    const [postSaleFinancial, setPostSaleFinancial] = useState(["SIN MORA", "PRE MORA", "MORA 1", "MORA 2", "MORA 3", "IMPAGO"])
-    const [newPSFinancial, setNewPSFinancial] = useState("")
-    const [postSaleActions, setPostSaleActions] = useState(["PRESENTACION", "CAMBIO DE PASS", "MENSAJE MORA", "RECUPERO", "BAJA"])
-    const [newPSAction, setNewPSAction] = useState("")
 
-    // 4. PERMISOS
+    // 4. PERMISOS (Desde DB)
     const [permissions, setPermissions] = useState({
-        ops: {
-            exportData: true, editSettings: false, deleteSales: false, assignCases: true,
-            accessMetrics: false, accessBilling: false, accessPostSale: true, 
-        }
+        exportData: true, editSettings: false, deleteSales: false, assignCases: true,
+        accessMetrics: false, accessBilling: false, accessPostSale: true, 
     })
+
+    // --- CARGA INICIAL ---
+    useEffect(() => {
+        fetchConfig()
+        fetchUsers()
+    }, [])
+
+    const fetchConfig = async () => {
+        setLoading(true)
+        const { data } = await supabase.from('system_config').select('*')
+        if (data) {
+            const p = data.find(c => c.key === 'prepagas_plans')?.value
+            const o = data.find(c => c.key === 'sales_origins')?.value
+            const s = data.find(c => c.key === 'workflow_substates')?.value
+            const perm = data.find(c => c.key === 'ops_permissions')?.value
+
+            if (p) setPrepagas(p)
+            if (o) setOrigins(o)
+            if (s) setSubStatesByStage(s)
+            if (perm) setPermissions(perm)
+        }
+        setLoading(false)
+    }
+
+    const fetchUsers = async () => {
+        const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+        if (data) {
+            setUsers(data.map(u => ({
+                id: u.id,
+                name: u.full_name || "Sin Nombre",
+                role: u.role || "seller",
+                email: u.email,
+                avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`
+            })))
+        }
+    }
+
+    // --- GUARDADO GENERAL ---
+    const handleSaveAll = async () => {
+        setLoading(true)
+        // Guardamos todo en system_config
+        await supabase.from('system_config').upsert({ key: 'prepagas_plans', value: prepagas })
+        await supabase.from('system_config').upsert({ key: 'sales_origins', value: origins })
+        await supabase.from('system_config').upsert({ key: 'workflow_substates', value: subStatesByStage })
+        await supabase.from('system_config').upsert({ key: 'ops_permissions', value: permissions })
+        
+        setLoading(false)
+        alert("✅ Configuración guardada y aplicada al sistema.")
+        // El realtime de los otros componentes debería actualizarse solo si están escuchando
+    }
 
     // --- HANDLERS COMERCIAL ---
     const addPrepaga = () => { if(newPrepaga) { setPrepagas([...prepagas, { id: Date.now(), name: newPrepaga, plans: [] }]); setNewPrepaga("") } }
     const deletePrepaga = (id: number) => setPrepagas(prepagas.filter(p => p.id !== id))
     const addPlan = () => { if(newPlan && selectedPrepagaId) { setPrepagas(prepagas.map(p => p.id === selectedPrepagaId ? { ...p, plans: [...p.plans, newPlan] } : p)); setNewPlan("") } }
-    const deletePlan = (prepagaId: number, plan: string) => { setPrepagas(prepagas.map(p => p.id === prepagaId ? { ...p, plans: p.plans.filter(pl => pl !== plan) } : p)) }
+    const deletePlan = (prepagaId: number, plan: string) => { setPrepagas(prepagas.map(p => p.id === prepagaId ? { ...p, plans: p.plans.filter((pl:string) => pl !== plan) } : p)) }
+    
     const addOrigin = () => { if(newOrigin && !origins.includes(newOrigin)) { setOrigins([...origins, newOrigin]); setNewOrigin("") } }
     const deleteOrigin = (name: string) => setOrigins(origins.filter(o => o !== name))
     
-    // --- HANDLERS USUARIOS ---
+    // --- HANDLERS USUARIOS (Conectado a Profiles) ---
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (file) {
-            const previewUrl = URL.createObjectURL(file)
-            setNewUser({ ...newUser, avatar: previewUrl })
+            const reader = new FileReader()
+            reader.onloadend = () => { setNewUser(prev => ({ ...prev, avatar: reader.result as string })) }
+            reader.readAsDataURL(file)
         }
     }
-    const generateRandomAvatar = () => {
-        const seed = Math.random().toString(36).substring(7)
-        setNewUser({ ...newUser, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}` })
-    }
-    const handleCreateUser = () => { 
-        if(newUser.name && newUser.email) { 
-            setUsers([...users, { id: Date.now(), ...newUser }])
-            setNewUser({ name: "", email: "", role: "ADMIN_OPS", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Nuevo" })
+
+    const handleCreateUser = async () => { 
+        if(!newUser.name || !newUser.email) return alert("Faltan datos")
+        
+        // Crear en DB
+        const { error } = await supabase.from('profiles').insert({
+            full_name: newUser.name,
+            email: newUser.email,
+            role: newUser.role,
+            avatar_url: newUser.avatar
+        })
+
+        if (!error) {
+            fetchUsers() // Recargar lista
+            setNewUser({ name: "", email: "", role: "admin_common", avatar: "" })
             setIsUserModalOpen(false)
-        } 
+        } else {
+            alert("Error creando usuario: " + error.message)
+        }
     }
-    const deleteUser = (id: number) => setUsers(users.filter(u => u.id !== id))
+
+    const deleteUser = async (id: string) => {
+        if (!confirm("¿Borrar usuario?")) return
+        await supabase.from('profiles').delete().eq('id', id)
+        fetchUsers()
+    }
 
     // --- HANDLERS WORKFLOWS ---
     const addSubState = () => { if(newSubState && selectedStage) { setSubStatesByStage({ ...subStatesByStage, [selectedStage]: [...(subStatesByStage[selectedStage] || []), newSubState] }); setNewSubState("") } }
     const deleteSubState = (val: string) => { setSubStatesByStage({ ...subStatesByStage, [selectedStage]: subStatesByStage[selectedStage].filter(s => s !== val) }) }
-    const addPSFinancial = () => { if(newPSFinancial) { setPostSaleFinancial([...postSaleFinancial, newPSFinancial.toUpperCase()]); setNewPSFinancial("") } }
-    const deletePSFinancial = (val: string) => setPostSaleFinancial(postSaleFinancial.filter(s => s !== val))
-    const addPSAction = () => { if(newPSAction) { setPostSaleActions([...postSaleActions, newPSAction.toUpperCase()]); setNewPSAction("") } }
-    const deletePSAction = (val: string) => setPostSaleActions(postSaleActions.filter(s => s !== val))
 
-    const togglePermission = (key: keyof typeof permissions.ops) => { setPermissions({ ...permissions, ops: { ...permissions.ops, [key]: !permissions.ops[key] } }) }
+    // --- HANDLERS PERMISOS ---
+    const togglePermission = (key: keyof typeof permissions) => { 
+        setPermissions(prev => ({ ...prev, [key]: !prev[key] })) 
+    }
 
+    // Helper Visual Roles
     const getRoleBadge = (role: string) => {
         switch(role) {
-            case 'ADMIN_GOD': return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold border border-purple-200 uppercase">Admin GOD</span>
-            case 'ADMIN_OPS': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-200 uppercase">Admin Ops</span>
-            default: return <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-200 uppercase">Vendedor</span>
+            case 'admin_god': return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold border border-purple-200 uppercase">Admin GOD</span>
+            case 'admin_common': return <span className="bg-pink-100 text-pink-700 px-2 py-0.5 rounded text-[10px] font-bold border border-pink-200 uppercase">Administrativa</span>
+            case 'supervisor_god': return <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold border border-amber-200 uppercase">Supervisión</span>
+            default: return <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-200 uppercase">Vendedor</span>
         }
     }
 
@@ -139,7 +181,10 @@ export function OpsSettings() {
                     <h2 className="text-3xl font-black text-slate-800">Configuración</h2>
                     <p className="text-slate-500">Administración general del sistema GML OPS.</p>
                 </div>
-                <Button className="bg-blue-600 hover:bg-blue-700 font-bold shadow-md"><Save size={16} className="mr-2"/> Guardar Todo</Button>
+                <Button onClick={handleSaveAll} disabled={loading} className="bg-blue-600 hover:bg-blue-700 font-bold shadow-md">
+                    {loading ? <RefreshCw className="animate-spin h-4 w-4 mr-2"/> : <Save size={16} className="mr-2"/>} 
+                    {loading ? "Guardando..." : "Guardar Todo"}
+                </Button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
@@ -184,7 +229,7 @@ export function OpsSettings() {
                                                     <Button variant="ghost" size="icon" onClick={() => deletePrepaga(p.id)} className="text-slate-400 hover:text-red-500 h-8 w-8"><Trash2 size={16}/></Button>
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {p.plans.map(plan => (
+                                                    {p.plans && p.plans.map((plan: string) => (
                                                         <Badge key={plan} variant="secondary" className="bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600 cursor-pointer group" onClick={() => deletePlan(p.id, plan)}>
                                                             {plan} <X size={10} className="ml-1 opacity-0 group-hover:opacity-100"/>
                                                         </Badge>
@@ -228,14 +273,14 @@ export function OpsSettings() {
                         </div>
                     )}
 
-                    {/* --- TAB USUARIOS (MEJORADO) --- */}
+                    {/* --- TAB USUARIOS --- */}
                     {activeTab === 'users' && (
                         <div className="space-y-6">
                             <Card className="border-slate-200 shadow-sm">
                                 <CardHeader className="flex flex-row items-center justify-between">
                                     <div>
                                         <CardTitle>Equipo de Trabajo</CardTitle>
-                                        <CardDescription>Crear y gestionar usuarios del sistema.</CardDescription>
+                                        <CardDescription>Gestión compartida con Admin Config.</CardDescription>
                                     </div>
                                     <Dialog open={isUserModalOpen} onOpenChange={setIsUserModalOpen}>
                                         <DialogTrigger asChild>
@@ -244,11 +289,10 @@ export function OpsSettings() {
                                         <DialogContent className="max-w-md">
                                             <DialogHeader>
                                                 <DialogTitle>Crear Usuario</DialogTitle>
-                                                <DialogDescription>Alta de nuevo integrante del equipo.</DialogDescription>
+                                                <DialogDescription>Alta de nuevo integrante.</DialogDescription>
                                             </DialogHeader>
                                             <div className="space-y-4 py-4">
-                                                
-                                                {/* FOTO DE PERFIL */}
+                                                {/* FORMULARIO USUARIO */}
                                                 <div className="flex flex-col items-center gap-3 mb-2">
                                                     <Avatar className="h-20 w-20 border-4 border-slate-100 shadow-md">
                                                         <AvatarImage src={newUser.avatar} className="object-cover"/>
@@ -257,35 +301,31 @@ export function OpsSettings() {
                                                     <div className="flex gap-2">
                                                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload}/>
                                                         <Button type="button" variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} className="text-xs h-8 gap-2"><Upload className="h-3 w-3"/> Subir</Button>
-                                                        <Button type="button" variant="outline" size="sm" onClick={generateRandomAvatar} className="text-xs h-8 gap-2"><Camera className="h-3 w-3"/> Random</Button>
                                                     </div>
                                                 </div>
-
                                                 <div className="grid gap-2">
-                                                    <Label>Nombre Completo</Label>
-                                                    <Input placeholder="Ej: Macarena Lopez" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})}/>
+                                                    <Label>Nombre</Label>
+                                                    <Input placeholder="Ej: Maca" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})}/>
                                                 </div>
                                                 <div className="grid gap-2">
                                                     <Label>Email</Label>
-                                                    <div className="relative">
-                                                        <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400"/>
-                                                        <Input className="pl-9" placeholder="email@gml.com" value={newUser.email} onChange={e=>setNewUser({...newUser, email: e.target.value})}/>
-                                                    </div>
+                                                    <Input placeholder="email@gml.com" value={newUser.email} onChange={e=>setNewUser({...newUser, email: e.target.value})}/>
                                                 </div>
                                                 <div className="grid gap-2">
                                                     <Label>Rol</Label>
                                                     <Select value={newUser.role} onValueChange={(v)=>setNewUser({...newUser, role: v})}>
                                                         <SelectTrigger><SelectValue placeholder="Rol" /></SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="ADMIN_GOD">Administración GOD</SelectItem>
-                                                            <SelectItem value="ADMIN_OPS">Administrativa Ops</SelectItem>
-                                                            <SelectItem value="SELLER">Vendedor</SelectItem>
+                                                            <SelectItem value="admin_god">Administrativa GOD</SelectItem>
+                                                            <SelectItem value="admin_common">Administrativa</SelectItem>
+                                                            <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>
+                                                            <SelectItem value="seller">Vendedora</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
                                             </div>
                                             <DialogFooter>
-                                                <Button onClick={handleCreateUser} className="w-full bg-slate-900 text-white">Confirmar Creación</Button>
+                                                <Button onClick={handleCreateUser} className="w-full bg-slate-900 text-white">Confirmar</Button>
                                             </DialogFooter>
                                         </DialogContent>
                                     </Dialog>
@@ -358,58 +398,19 @@ export function OpsSettings() {
                                     </div>
                                 </CardContent>
                             </Card>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <Card className="border-slate-200 shadow-sm">
-                                    <CardHeader>
-                                        <CardTitle className="text-base">Posventa: Estados Financieros</CardTitle>
-                                        <CardDescription>Opciones para Mora.</CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="flex gap-2 mb-3">
-                                            <Input className="h-8 text-xs" placeholder="Ej: MORA 4" value={newPSFinancial} onChange={e=>setNewPSFinancial(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addPSFinancial()}/>
-                                            <Button size="sm" onClick={addPSFinancial} variant="outline"><Plus size={14}/></Button>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {postSaleFinancial.map(s => (
-                                                <Badge key={s} variant="secondary" className="bg-slate-100 text-xs cursor-pointer hover:bg-red-100" onClick={() => deletePSFinancial(s)}>{s}</Badge>
-                                            ))}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                <Card className="border-slate-200 shadow-sm">
-                                    <CardHeader>
-                                        <CardTitle className="text-base">Posventa: Acciones</CardTitle>
-                                        <CardDescription>Gestión con cliente.</CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="flex gap-2 mb-3">
-                                            <Input className="h-8 text-xs" placeholder="Ej: RECORDATORIO" value={newPSAction} onChange={e=>setNewPSAction(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addPSAction()}/>
-                                            <Button size="sm" onClick={addPSAction} variant="outline"><Plus size={14}/></Button>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {postSaleActions.map(s => (
-                                                <Badge key={s} variant="secondary" className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-red-100" onClick={() => deletePSAction(s)}>{s}</Badge>
-                                            ))}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            </div>
                         </div>
                     )}
 
-                    {/* --- TAB PERMISOS --- */}
+                    {/* --- TAB PERMISOS (Aquí se configuran los permisos para Admin Común) --- */}
                     {activeTab === 'permissions' && (
                         <div className="space-y-6">
-                            <Card className="border-slate-200 shadow-sm">
+                            <Card className="border-slate-200 shadow-sm border-l-4 border-l-pink-500">
                                 <CardHeader>
                                     <CardTitle>Matriz de Permisos</CardTitle>
-                                    <CardDescription>Configuración granular para el rol <span className="font-bold text-blue-600">ADMIN OPS</span>.</CardDescription>
+                                    <CardDescription>Configuración granular para el rol <span className="font-bold text-pink-600">ADMINISTRATIVA COMÚN</span>.</CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                     <div className="space-y-8">
-                                        
                                         {/* ACCESO A MÓDULOS */}
                                         <div className="space-y-4">
                                             <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2"><Lock size={16}/> Acceso a Módulos</h4>
@@ -422,7 +423,7 @@ export function OpsSettings() {
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <p className="text-[10px] text-orange-600 leading-tight pr-2">Ver Dashboard global.</p>
-                                                        <Switch checked={permissions.ops.accessMetrics} onCheckedChange={() => togglePermission('accessMetrics')} className="data-[state=checked]:bg-orange-600"/>
+                                                        <Switch checked={permissions.accessMetrics} onCheckedChange={() => togglePermission('accessMetrics')} className="data-[state=checked]:bg-orange-600"/>
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-col justify-between p-4 bg-green-50 border border-green-100 rounded-lg h-full">
@@ -432,7 +433,7 @@ export function OpsSettings() {
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <p className="text-[10px] text-green-600 leading-tight pr-2">Ver dinero y liquidaciones.</p>
-                                                        <Switch checked={permissions.ops.accessBilling} onCheckedChange={() => togglePermission('accessBilling')} className="data-[state=checked]:bg-green-600"/>
+                                                        <Switch checked={permissions.accessBilling} onCheckedChange={() => togglePermission('accessBilling')} className="data-[state=checked]:bg-green-600"/>
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-col justify-between p-4 bg-blue-50 border border-blue-100 rounded-lg h-full">
@@ -442,7 +443,7 @@ export function OpsSettings() {
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <p className="text-[10px] text-blue-600 leading-tight pr-2">Gestión de cartera y mora.</p>
-                                                        <Switch checked={permissions.ops.accessPostSale} onCheckedChange={() => togglePermission('accessPostSale')} className="data-[state=checked]:bg-blue-600"/>
+                                                        <Switch checked={permissions.accessPostSale} onCheckedChange={() => togglePermission('accessPostSale')} className="data-[state=checked]:bg-blue-600"/>
                                                     </div>
                                                 </div>
                                             </div>
@@ -455,19 +456,19 @@ export function OpsSettings() {
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                                                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                                                     <div><Label className="font-medium">Exportar Data</Label><p className="text-[10px] text-slate-500">Descargar Excel/CSV masivos.</p></div>
-                                                    <Switch checked={permissions.ops.exportData} onCheckedChange={() => togglePermission('exportData')}/>
+                                                    <Switch checked={permissions.exportData} onCheckedChange={() => togglePermission('exportData')}/>
                                                 </div>
                                                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                                                     <div><Label className="font-medium text-red-600">Eliminar Ventas</Label><p className="text-[10px] text-slate-500">Borrar registros permanentemente.</p></div>
-                                                    <Switch checked={permissions.ops.deleteSales} onCheckedChange={() => togglePermission('deleteSales')}/>
+                                                    <Switch checked={permissions.deleteSales} onCheckedChange={() => togglePermission('deleteSales')}/>
                                                 </div>
                                                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                                                     <div><Label className="font-medium">Editar Configuración</Label><p className="text-[10px] text-slate-500">Modificar prepagas, usuarios y reglas.</p></div>
-                                                    <Switch checked={permissions.ops.editSettings} onCheckedChange={() => togglePermission('editSettings')}/>
+                                                    <Switch checked={permissions.editSettings} onCheckedChange={() => togglePermission('editSettings')}/>
                                                 </div>
                                                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                                                     <div><Label className="font-medium">Asignar Casos</Label><p className="text-[10px] text-slate-500">Tomar o delegar operaciones.</p></div>
-                                                    <Switch checked={permissions.ops.assignCases} onCheckedChange={() => togglePermission('assignCases')}/>
+                                                    <Switch checked={permissions.assignCases} onCheckedChange={() => togglePermission('assignCases')}/>
                                                 </div>
                                             </div>
                                         </div>

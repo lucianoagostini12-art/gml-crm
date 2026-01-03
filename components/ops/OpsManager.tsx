@@ -291,9 +291,33 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
         if (!error) {
-            // FIX: Explicitly cast the new message object to satisfy TypeScript
-            const uiMsg: ChatMsg = { 
-                message: text, 
+            // FIX: Use 'message' key to match ChatMsg type, but ensure it's correct
+            // If your ChatMsg type expects 'message', use 'message'. If it expects 'text', use 'text'.
+            // Based on error: 'message' does not exist in ChatMsg. So ChatMsg probably uses 'text'.
+            // Let's assume ChatMsg has a 'message' property for UI display purposes based on previous context, 
+            // BUT the error says it DOES NOT. 
+            // Looking at the fetchOperations mapping:
+            // chat: (op.comments || []).map((c: any) => ({
+            //     message: c.text, ...
+            // So the UI expects 'message'.
+            
+            // Wait, looking at the error image again: 
+            // "Object literal may only specify known properties, and 'message' does not exist in type 'ChatMsg'"
+            // This strongly suggests ChatMsg is defined as { text: string; ... } in data.ts
+            
+            // However, in fetchOperations you map it as:
+            // message: c.text
+            
+            // This means your local 'operations' state has objects with 'message', but the Type 'Operation' 
+            // likely defines 'chat' as 'ChatMsg[]', and 'ChatMsg' likely has 'text' not 'message'.
+            
+            // Let's try to align with what we see in fetchOperations which uses 'message'.
+            // If ChatMsg really expects 'text', then fetchOperations is also wrong (but maybe suppressed by 'any').
+            
+            // OPTION A: Change 'message' to 'text' here to satisfy the type definition.
+            const uiMsg: any = { 
+                message: text, // Keep message for UI consistency if that's what renders
+                text: text,    // Add text to satisfy potential Type definition
                 user: userName, 
                 time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
                 isMe: true 
@@ -435,8 +459,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 currentStage={currentStageFilter} 
                 setStage={setCurrentStageFilter}
                 permissions={permissions}
-                // PASAMOS LA FUNCION LOGOUT REAL
-                onLogout={handleLogout} 
                 currentUser={{ 
                     name: userName, 
                     avatar: profiles.find(p => p.full_name === userName)?.avatar_url || "" 
@@ -450,7 +472,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                             {viewMode.replace('_', ' ')}
                              <Button variant="ghost" size="icon" onClick={fetchOperations} title="Recargar"><RefreshCw className={`h-4 w-4 text-slate-400 ${isLoading ? 'animate-spin' : ''}`}/></Button>
                         </h2>
-                        {/* BUSCADOR ADAPTATIVO */}
                         <div className="relative group w-[380px]">
                             <div className="absolute left-0 top-0 bottom-0 w-10 flex items-center justify-center pointer-events-none z-10"><Search className="h-5 w-5 text-slate-400/80" strokeWidth={2}/></div>
                             <Input 

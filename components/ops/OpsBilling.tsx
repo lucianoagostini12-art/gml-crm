@@ -12,7 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X } from "lucide-react"
+// --- CORRECCIÓN: Se agregó 'ArrowRight' a los imports ---
+import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight } from "lucide-react"
 import { Operation } from "./data"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 

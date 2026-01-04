@@ -17,11 +17,9 @@ type AnnouncementRow = {
     full_name: string | null
     email: string | null
     role: string | null
-  } | null
+  }[] | null
 }
 
-// ✅ Tus roles reales (según tu tabla profiles)
-// Agregá "ops_god" si lo usás / vas a usar
 const ALLOWED_AUTHOR_ROLES = ["admin_god", "supervisor_god", "ops_god"] as const
 
 export function AnnouncementsView() {
@@ -31,8 +29,9 @@ export function AnnouncementsView() {
   const fetchAnnouncements = async () => {
     const { data, error } = await supabase
       .from("announcements")
-      // ✅ columnas reales + join al profile del autor
-      .select("id, created_at, title, message, priority, is_blocking, author_id, profiles:author_id(full_name, email, role)")
+      .select(
+        "id, created_at, title, message, priority, is_blocking, author_id, profiles:author_id(full_name, email, role)"
+      )
       .order("created_at", { ascending: false })
       .limit(200)
 
@@ -43,10 +42,8 @@ export function AnnouncementsView() {
 
     const rows = (data ?? []) as AnnouncementRow[]
 
-    // ✅ Opción 3 (según tu sistema): ADMIN + OPS + SUPERVISION
-    // En tu DB hoy existen: admin_god, supervisor_god
     const filtered = rows.filter((a) => {
-      const role = (a.profiles?.role ?? "").toLowerCase()
+      const role = (a.profiles?.[0]?.role ?? "").toLowerCase()
       return (ALLOWED_AUTHOR_ROLES as readonly string[]).includes(role)
     })
 
@@ -56,21 +53,15 @@ export function AnnouncementsView() {
   useEffect(() => {
     fetchAnnouncements()
 
-    // ✅ Realtime: aparece sin refresh
     const channel = supabase
       .channel("rt_announcements_vendor")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "announcements" }, () => {
-        fetchAnnouncements()
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "announcements" }, () => {
-        fetchAnnouncements()
-      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "announcements" }, fetchAnnouncements)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "announcements" }, fetchAnnouncements)
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const formatDate = (iso: string | null) => {
@@ -79,10 +70,12 @@ export function AnnouncementsView() {
   }
 
   const safeAuthorName = (a: AnnouncementRow) => {
-    const full = a.profiles?.full_name?.trim()
+    const profile = a.profiles?.[0]
+
+    const full = profile?.full_name?.trim()
     if (full) return full
 
-    const email = a.profiles?.email?.trim()
+    const email = profile?.email?.trim()
     if (email) return email
 
     const id = a.author_id?.trim()
@@ -138,10 +131,12 @@ export function AnnouncementsView() {
             </CardHeader>
 
             <CardContent>
-              <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{ann.message}</p>
+              <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                {ann.message}
+              </p>
 
               <div className="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400 flex justify-end">
-                Publicado por: {safeAuthorName(ann)} ({normalizeRoleLabel(ann.profiles?.role)})
+                Publicado por: {safeAuthorName(ann)} ({normalizeRoleLabel(ann.profiles?.[0]?.role)})
               </div>
             </CardContent>
           </Card>

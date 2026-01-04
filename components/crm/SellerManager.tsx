@@ -31,6 +31,9 @@ import { AgendasView } from "@/components/crm/AgendasView"
 import { CreateLeadDialog } from "@/components/crm/CreateLeadDialog"
 import { LeadDetail } from "@/components/crm/LeadDetail"
 
+// ✅ IMPORTANTE: usamos el tipo Lead real que espera LeadDetail (viene de LeadCard)
+import type { Lead as CRMLead } from "@/components/crm/LeadCard"
+
 import { DashboardView } from "@/components/shared/DashboardView"
 import { AnnouncementsView } from "@/components/shared/AnnouncementsView"
 import { RankingsView } from "@/components/shared/RankingsView"
@@ -53,19 +56,6 @@ type AppNotification = {
   body: string | null
   read: boolean | null
   created_at: string | null
-}
-
-type Lead = {
-  id: string
-  name?: string | null
-  phone?: string | null
-  email?: string | null
-  source?: string | null
-  status?: string | null
-  assigned_to?: string | null
-  agent_name?: string | null
-  created_at?: string | null
-  [key: string]: any
 }
 
 export function SellerManager({
@@ -108,9 +98,8 @@ export function SellerManager({
 
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
 
-  // ✅ NUEVO: guardamos el lead completo porque LeadDetail espera `lead` (no `leadId`)
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  const [leadDetailLoading, setLeadDetailLoading] = useState(false)
+  // ✅ Ahora el lead seleccionado es del tipo REAL que espera LeadDetail/LeadCard
+  const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null)
 
   // Anti-spam auto-open
   const lastAutoOpenAtRef = useRef<number>(0)
@@ -215,7 +204,7 @@ export function SellerManager({
     }
   }, [currentUser])
 
-  // ✅ NUEVO: cuando cambia selectedLeadId, traemos el lead completo para pasarlo a LeadDetail como `lead`
+  // ✅ FIX REAL: cuando cambia selectedLeadId, traemos el lead y lo "adaptamos" al tipo CRMLead
   useEffect(() => {
     let alive = true
 
@@ -225,7 +214,6 @@ export function SellerManager({
         return
       }
 
-      setLeadDetailLoading(true)
       const { data, error } = await supabase
         .from("leads")
         .select("*")
@@ -234,13 +222,25 @@ export function SellerManager({
 
       if (!alive) return
 
-      if (error) {
+      if (error || !data) {
         console.error(error)
         setSelectedLead(null)
-      } else {
-        setSelectedLead((data as Lead) || null)
+        return
       }
-      setLeadDetailLoading(false)
+
+      const row: any = data
+
+      // Adaptamos snake_case -> camelCase y completamos defaults
+      const adapted: any = {
+        ...row,
+        createdAt: row.createdAt ?? row.created_at ?? null,
+        lastUpdate: row.lastUpdate ?? row.last_update ?? null,
+        agent: row.agent ?? row.agent_name ?? row.assigned_to ?? null,
+        calls: row.calls ?? 0,
+        intent: row.intent ?? null,
+      }
+
+      setSelectedLead(adapted as CRMLead)
     }
 
     fetchLead()
@@ -588,7 +588,7 @@ export function SellerManager({
         userName={currentUser}
       />
 
-      {/* ✅ FIX: LeadDetail recibe `lead`, no `leadId` */}
+      {/* ✅ FIX: LeadDetail recibe Lead del tipo correcto */}
       {selectedLeadId && (
         <LeadDetail
           lead={selectedLead}

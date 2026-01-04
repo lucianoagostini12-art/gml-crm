@@ -4,11 +4,12 @@ import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase"
 import { Loader2 } from "lucide-react"
 
-// --- IMPORTACIONES CORREGIDAS ---
-import { LoginView } from "@/components/auth/LoginView" // <--- CAMBIADO DE AuthLogin A LoginView
+// --- IMPORTACIONES ---
+import { LoginView } from "@/components/auth/LoginView"
 import { AdminDashboard } from "@/components/admin/AdminDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
-import { MySalesView } from "@/components/seller/MySalesView"
+import { SellerManager } from "@/components/crm/SellerManager" // <--- CAMBIADO
+import { SetterDashboard } from "@/components/setter/SetterDashboard"
 
 export default function Home() {
   const supabase = createClient()
@@ -18,7 +19,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // 1. Verificar sesión activa al cargar
+    // 1. Verificar sesión activa
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       setSession(session)
@@ -32,7 +33,7 @@ export default function Home() {
 
     checkSession()
 
-    // 2. Escuchar cambios (login/logout) en tiempo real
+    // 2. Escuchar cambios (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
@@ -47,7 +48,6 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // 3. Buscar el Rol REAL en la tabla 'profiles'
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -69,12 +69,11 @@ export default function Home() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    setRole(null)
-    setSession(null)
-    window.location.href = "/" // Recarga limpia para borrar estados de memoria
+    // Forzamos recarga para limpiar estados de memoria
+    window.location.href = "/" 
   }
 
-  // --- PANTALLA DE CARGA ---
+  // PANTALLA DE CARGA
   if (loading) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
@@ -84,31 +83,34 @@ export default function Home() {
     )
   }
 
-  // --- 1. LOGIN (Si no hay usuario) ---
+  // 1. LOGIN
   if (!session) {
-    // Usamos tu componente existente. 
-    // NOTA: Asegurate de que LoginView haga el 'supabase.auth.signInWithPassword'.
-    // Al hacerlo, el 'onAuthStateChange' de arriba detectará el login automáticamente.
     return <LoginView />
   }
 
-  // --- 2. RUTEO SEGÚN ROL (JERARQUÍA REAL) ---
+  // 2. RUTEO DE ROLES
 
-  // A. SUPERVISIÓN GOD -> Torre de Control Total
+  // A. SUPERVISIÓN GOD
   if (role === "supervisor_god") {
     return <AdminDashboard onLogout={handleLogout} />
   }
 
-  // B. ADMINISTRACIÓN (GOD y COMÚN) -> Tablero Operativo
-  if (role === "admin_god" || role === "admin_common") {
+  // B. ADMINISTRACIÓN (GOD y COMÚN)
+  if (role === "admin_god" || role === "admin_common" || role === "ops") {
     return <OpsManager role={role as any} userName={userName} />
   }
 
-  // C. VENDEDORAS -> Panel de Ventas
-  if (role === "seller") {
-    return <MySalesView />
+  // C. SETTER (GESTORA DE LEADS)
+  if (role === "setter") {
+    return <SetterDashboard /> 
   }
 
-  // D. DEFAULT (Rol nuevo o desconocido) -> Panel Vendedor por seguridad
-  return <MySalesView />
+  // D. VENDEDORAS
+  if (role === "seller") {
+    // CAMBIO CLAVE: Llamamos al Manager para que dibuje el Sidebar
+    return <SellerManager userName={userName} onLogout={handleLogout} />
+  }
+
+  // Default: Por seguridad mandamos al SellerManager
+  return <SellerManager userName={userName} onLogout={handleLogout} />
 }

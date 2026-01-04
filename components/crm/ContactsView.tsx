@@ -1,122 +1,193 @@
 "use client"
 
 import { useState, useEffect } from "react"
-// 1. CORRECCIÓN: Importamos la función correcta
 import { createClient } from "@/lib/supabase"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search } from "lucide-react"
+import { Search, RefreshCw, Filter, ArrowUpRight } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 
-// 2. Aceptamos el nombre del usuario real
 export function ContactsView({ userName }: { userName?: string }) {
-    // 3. Iniciamos la conexión a Supabase
     const supabase = createClient()
-
     const [contacts, setContacts] = useState<any[]>([])
+    const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState("")
+    const [statusFilter, setStatusFilter] = useState("all")
 
-    // Usamos el nombre real (o Maca por defecto para evitar errores)
-    const CURRENT_USER = userName || "Maca" 
+    // Si no viene usuario, usamos "Maca" por defecto para evitar pantallas blancas
+    const CURRENT_USER = userName || "Maca"
+
+    // --- CARGA DE DATOS ---
+    const fetchContacts = async () => {
+        setLoading(true)
+        const { data, error } = await supabase
+            .from('leads')
+            .select('*')
+            .eq('agent_name', CURRENT_USER)
+            .order('last_update', { ascending: false }) // Ordenar por movimiento más reciente
+        
+        if (data) setContacts(data)
+        setLoading(false)
+    }
 
     useEffect(() => {
-        const fetchContacts = async () => {
-            const { data } = await supabase
-                .from('leads')
-                .select('*')
-                .eq('agent_name', CURRENT_USER) 
-                .order('created_at', { ascending: false })
-            
-            if (data) setContacts(data)
-        }
         fetchContacts()
+
+        // Suscripción Realtime: Si un Admin te devuelve un caso o cambia algo, lo ves al instante
+        const channel = supabase.channel('contacts_view_realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
+                fetchContacts()
+            })
+            .subscribe()
+
+        return () => { supabase.removeChannel(channel) }
     }, [CURRENT_USER])
 
-    const filtered = contacts.filter(c => 
-        c.name.toLowerCase().includes(search.toLowerCase()) || 
-        (c.phone && c.phone.includes(search))
-    )
-
+    // --- LOGICA DE CAMBIO DE ESTADO ---
     const changeStatus = async (id: string, newStatus: string) => {
-        const confirm = window.confirm(`¿Mover este cliente a "${newStatus}"?`)
-        if (!confirm) return
+        // Actualizamos optimísticamente la UI para que se sienta rápido
+        setContacts(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c))
 
-        await supabase.from('leads').update({ 
+        const { error } = await supabase.from('leads').update({ 
             status: newStatus,
             last_update: new Date().toISOString()
         }).eq('id', id)
 
-        window.location.reload()
+        if (error) {
+            alert("Error al actualizar. Refrescando...")
+            fetchContacts()
+        }
+    }
+
+    // --- FILTROS ---
+    const filtered = contacts.filter(c => {
+        const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone && c.phone.includes(search))
+        const matchesStatus = statusFilter === "all" ? true : c.status === statusFilter
+        return matchesSearch && matchesStatus
+    })
+
+    // Helper para mostrar la prepaga correcta (Final o Cotizada)
+    const getDisplayPrepaga = (c: any) => {
+        if (c.prepaga && c.prepaga !== "Generica") return c.prepaga
+        if (c.quoted_prepaga) return c.quoted_prepaga + " (Cotiz)"
+        return "-"
     }
 
     return (
-        <div className="p-6 h-full overflow-y-auto">
-            <div className="max-w-6xl mx-auto">
-                <div className="flex flex-col gap-2 mb-6">
-                    <h2 className="text-xl font-bold text-slate-800 dark:text-white">Mi Archivo Histórico</h2>
-                    <p className="text-sm text-slate-500">Gestionando datos de: <span className="font-bold text-blue-600">{CURRENT_USER}</span></p>
-                    
-                    <div className="relative mt-2">
-                        <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                        <Input 
-                            placeholder="Buscar en mis perdidos/vendidos..." 
-                            className="pl-10 bg-white shadow-sm"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
+        <div className="p-6 h-full overflow-y-auto w-full bg-slate-50 dark:bg-slate-950">
+            <div className="max-w-6xl mx-auto space-y-6">
+                
+                {/* HEADER */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-2xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                            🗂️ Archivo Histórico
+                        </h2>
+                        <p className="text-sm text-slate-500">
+                            Base de datos personal de: <span className="font-bold text-blue-600">{CURRENT_USER}</span>
+                        </p>
+                    </div>
+                    <div className="flex gap-2">
+                        <div className="relative w-full md:w-64">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                            <Input 
+                                placeholder="Buscar nombre o teléfono..." 
+                                className="pl-9 bg-white shadow-sm"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                            />
+                        </div>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-[160px] bg-white shadow-sm">
+                                <div className="flex items-center gap-2 text-slate-600"><Filter size={14}/> <SelectValue /></div>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos</SelectItem>
+                                <SelectItem value="vendido">✅ Vendidos</SelectItem>
+                                <SelectItem value="perdido">❌ Perdidos</SelectItem>
+                                <SelectItem value="contactado">📞 En Seguimiento</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="icon" onClick={fetchContacts} disabled={loading}>
+                            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>
+                        </Button>
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 rounded-lg shadow border border-slate-200 dark:border-slate-800 overflow-hidden">
+                {/* TABLA DE DATOS */}
+                <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-medium border-b">
+                        <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-bold uppercase text-xs border-b tracking-wider">
                             <tr>
                                 <th className="p-4">Cliente</th>
                                 <th className="p-4">Estado Actual</th>
-                                <th className="p-4">Prepaga</th>
-                                <th className="p-4">Notas / Motivo</th>
-                                <th className="p-4 text-right">Mover a...</th>
+                                <th className="p-4">Prepaga / Plan</th>
+                                <th className="p-4">Notas / Último Movimiento</th>
+                                <th className="p-4 text-right">Recuperar / Mover</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {filtered.map(contact => (
-                                <tr key={contact.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                    <td className="p-4">
-                                        <p className="font-bold text-slate-800 dark:text-white">{contact.name}</p>
-                                        <p className="text-xs text-slate-500">{contact.phone}</p>
-                                    </td>
-                                    <td className="p-4">
-                                        <Badge variant="outline" className={`
-                                            ${contact.status === 'vendido' ? 'bg-green-50 text-green-700 border-green-200' : ''}
-                                            ${contact.status === 'perdido' ? 'bg-red-50 text-red-700 border-red-200' : ''}
-                                            ${!['vendido','perdido'].includes(contact.status) ? 'bg-blue-50 text-blue-700' : ''}
-                                        `}>
-                                            {contact.status.toUpperCase()}
-                                        </Badge>
-                                    </td>
-                                    <td className="p-4 text-slate-500">{contact.prepaga}</td>
-                                    <td className="p-4 text-slate-500 text-xs max-w-[200px] truncate">
-                                        {contact.loss_reason ? `Perdido: ${contact.loss_reason}` : (contact.notes || '-')}
-                                    </td>
-                                    <td className="p-4 text-right">
-                                        <div className="flex justify-end">
-                                            <Select onValueChange={(val) => changeStatus(contact.id, val)}>
-                                                <SelectTrigger className="w-[140px] h-8 text-xs">
-                                                    <SelectValue placeholder="Cambiar Estado" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="nuevo">📥 Sin Trabajar</SelectItem>
-                                                    <SelectItem value="contactado">📞 En Contacto</SelectItem>
-                                                    <SelectItem value="cotizacion">💲 Cotizando</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
+                            {filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={5} className="p-10 text-center text-slate-400 italic">
+                                        {loading ? "Cargando tu historial..." : "No se encontraron registros con estos filtros."}
                                     </td>
                                 </tr>
-                            ))}
+                            ) : (
+                                filtered.map(contact => (
+                                    <tr key={contact.id} className="hover:bg-blue-50/50 dark:hover:bg-slate-800/50 transition-colors group">
+                                        <td className="p-4">
+                                            <p className="font-bold text-slate-800 dark:text-white text-base">{contact.name}</p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className="text-xs font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{contact.phone}</span>
+                                                <span className="text-[10px] text-slate-400 bg-slate-50 border px-1 rounded">{contact.source || "Base"}</span>
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <Badge variant="outline" className={`
+                                                uppercase font-bold text-[10px] tracking-wide
+                                                ${contact.status === 'vendido' ? 'bg-green-100 text-green-700 border-green-200' : ''}
+                                                ${contact.status === 'perdido' ? 'bg-red-50 text-red-600 border-red-200' : ''}
+                                                ${contact.status === 'contactado' ? 'bg-blue-50 text-blue-600 border-blue-200' : ''}
+                                                ${['nuevo', 'dato'].includes(contact.status) ? 'bg-slate-100 text-slate-600' : ''}
+                                            `}>
+                                                {contact.status}
+                                            </Badge>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="font-medium text-slate-700 dark:text-slate-300">{getDisplayPrepaga(contact)}</div>
+                                            {contact.plan && <div className="text-xs text-slate-500">{contact.plan}</div>}
+                                        </td>
+                                        <td className="p-4 max-w-[250px]">
+                                            <p className="text-slate-600 text-xs truncate font-medium" title={contact.notes}>
+                                                {contact.notes || contact.loss_reason || "-"}
+                                            </p>
+                                            <p className="text-[10px] text-slate-400 mt-1">
+                                                Act: {new Date(contact.last_update).toLocaleDateString()}
+                                            </p>
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <Select onValueChange={(val) => changeStatus(contact.id, val)}>
+                                                    <SelectTrigger className="w-[150px] h-8 text-xs bg-white border-slate-300 focus:ring-blue-500">
+                                                        <div className="flex items-center gap-2"><ArrowUpRight size={12}/> <SelectValue placeholder="Cambiar Estado" /></div>
+                                                    </SelectTrigger>
+                                                    <SelectContent align="end">
+                                                        <SelectItem value="nuevo">📥 Mover a Bandeja</SelectItem>
+                                                        <SelectItem value="contactado">📞 Reactivar (Seguimiento)</SelectItem>
+                                                        <SelectItem value="cotizacion">💲 Enviar a Cotización</SelectItem>
+                                                        <div className="border-t my-1"></div>
+                                                        <SelectItem value="perdido" className="text-red-600">❌ Marcar Perdido</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
-                    {filtered.length === 0 && <div className="p-10 text-center text-slate-400">No tenés datos archivados con este nombre.</div>}
                 </div>
             </div>
         </div>

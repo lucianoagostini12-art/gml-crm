@@ -55,6 +55,19 @@ type AppNotification = {
   created_at: string | null
 }
 
+type Lead = {
+  id: string
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  source?: string | null
+  status?: string | null
+  assigned_to?: string | null
+  agent_name?: string | null
+  created_at?: string | null
+  [key: string]: any
+}
+
 export function SellerManager({
   userName,
   onLogout,
@@ -94,6 +107,10 @@ export function SellerManager({
   const [isAlertsOpen, setIsAlertsOpen] = useState(false)
 
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
+
+  // ✅ NUEVO: guardamos el lead completo porque LeadDetail espera `lead` (no `leadId`)
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [leadDetailLoading, setLeadDetailLoading] = useState(false)
 
   // Anti-spam auto-open
   const lastAutoOpenAtRef = useRef<number>(0)
@@ -197,6 +214,41 @@ export function SellerManager({
       if (quotesChannel) supabase.removeChannel(quotesChannel)
     }
   }, [currentUser])
+
+  // ✅ NUEVO: cuando cambia selectedLeadId, traemos el lead completo para pasarlo a LeadDetail como `lead`
+  useEffect(() => {
+    let alive = true
+
+    const fetchLead = async () => {
+      if (!selectedLeadId) {
+        setSelectedLead(null)
+        return
+      }
+
+      setLeadDetailLoading(true)
+      const { data, error } = await supabase
+        .from("leads")
+        .select("*")
+        .eq("id", selectedLeadId)
+        .maybeSingle()
+
+      if (!alive) return
+
+      if (error) {
+        console.error(error)
+        setSelectedLead(null)
+      } else {
+        setSelectedLead((data as Lead) || null)
+      }
+      setLeadDetailLoading(false)
+    }
+
+    fetchLead()
+
+    return () => {
+      alive = false
+    }
+  }, [selectedLeadId])
 
   const handleCreateConfirm = async (_data: any) => {
     setIsCreateOpen(false)
@@ -536,12 +588,16 @@ export function SellerManager({
         userName={currentUser}
       />
 
+      {/* ✅ FIX: LeadDetail recibe `lead`, no `leadId` */}
       {selectedLeadId && (
         <LeadDetail
-          leadId={selectedLeadId}
+          lead={selectedLead}
           open={!!selectedLeadId}
           onOpenChange={(open) => {
-            if (!open) setSelectedLeadId(null)
+            if (!open) {
+              setSelectedLeadId(null)
+              setSelectedLead(null)
+            }
           }}
         />
       )}

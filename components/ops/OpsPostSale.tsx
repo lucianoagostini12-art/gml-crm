@@ -12,11 +12,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, Save, Pencil, LayoutList, Users, RefreshCw } from "lucide-react"
+import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, Save, Pencil, LayoutList, Users, RefreshCw, Trash2, Undo2 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
-// --- HELPERS COLORES (Igual que antes) ---
+// --- HELPERS COLORES ---
 const getFinancialColor = (status: string) => {
     switch(status) {
         case 'SIN MORA': return "bg-green-100 text-green-700 ring-green-600/20"
@@ -46,6 +46,9 @@ export function OpsPostSale() {
     
     // --- ESTADO PARA EDICIÓN (MODAL) ---
     const [editingClient, setEditingClient] = useState<any>(null)
+    
+    // --- ESTADO PARA ELIMINAR DE CARTERA ---
+    const [clientToRemove, setClientToRemove] = useState<any>(null)
 
     // --- FILTROS AVANZADOS ---
     const [filters, setFilters] = useState({
@@ -57,37 +60,36 @@ export function OpsPostSale() {
     })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     
-    // --- 1. CARGA DE DATOS REALES ---
+    // --- 1. CARGA DE DATOS REALES (FILTRO CORREGIDO) ---
     const fetchPortfolio = async () => {
         setLoading(true)
-        // Traemos solo los que ya son clientes (vendido, cumplidas, etc)
-        // Ajustá el filtro .in() según tus estados de "venta cerrada"
+        // AHORA FILTRAMOS POR 'cumplidas' Y ADEMÁS QUE HAYA PASADO POR FACTURACIÓN
         const { data, error } = await supabase
             .from('leads')
             .select('*')
-            .in('status', ['vendido', 'cumplidas', 'ingresado', 'legajo', 'medicas']) 
+            .eq('status', 'cumplidas') // Solo los aprobados por Ops
+            .eq('billing_approved', true) // Y aprobados por Facturación
             .order('created_at', { ascending: false })
 
         if (data) {
-            // Mapeamos los campos de DB a la estructura visual
             const mappedClients = data.map((c: any) => ({
                 id: c.id,
                 name: c.name || "Sin Nombre",
                 dni: c.dni || "-",
-                dob: c.dob || "2000-01-01", // Default para evitar errores de fecha
+                dob: c.dob || "2000-01-01", 
                 prepaga: c.prepaga || c.quoted_prepaga || "Sin Asignar",
                 plan: c.plan || c.quoted_plan || "-",
                 price: c.price || c.quoted_price || 0,
                 seller: c.agent_name || "Desconocido",
                 saleDate: new Date(c.created_at).toISOString().split('T')[0],
-                activationDate: c.activation_date || "-", // Campo nuevo en DB
+                activationDate: c.activation_date || "-", 
                 financialStatus: c.financial_status || "SIN MORA",
                 actionStatus: c.action_status || "OK",
                 province: c.province || "Sin Datos",
                 zip: c.zip || "-",
                 observations: c.notes || "",
-                condicionLaboral: "Monotributo", // Podrías agregarlo a DB si falta
-                hijos: [] // Podrías mapear hijos si tenés esa estructura JSON
+                condicionLaboral: c.labor_condition || "Monotributo", 
+                hijos: [] 
             }))
             setClients(mappedClients)
         }
@@ -100,10 +102,8 @@ export function OpsPostSale() {
 
     // --- ACTUALIZAR EN BASE DE DATOS ---
     const updateClientInDb = async (id: string, updates: any) => {
-        // Optimistic UI Update
         setClients(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
         
-        // Mapeo inverso para DB
         const dbUpdates: any = {}
         if (updates.financialStatus) dbUpdates.financial_status = updates.financialStatus
         if (updates.actionStatus) dbUpdates.action_status = updates.actionStatus
@@ -115,15 +115,29 @@ export function OpsPostSale() {
         if (updates.activationDate) dbUpdates.activation_date = updates.activationDate
         if (updates.province) dbUpdates.province = updates.province
         if (updates.zip) dbUpdates.zip = updates.zip
-        if (updates.observations) dbUpdates.notes = updates.observations // Guardamos en notas
+        if (updates.observations) dbUpdates.notes = updates.observations 
 
         await supabase.from('leads').update(dbUpdates).eq('id', id)
+    }
+
+    // --- ELIMINAR DE CARTERA (Volver a Demoras) ---
+    const handleRemoveFromPortfolio = async () => {
+        if (!clientToRemove) return
+        
+        // Lo sacamos de 'billing_approved' y lo devolvemos a 'demoras'
+        await supabase.from('leads').update({ 
+            status: 'demoras',
+            billing_approved: false, // Importante: invalidar la aprobación de facturación
+            notes: (clientToRemove.observations || "") + "\n[SISTEMA]: Sacado de cartera postventa."
+        }).eq('id', clientToRemove.id)
+        
+        setClients(prev => prev.filter(c => c.id !== clientToRemove.id))
+        setClientToRemove(null)
     }
 
     // HANDLERS
     const handleSaveClient = () => {
         if (!editingClient) return
-        // Guardamos todo el objeto editado
         updateClientInDb(editingClient.id, editingClient)
         setEditingClient(null)
     }
@@ -190,7 +204,6 @@ export function OpsPostSale() {
     // --- DATOS PARA DROPDOWNS FILTRO ---
     const uniqueSellers = Array.from(new Set(clients.map(c => c.seller))).filter(Boolean)
     const uniquePrepagas = Array.from(new Set(clients.map(c => c.prepaga))).filter(Boolean)
-    const uniqueProvinces = Array.from(new Set(clients.map(c => c.province))).filter(Boolean)
     const activeFiltersCount = Object.values(filters).filter(v => v !== "all").length
 
     const getWhatsAppLink = (client: any) => {
@@ -321,7 +334,6 @@ export function OpsPostSale() {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                {/* Resto de filtros conectados al estado 'filters' igual que antes... */}
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Vendedor</label>
                                     <Select value={filters.seller} onValueChange={v => setFilters({...filters, seller: v})}>
@@ -360,7 +372,7 @@ export function OpsPostSale() {
                             {loading ? (
                                 <TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400">Cargando cartera...</TableCell></TableRow>
                             ) : filteredClients.length === 0 ? (
-                                <TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400">No se encontraron clientes.</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400">No se encontraron clientes activos.</TableCell></TableRow>
                             ) : filteredClients.map((client) => (
                                 <TableRow 
                                     key={client.id} 
@@ -478,8 +490,15 @@ export function OpsPostSale() {
             <Dialog open={!!editingClient} onOpenChange={() => setEditingClient(null)}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2"><Pencil size={16} className="text-blue-600"/> Editar Ficha: {editingClient?.name}</DialogTitle>
-                        <DialogDescription>Modificar datos de la póliza o agregar observaciones.</DialogDescription>
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <DialogTitle className="flex items-center gap-2"><Pencil size={16} className="text-blue-600"/> Editar Ficha: {editingClient?.name}</DialogTitle>
+                                <DialogDescription>Modificar datos de la póliza o agregar observaciones.</DialogDescription>
+                            </div>
+                            <Button variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 text-xs gap-1" onClick={() => { setClientToRemove(editingClient); setEditingClient(null); }}>
+                                <Trash2 size={14} /> Sacar de Cartera
+                            </Button>
+                        </div>
                     </DialogHeader>
                     
                     {editingClient && (
@@ -511,6 +530,23 @@ export function OpsPostSale() {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setEditingClient(null)}>Cancelar</Button>
                         <Button onClick={handleSaveClient} className="bg-blue-600 hover:bg-blue-700 text-white gap-2"><Save size={14}/> Guardar Cambios</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* MODAL CONFIRMACIÓN ELIMINAR */}
+            <Dialog open={!!clientToRemove} onOpenChange={() => setClientToRemove(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <div className="mx-auto bg-red-100 p-3 rounded-full w-fit mb-3"><Undo2 className="h-6 w-6 text-red-600"/></div>
+                        <DialogTitle className="text-center text-lg font-bold">¿Sacar de Cartera?</DialogTitle>
+                        <DialogDescription className="text-center">
+                            El cliente <b>{clientToRemove?.name}</b> volverá al estado <b>"Demoras"</b> en la mesa de entrada de Operaciones.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="sm:justify-center gap-2">
+                        <Button variant="ghost" onClick={() => setClientToRemove(null)}>Cancelar</Button>
+                        <Button variant="destructive" onClick={handleRemoveFromPortfolio}>Confirmar Retiro</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

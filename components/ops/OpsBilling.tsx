@@ -11,8 +11,9 @@ import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2 } from "lucide-react"
+import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2, ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 // --- TIPOS ---
@@ -48,7 +49,8 @@ const SELLERS_DB: Record<string, { shift: '5hs' | '8hs', photo: string }> = {
     "Abru": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Abru" }
 }
 
-const COMMISSION_RULES = {
+// --- ESTADO INICIAL DE REGLAS (Para poder editarlas) ---
+const INITIAL_COMMISSION_RULES = {
     special: { plans: ['A1', '500', 'AMPF'], percentage: 0.10 },
     scales: {
         '5hs': { 
@@ -72,7 +74,7 @@ const COMMISSION_RULES = {
     }
 }
 
-const DEFAULT_RULES = {
+const INITIAL_CALC_RULES = {
     taxRate: 0.10,
     prevencionVat: 0.21,
     doctoRed: { base: 1.80, specialPlan: '500' },
@@ -106,15 +108,22 @@ const getCurrentMonth = () => {
 export function OpsBilling() {
     const supabase = createClient()
     
-    // --- ESTADO DE DATOS (Fetch propio) ---
+    // --- ESTADO DE DATOS ---
     const [operations, setOperations] = useState<Operation[]>([])
     const [loading, setLoading] = useState(true)
 
     const [activeTab, setActiveTab] = useState("audit") 
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
     const [isLocked, setIsLocked] = useState(false)
-    const [rules, setRules] = useState(DEFAULT_RULES)
+    
+    // Configuración Editable
+    const [calcRules, setCalcRules] = useState(INITIAL_CALC_RULES)
+    const [commissionRules, setCommissionRules] = useState(INITIAL_COMMISSION_RULES)
     const [showConfig, setShowConfig] = useState(false)
+    const [showHistory, setShowHistory] = useState(false)
+    
+    // Estados Diferir
+    const [deferOpId, setDeferOpId] = useState<string | null>(null)
     
     // --- DATOS REALES (Manual Portfolio) ---
     const [manualPortfolio, setManualPortfolio] = useState<any[]>([]) 
@@ -134,8 +143,6 @@ export function OpsBilling() {
     // --- CARGAR DATOS DESDE SUPABASE ---
     const fetchData = async () => {
         setLoading(true)
-        // 1. Traer Ventas CUMPLIDAS (status = cumplidas)
-        // Mapeamos los campos de la BD a la estructura que usa el componente
         const { data: opsData } = await supabase
             .from('leads')
             .select('*')
@@ -152,13 +159,12 @@ export function OpsBilling() {
                 seller: d.agent_name,
                 prepaga: d.company_name || d.health_insurance || d.prepaga,
                 plan: d.plan_type || d.plan,
-                fullPrice: d.price || d.full_price || "0", // Usamos el que esté disponible
+                fullPrice: d.price || d.full_price || "0",
                 aportes: d.aportes || "0",
                 descuento: d.descuento || "0",
                 status: d.status,
                 condicionLaboral: d.employment_status,
-                hijos: d.family_members || d.hijos || [], // Compatible con ambos nombres de columna
-                // Billing fields
+                hijos: d.family_members || d.hijos || [],
                 billing_approved: d.billing_approved,
                 billing_period: d.billing_period,
                 billing_price_override: d.billing_price_override,
@@ -167,7 +173,6 @@ export function OpsBilling() {
             setOperations(mapped)
         }
 
-        // 2. Traer Manual Portfolio
         const { data: manualData } = await supabase.from('billing_manual_clients').select('*').order('created_at', { ascending: false })
         if (manualData) setManualPortfolio(manualData)
         
@@ -177,7 +182,6 @@ export function OpsBilling() {
     useEffect(() => {
         fetchData()
         
-        // Suscripción a cambios en tiempo real
         const channel = supabase.channel('billing_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: 'status=eq.cumplidas' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchData())
@@ -188,10 +192,7 @@ export function OpsBilling() {
 
     // --- UPDATER A BASE DE DATOS ---
     const updateOpBilling = async (id: string, updates: any) => {
-        // Optimistic update local
         setOperations(prev => prev.map(op => op.id === id ? { ...op, ...updates } : op))
-        
-        // Update Real
         await supabase.from('leads').update(updates).eq('id', id)
     }
 
@@ -199,7 +200,6 @@ export function OpsBilling() {
     const calculate = (op: any) => {
         let val = 0, formula = ""
         
-        // Prioridad: 1. Override DB, 2. Cálculo
         if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
             val = parseFloat(op.billing_price_override.toString())
             formula = "Manual (Editado)"
@@ -211,20 +211,20 @@ export function OpsBilling() {
 
             if (p.includes("preven")) {
                 const base = full - desc
-                const rate = rules.prevencion.default 
+                const rate = calcRules.prevencion.default 
                 val = base * rate
                 formula = `(Full - Desc) * ${rate*100}%`
             } else if (p.includes("ampf")) {
-                val = full * rules.ampf.multiplier
-                formula = `Full * ${rules.ampf.multiplier}`
+                val = full * calcRules.ampf.multiplier
+                formula = `Full * ${calcRules.ampf.multiplier}`
             } else {
-                let base = full * (1 - rules.taxRate)
-                formula = `(Full - ${rules.taxRate*100}%) * 180%`
+                let base = full * (1 - calcRules.taxRate)
+                formula = `(Full - ${calcRules.taxRate*100}%) * 180%`
                 if (p.includes("doctored") && op.condicionLaboral === 'empleado') {
-                    base = aportes * (1 - rules.taxRate)
-                    formula = `(Aportes - ${rules.taxRate*100}%) * 180%`
+                    base = aportes * (1 - calcRules.taxRate)
+                    formula = `(Aportes - ${calcRules.taxRate*100}%) * 180%`
                 }
-                val = base * rules.doctoRed.base
+                val = base * calcRules.doctoRed.base
             }
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
@@ -233,35 +233,59 @@ export function OpsBilling() {
         if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
              portfolioVal = parseFloat(op.billing_portfolio_override.toString())
         } else {
-             portfolioVal = Math.round(val * rules.portfolioRate)
+             portfolioVal = Math.round(val * calcRules.portfolioRate)
         }
 
         return { val: Math.round(val), formula, portfolio: portfolioVal }
     }
 
+    // --- LOGICA DE PERIODO INTELIGENTE ---
+    const changeMonth = (delta: number) => {
+        const [y, m] = selectedMonth.split('-').map(Number)
+        const date = new Date(y, m - 1 + delta, 1)
+        const newMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+        setSelectedMonth(newMonth)
+    }
+
+    const formatMonth = (isoMonth: string) => {
+        const [y, m] = isoMonth.split('-').map(Number)
+        const date = new Date(y, m - 1, 1)
+        return date.toLocaleString('es-ES', { month: 'long', year: 'numeric' })
+    }
+
     // --- LOGICA DE DATOS (Filtrado) ---
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
-            // Chequear si tiene un mes diferido en DB, sino usar fecha de venta (created_at)
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
-            
             const targetMonth = op.billing_period || defaultMonth
             
             if (targetMonth !== selectedMonth) return false
-            
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
             return true
         })
     }, [operations, selectedMonth, filters])
 
-    // --- FILTRADO DE PESTAÑAS (CORREGIDO) ---
-    // Pending: Todo lo que NO sea explícitamente true (false o null)
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
-    
-    // Approved: Solo lo que explícitamente sea true
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
+
+    // --- HISTORIAL ANUAL (Agregación) ---
+    const historyData = useMemo(() => {
+        const aggregated: Record<string, number> = {}
+        operations.forEach(op => {
+            if (op.billing_approved === true) {
+                const opDate = new Date(op.entryDate)
+                const month = op.billing_period || `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
+                const val = calculate(op).val
+                aggregated[month] = (aggregated[month] || 0) + val
+            }
+        })
+        return Object.entries(aggregated)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([month, total]) => ({ month, total }))
+            .slice(-12) // Últimos 12 meses
+    }, [operations, calcRules]) // Depende de operations y reglas
 
     // --- TOTALES ---
     const { totalNeto, totalPreve, totalMutual, totalXP, totalIVA } = useMemo(() => {
@@ -274,19 +298,17 @@ export function OpsBilling() {
             else if (p.includes("ampf")) mutual += val
             else xp += val
         })
-        const iva = preve * rules.prevencionVat
+        const iva = preve * calcRules.prevencionVat
         return { totalNeto: neto, totalPreve: preve, totalMutual: mutual, totalXP: xp, totalIVA: iva }
-    }, [approvedOps, rules])
+    }, [approvedOps, calcRules])
 
     const totalBilling = totalNeto + totalIVA
 
     // --- PORTFOLIO ---
     const portfolioOps = approvedOps.reduce((acc, op) => op.prepaga?.toLowerCase().includes('preven') ? acc + calculate(op).portfolio : acc, 0)
-    
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => {
-         return acc + (parseFloat(item.calculated_liquidation || item.calculatedLiquidation || "0") * rules.portfolioRate)
+         return acc + (parseFloat(item.calculated_liquidation || item.calculatedLiquidation || "0") * calcRules.portfolioRate)
     }, 0)
-    
     const totalPortfolio = portfolioOps + portfolioManualTotal
 
     // --- COMISIONES VENDEDORAS ---
@@ -298,20 +320,19 @@ export function OpsBilling() {
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
             const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
-            const shiftRules = COMMISSION_RULES.scales[sellerInfo.shift]
+            const shiftRules = commissionRules.scales[sellerInfo.shift] // Usa el estado
             
             let specialCommission = 0
             let variableCommission = 0
             let specialCount = 0
-            
             const variableOps: Operation[] = []
             
             ops.forEach(op => {
                 const plan = op.plan?.toUpperCase() || ""
-                const isSpecial = COMMISSION_RULES.special.plans.some(p => plan.includes(p))
+                const isSpecial = commissionRules.special.plans.some(p => plan.includes(p))
                 
                 if (isSpecial) {
-                    specialCommission += calculate(op).val * COMMISSION_RULES.special.percentage
+                    specialCommission += calculate(op).val * commissionRules.special.percentage
                     specialCount++
                 } else {
                     variableOps.push(op)
@@ -319,7 +340,6 @@ export function OpsBilling() {
             })
 
             variableOps.sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
-
             const totalVariableCount = variableOps.length
             const absorbableCount = shiftRules.absorbable
             const payableOps = variableOps.slice(absorbableCount) 
@@ -329,7 +349,6 @@ export function OpsBilling() {
             if (payableCount > 0) {
                 const tier = shiftRules.tiers.find(t => totalVariableCount >= t.min && totalVariableCount <= t.max)
                 scalePercentage = tier ? tier.pct : 0
-                
                 const totalLiquidatedPayable = payableOps.reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedPayable * scalePercentage
             }
@@ -349,7 +368,7 @@ export function OpsBilling() {
             })
         })
         return result.sort((a, b) => b.total - a.total)
-    }, [approvedOps, rules])
+    }, [approvedOps, commissionRules, calcRules]) // Depende de reglas
 
     // --- HANDLERS ---
     const handlePriceChange = (id: string, newVal: string) => {
@@ -362,19 +381,23 @@ export function OpsBilling() {
         if (!isNaN(num)) updateOpBilling(id, { billing_portfolio_override: num })
     }
 
-    const moveToNextMonth = (id: string) => {
+    const confirmDefer = () => {
+        if (!deferOpId) return
         const [y, m] = selectedMonth.split('-').map(Number)
         const nextM = m === 12 ? 1 : m + 1
         const nextY = m === 12 ? y + 1 : y
         const nextStr = `${nextY}-${String(nextM).padStart(2,'0')}`
-        updateOpBilling(id, { billing_period: nextStr })
-    }
-    
-    const approveOp = (id: string) => {
-        // Al aprobar, se marca billing_approved = TRUE. 
-        updateOpBilling(id, { billing_approved: true })
+        updateOpBilling(deferOpId, { billing_period: nextStr })
+        setDeferOpId(null)
     }
 
+    const revertDefer = (id: string) => {
+        // Devuelve al mes original (NULL en billing_period usa created_at, o podríamos calcular el anterior)
+        // La forma más segura de "volver" es poner el billing_period en null para que use created_at
+        updateOpBilling(id, { billing_period: null })
+    }
+    
+    const approveOp = (id: string) => { updateOpBilling(id, { billing_approved: true }) }
     const unapproveOp = (id: string) => updateOpBilling(id, { billing_approved: false })
     
     const calculateManualLiquidation = () => {
@@ -389,53 +412,34 @@ export function OpsBilling() {
     const handleAddClient = async () => {
         if(!newClient.name) return
         const val = calculateManualLiquidation()
-        
         const { error } = await supabase.from('billing_manual_clients').insert({
-            name: newClient.name,
-            dni: newClient.dni,
-            prepaga: newClient.prepaga,
-            plan: newClient.plan,
-            full_price: parseFloat(newClient.fullPrice),
-            aportes: parseFloat(newClient.aportes),
-            descuento: parseFloat(newClient.descuento),
-            calculated_liquidation: val,
-            hijos: newClient.hijos
+            name: newClient.name, dni: newClient.dni, prepaga: newClient.prepaga, plan: newClient.plan, full_price: parseFloat(newClient.fullPrice), aportes: parseFloat(newClient.aportes), descuento: parseFloat(newClient.descuento), calculated_liquidation: val, hijos: newClient.hijos
         })
-
-        if (!error) {
-            setNewClient({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] })
-            setIsAddingClient(false)
-        }
+        if (!error) { setNewClient({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] }); setIsAddingClient(false) }
     }
 
     const uniqueSellers = Array.from(new Set(operations.map(o => o.seller)))
     const uniquePrepagas = Array.from(new Set(operations.map(o => o.prepaga).filter((p): p is string => !!p)))
 
-    // --- HELPER PARA DETALLE ---
     const getSellerOpsDetail = (sellerName: string | null) => {
         if (!sellerName) return []
-        
         const ops = approvedOps.filter((op: any) => op.seller === sellerName)
         const variableOps = ops.filter((op: any) => {
             const plan = op.plan?.toUpperCase() || ""
-            return !COMMISSION_RULES.special.plans.some(p => plan.includes(p))
+            return !commissionRules.special.plans.some(p => plan.includes(p))
         }).sort((a: any, b: any) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
 
         const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
-        const absorbLimit = COMMISSION_RULES.scales[sellerInfo.shift].absorbable
-
+        const absorbLimit = commissionRules.scales[sellerInfo.shift].absorbable
         const statusMap: Record<string, string> = {}
         ops.forEach((op: any) => {
             const plan = op.plan?.toUpperCase() || ""
-            if (COMMISSION_RULES.special.plans.some(p => plan.includes(p))) {
-                statusMap[op.id] = "special"
-            }
+            if (commissionRules.special.plans.some(p => plan.includes(p))) { statusMap[op.id] = "special" }
         })
         variableOps.forEach((op: any, index: number) => {
             if (index < absorbLimit) statusMap[op.id] = "absorbed"
             else statusMap[op.id] = "paid"
         })
-
         return ops.map((op: any) => ({ ...op, payStatus: statusMap[op.id] }))
     }
 
@@ -443,8 +447,8 @@ export function OpsBilling() {
 
     return (
         <div className="p-6 h-full flex flex-col gap-6 overflow-hidden max-w-[1900px] mx-auto pb-20">
-            {/* 1. HEADER */}
-            <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-slate-200 shadow-sm shrink-0">
+            {/* 1. HEADER REFORMULADO */}
+            <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200 shadow-sm shrink-0">
                 <div className="flex items-center gap-4 px-2">
                     <div className="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white"><DollarSign/></div>
                     <div>
@@ -455,34 +459,34 @@ export function OpsBilling() {
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <div className="flex items-center bg-slate-50 rounded-lg border border-slate-200 px-3 py-1.5 gap-3">
-                        <History size={16} className="text-slate-400"/>
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Período:</span>
-                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                            <SelectTrigger className="border-0 font-black bg-transparent focus:ring-0 h-auto p-0 text-slate-800 w-[140px] text-sm"><SelectValue/></SelectTrigger>
-                            <SelectContent align="end">
-                                {Array.from({length: 6}).map((_, i) => {
-                                    const d = new Date();
-                                    d.setMonth(d.getMonth() - i + 2);
-                                    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                                    const label = d.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-                                    return <SelectItem key={val} value={val} className="capitalize">{label}</SelectItem>
-                                })}
-                            </SelectContent>
-                        </Select>
+                
+                {/* 1. SELECTOR DE PERIODO INTELIGENTE */}
+                <div className="flex items-center gap-4 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-white hover:shadow-sm text-slate-500" onClick={() => changeMonth(-1)}>
+                        <ChevronLeft size={16}/>
+                    </Button>
+                    <div className="flex flex-col items-center w-36">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Período</span>
+                        <span className="text-sm font-black text-slate-800 capitalize leading-tight">{formatMonth(selectedMonth)}</span>
                     </div>
-                    <div className="h-8 w-px bg-slate-200 mx-2"></div>
-                    <Button variant="outline" size="sm" onClick={() => setShowConfig(!showConfig)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-white hover:shadow-sm text-slate-500" onClick={() => changeMonth(1)}>
+                        <ChevronRight size={16}/>
+                    </Button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    {/* 2. BOTÓN REGLAS FUNCIONAL */}
+                    <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}>
                         <Settings2 size={14} className="mr-2"/> Reglas
                     </Button>
+                    
                     <Button size="sm" variant={isLocked ? "secondary" : "default"} onClick={() => setIsLocked(!isLocked)} className="gap-2 font-bold min-w-[130px]">
                         {isLocked ? <><Lock size={14}/> Reabrir Mes</> : <><Save size={14}/> Cerrar Mes</>}
                     </Button>
                 </div>
             </div>
 
-            {/* 2. TABLERO DE TOTALES */}
+            {/* 2. TABLERO DE TOTALES (Con botón de historial) */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
                 <Card className="bg-slate-900 border-0 text-white shadow-xl relative overflow-hidden">
                     <CardContent className="p-5 flex flex-col justify-between h-full z-10 relative">
@@ -491,7 +495,7 @@ export function OpsBilling() {
                             <div className="text-4xl font-black text-green-400">{Math.round(totalNeto).toLocaleString()}</div>
                         </div>
                         <div className="mt-3 pt-3 border-t border-slate-700/50 flex flex-col gap-1 text-[10px] text-slate-400">
-                            <div className="flex justify-between"><span>+ IVA (Prevención {rules.prevencionVat * 100}%):</span> <span className="font-bold text-white">${Math.round(totalIVA).toLocaleString()}</span></div>
+                            <div className="flex justify-between"><span>+ IVA (Prevención {calcRules.prevencionVat * 100}%):</span> <span className="font-bold text-white">${Math.round(totalIVA).toLocaleString()}</span></div>
                             <div className="flex justify-between"><span>Facturación Total:</span> <span className="font-bold text-white">${Math.round(totalBilling).toLocaleString()}</span></div>
                         </div>
                     </CardContent>
@@ -500,7 +504,7 @@ export function OpsBilling() {
                     <CardContent className="p-5">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Cartera Nueva</p>
                         <div className="text-3xl font-black text-slate-800">${Math.round(totalPortfolio).toLocaleString()}</div>
-                        <p className="text-xs text-blue-600 mt-2 font-bold">Proyección a 60 días</p>
+                        <p className="text-xs text-blue-600 mt-2 font-bold">Proyección a 60 días ({calcRules.portfolioRate * 100}%)</p>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-l-4 border-l-pink-500 shadow-md">
@@ -512,7 +516,8 @@ export function OpsBilling() {
                         <p className="text-xs text-pink-600 mt-2 font-bold">Total equipo de ventas</p>
                     </CardContent>
                 </Card>
-                <Card className="bg-slate-50 border-dashed border-2 border-slate-200 shadow-none hover:bg-slate-100 transition-colors cursor-pointer flex items-center justify-center group">
+                {/* 4. BOTÓN HISTORIAL FUNCIONAL */}
+                <Card onClick={() => setShowHistory(true)} className="bg-slate-50 border-dashed border-2 border-slate-200 shadow-none hover:bg-slate-100 transition-colors cursor-pointer flex items-center justify-center group">
                     <div className="text-center">
                         <div className="h-10 w-10 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-2 text-slate-500 group-hover:bg-slate-300 group-hover:text-slate-700 transition-colors">
                             <LayoutGrid size={20}/>
@@ -601,10 +606,15 @@ export function OpsBilling() {
                                 </TableHeader>
                                 <TableBody>
                                     {pendingOps.length === 0 ? (
-                                        <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {selectedMonth}.</TableCell></TableRow>
+                                        <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {formatMonth(selectedMonth)}.</TableCell></TableRow>
                                     ) : pendingOps.map((op: any) => {
                                         const calc = calculate(op)
                                         const capitasCount = (op.hijos?.length || 0) + 1
+                                        
+                                        // 3. LOGICA BOTON DIFERIR / VOLVER
+                                        // Si la fecha de la operación es diferente al mes seleccionado, significa que viene diferida.
+                                        const opMonth = op.entryDate.substring(0, 7)
+                                        const isDeferred = opMonth !== selectedMonth
 
                                         return (
                                             <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors ${getPrepagaColor(op.prepaga || "")}`}>
@@ -647,9 +657,15 @@ export function OpsBilling() {
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-2">
-                                                        <Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700" title="Patear al mes siguiente" onClick={() => moveToNextMonth(op.id)}>
-                                                            <Calendar size={14} className="mr-1"/> Diferir
-                                                        </Button>
+                                                        {isDeferred ? (
+                                                            <Button size="sm" variant="ghost" className="h-8 text-blue-600 hover:bg-blue-50" title="Volver al mes original" onClick={() => revertDefer(op.id)}>
+                                                                <Undo2 size={14} className="mr-1"/> Traer
+                                                            </Button>
+                                                        ) : (
+                                                            <Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700" title="Patear al mes siguiente" onClick={() => setDeferOpId(op.id)}>
+                                                                <Calendar size={14} className="mr-1"/> Diferir
+                                                            </Button>
+                                                        )}
                                                         <Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>
                                                             Aprobar <ArrowRight size={14} className="ml-1"/>
                                                         </Button>
@@ -781,7 +797,7 @@ export function OpsBilling() {
                                     })}
                                     {/* MANUALES (Desde DB) */}
                                     {manualPortfolio.map(item => {
-                                        const currentVal = Math.round(parseFloat(item.calculated_liquidation || item.calculatedLiquidation || "0") * rules.portfolioRate)
+                                        const currentVal = Math.round(parseFloat(item.calculated_liquidation || item.calculatedLiquidation || "0") * calcRules.portfolioRate)
                                         return (
                                             <TableRow key={item.id} className="bg-yellow-50/30">
                                                 <TableCell className="font-bold text-slate-700">{item.name}</TableCell>
@@ -855,6 +871,119 @@ export function OpsBilling() {
                     </Card>
                 </TabsContent>
             </Tabs>
+
+            {/* 2. DIALOGO DE CONFIGURACIÓN (REGLAS) */}
+            <Dialog open={showConfig} onOpenChange={setShowConfig}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><Settings2/> Configuración de Reglas</DialogTitle>
+                        <DialogDescription>Ajusta los parámetros de cálculo en tiempo real.</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-6 py-4">
+                        
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <h4 className="font-bold text-sm text-slate-700 mb-3">Liquidación General</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <Label className="text-xs">Tasa Impuestos (Tax Rate)</Label>
+                                    <Input type="number" value={calcRules.taxRate} onChange={e => setCalcRules({...calcRules, taxRate: parseFloat(e.target.value)})} step="0.01"/>
+                                </div>
+                                <div>
+                                    <Label className="text-xs">IVA Prevención</Label>
+                                    <Input type="number" value={calcRules.prevencionVat} onChange={e => setCalcRules({...calcRules, prevencionVat: parseFloat(e.target.value)})} step="0.01"/>
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Multiplicador AMPF</Label>
+                                    <Input type="number" value={calcRules.ampf.multiplier} onChange={e => setCalcRules({...calcRules, ampf: {...calcRules.ampf, multiplier: parseFloat(e.target.value)}})} step="0.1"/>
+                                </div>
+                                <div>
+                                    <Label className="text-xs font-bold text-blue-600">% Cartera</Label>
+                                    <Input type="number" value={calcRules.portfolioRate} onChange={e => setCalcRules({...calcRules, portfolioRate: parseFloat(e.target.value)})} step="0.01"/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <h4 className="font-bold text-sm text-slate-700 mb-3">Comisiones (Escalas)</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <Label className="text-xs">Absorbible 5hs</Label>
+                                    <Input type="number" value={commissionRules.scales['5hs'].absorbable} onChange={e => {
+                                        const newScales = {...commissionRules.scales};
+                                        newScales['5hs'].absorbable = parseInt(e.target.value);
+                                        setCommissionRules({...commissionRules, scales: newScales});
+                                    }}/>
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Absorbible 8hs</Label>
+                                    <Input type="number" value={commissionRules.scales['8hs'].absorbable} onChange={e => {
+                                        const newScales = {...commissionRules.scales};
+                                        newScales['8hs'].absorbable = parseInt(e.target.value);
+                                        setCommissionRules({...commissionRules, scales: newScales});
+                                    }}/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={() => setShowConfig(false)}>Cerrar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* 3. DIALOGO ALERTA DIFERIR */}
+            <AlertDialog open={!!deferOpId} onOpenChange={() => setDeferOpId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Diferir al próximo mes?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta operación desaparecerá del período actual y se moverá al siguiente mes contable.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDefer}>Confirmar</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* 4. DIALOGO HISTORIAL ANUAL */}
+            <Dialog open={showHistory} onOpenChange={setShowHistory}>
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><BarChart3/> Historial Anual</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Mes</TableHead>
+                                    <TableHead className="text-right">Total Facturado</TableHead>
+                                    <TableHead className="w-[50%]">Gráfico</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {historyData.map((data) => {
+                                    const maxVal = Math.max(...historyData.map(d => d.total));
+                                    const width = maxVal > 0 ? (data.total / maxVal) * 100 : 0;
+                                    return (
+                                        <TableRow key={data.month}>
+                                            <TableCell className="capitalize font-bold text-slate-700">{formatMonth(data.month)}</TableCell>
+                                            <TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell>
+                                            <TableCell>
+                                                <div className="h-4 bg-slate-100 rounded-full overflow-hidden w-full">
+                                                    <div className="h-full bg-green-500" style={{ width: `${width}%` }}></div>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })}
+                                {historyData.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-slate-400">Sin datos históricos.</TableCell></TableRow>}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* DIALOGO DETALLE VENDEDOR */}
             <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}>
@@ -958,7 +1087,7 @@ export function OpsBilling() {
                                 </div>
                                 <div className="flex justify-between text-sm font-black text-blue-600">
                                     <span>Cartera (5%):</span>
-                                    <span>${Math.round(calculateManualLiquidation() * 0.05).toLocaleString()}</span>
+                                    <span>${Math.round(calculateManualLiquidation() * calcRules.portfolioRate).toLocaleString()}</span>
                                 </div>
                             </div>
                         </div>

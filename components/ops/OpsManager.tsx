@@ -147,20 +147,32 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
-    // === AQUÍ ESTÁ LA CORRECCIÓN CRÍTICA EN FETCHOPERATIONS ===
+    // === AQUÍ ESTÁ LA CORRECCIÓN CRÍTICA (SOLUCIÓN ERROR 400) ===
     const fetchOperations = async () => {
         setIsLoading(true)
+        
+        // CORRECCIÓN: Usamos un filtro positivo (.in) en lugar de negativo (.not)
+        // Esto evita el error de sintaxis en la URL y trae explícitamente lo que Ops necesita ver.
+        const opsStatuses = [
+            'ingresado', 
+            'precarga', 
+            'medicas', 
+            'legajo', 
+            'demoras', 
+            'cumplidas', 
+            'rechazado',
+            'vendido' // Mantenemos 'vendido' por seguridad, el mapeo abajo lo corrige
+        ];
+
         const { data, error } = await supabase
             .from('leads')
             .select('*')
-            // CORRECCIÓN: Usamos Array para el filtro .in(). 
-            // Esto elimina el error 400 y trae explícitamente 'ingresado' y el resto del flujo de Ops.
-            .in('status', ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'vendido']) 
+            .in('status', opsStatuses)
             .order('last_update', { ascending: false })
 
         if (error) {
             console.error("Error fetching ops:", error)
-            showToast("Error de conexión al cargar operaciones", "error")
+            showToast("Error de conexión con la base de datos", "error")
         }
 
         if (data) {
@@ -170,7 +182,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 dni: op.dni || "S/D",
                 plan: op.plan || op.quoted_plan || "-",
                 prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
-                // Aseguramos que si viene como 'vendido' se vea como 'ingresado' para Ops
+                // Aseguramos que si viene como 'vendido' se vea como 'ingresado' en Ops
                 status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
                 subState: op.sub_state || "Pendiente",
                 seller: op.agent_name || "Desconocido",

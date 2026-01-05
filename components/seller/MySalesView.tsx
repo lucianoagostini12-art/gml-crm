@@ -123,7 +123,8 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
       // Si hay una seleccionada, refrescar sus datos básicos (estado, etc)
       if (selectedSale) {
         const updatedSelected = data.find((s) => s.id === selectedSale.id)
-        if (updatedSelected) setSelectedSale(prev => ({...prev, ...updatedSelected}))
+        // Corrección del error de TypeScript aquí: especificamos el tipo 'any' para 'prev'
+        if (updatedSelected) setSelectedSale((prev: any) => ({...prev, ...updatedSelected}))
       }
     }
     setLoading(false)

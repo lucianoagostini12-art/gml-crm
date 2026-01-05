@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,14 @@ import { Label } from "@/components/ui/label"
 export function OpsDatabase({ operations, onSelectOp }: any) {
     const supabase = createClient()
     const [searchTerm, setSearchTerm] = useState("")
+    
+    // Estado local para manejo optimista de borrado
+    const [localOperations, setLocalOperations] = useState(operations)
+
+    // Sincronizar con props del padre
+    useEffect(() => {
+        setLocalOperations(operations)
+    }, [operations])
     
     // Estados para eliminación
     const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -50,7 +58,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
     }
 
     // --- LÓGICA DE FILTRADO ---
-    const filteredOps = operations.filter((op: any) => {
+    const filteredOps = localOperations.filter((op: any) => {
         // 1. Buscador Potente (Texto libre)
         if (searchTerm) {
             const searchLower = searchTerm.toLowerCase()
@@ -126,8 +134,9 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         if (error) {
             alert("Error al eliminar: " + error.message)
         } else {
-            // No hace falta actualizar estado local manual, 
-            // el OpsManager tiene Realtime y actualizará la lista operations sola.
+            // Actualización Optimista: Lo sacamos de la lista visual YA mismo
+            setLocalOperations((prev: any[]) => prev.filter(op => op.id !== deleteId))
+            
             setIsDeleteOpen(false)
             setDeleteId(null)
         }
@@ -141,7 +150,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                 <div className="flex justify-between items-center">
                     <div>
                         <h2 className="text-2xl font-black text-slate-800">Ventas Totales</h2>
-                        <p className="text-xs text-slate-500">Base de datos histórica ({operations.length} registros).</p>
+                        <p className="text-xs text-slate-500">Base de datos histórica ({localOperations.length} registros).</p>
                     </div>
                     <Button variant="outline" onClick={handleExportCSV} className="gap-2 text-xs font-bold border-slate-300 hover:bg-slate-100">
                         <Download size={16}/> Exportar CSV
@@ -267,7 +276,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                 </ScrollArea>
             </div>
             <div className="p-2 border-t border-slate-100 bg-slate-50 text-xs text-center text-slate-400 font-medium">
-                Mostrando {filteredOps.length} registros de {operations.length} totales.
+                Mostrando {filteredOps.length} registros de {localOperations.length} totales.
             </div>
 
             {/* MODAL DE CONFIRMACIÓN DE BORRADO */}

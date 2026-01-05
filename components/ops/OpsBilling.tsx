@@ -39,19 +39,23 @@ type Operation = {
     billing_portfolio_override?: number
 }
 
-// --- CONFIGURACIÓN ESTÁTICA ---
+// --- CONFIGURACIÓN ESTÁTICA VENDEDORAS ---
 const SELLERS_DB: Record<string, { shift: '5hs' | '8hs', photo: string }> = {
     "Maca": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Maca" },
     "Agus": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Agus" },
     "Lu T": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=LuT" },
     "Eve": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Eve" },
     "Iara": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Iara" },
-    "Abru": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Abru" }
+    "Abru": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Abru" },
+    "Ornella Muchiutti": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Orne" } // Agregado por si acaso
 }
 
-// --- ESTADO INICIAL DE REGLAS (Para poder editarlas) ---
+// --- ESTADO INICIAL DE REGLAS (Editables) ---
 const INITIAL_COMMISSION_RULES = {
-    special: { plans: ['A1', '500', 'AMPF'], percentage: 0.10 },
+    special: { 
+        plans: ['A1', '500', 'AMPF'], // Planes que NO suman al absorbible
+        percentage: 0.10 
+    },
     scales: {
         '5hs': { 
             absorbable: 8, 
@@ -75,12 +79,13 @@ const INITIAL_COMMISSION_RULES = {
 }
 
 const INITIAL_CALC_RULES = {
-    taxRate: 0.10,
-    prevencionVat: 0.21,
+    taxRate: 0.10, // 10%
+    prevencionVat: 0.21, // 21%
     doctoRed: { base: 1.80, specialPlan: '500' },
     ampf: { multiplier: 2.0 },
-    prevencion: { 'A1': 0.90, 'A2': 1.30, 'A4': 1.50, default: 1.30 },
-    portfolioRate: 0.05
+    prevencion: { default: 1.30 }, // Multiplicador general Prevención
+    avalian: { default: 1.00 }, // Multiplicador general Avalian
+    portfolioRate: 0.05 // 5% Cartera
 }
 
 // Helpers Visuales
@@ -200,6 +205,7 @@ export function OpsBilling() {
     const calculate = (op: any) => {
         let val = 0, formula = ""
         
+        // 1. LIQUIDACIÓN OFICIAL (Para facturar)
         if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
             val = parseFloat(op.billing_price_override.toString())
             formula = "Manual (Editado)"
@@ -213,11 +219,17 @@ export function OpsBilling() {
                 const base = full - desc
                 const rate = calcRules.prevencion.default 
                 val = base * rate
-                formula = `(Full - Desc) * ${rate*100}%`
+                formula = `(Full - Desc) * ${rate}`
+            } else if (p.includes("avalian")) {
+                const base = full - desc
+                const rate = calcRules.avalian.default 
+                val = base * rate
+                formula = `(Full - Desc) * ${rate}`
             } else if (p.includes("ampf")) {
                 val = full * calcRules.ampf.multiplier
                 formula = `Full * ${calcRules.ampf.multiplier}`
             } else {
+                // Genericas / DoctoRed
                 let base = full * (1 - calcRules.taxRate)
                 formula = `(Full - ${calcRules.taxRate*100}%) * 180%`
                 if (p.includes("doctored") && op.condicionLaboral === 'empleado') {
@@ -229,11 +241,20 @@ export function OpsBilling() {
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
 
+        // 2. CARTERA (Punto 1: 5% sobre el NETO a pagar)
         let portfolioVal = 0
         if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
              portfolioVal = parseFloat(op.billing_portfolio_override.toString())
         } else {
-             portfolioVal = Math.round(val * calcRules.portfolioRate)
+             // Calculamos el "Neto a Pagar" por el cliente
+             const full = parseFloat(op.fullPrice || "0")
+             const aportes = parseFloat(op.aportes || "0")
+             const desc = parseFloat(op.descuento || "0")
+             
+             // Neto = Full - Descuentos - Aportes
+             const netPayable = Math.max(0, full - desc - aportes)
+             
+             portfolioVal = Math.round(netPayable * calcRules.portfolioRate)
         }
 
         return { val: Math.round(val), formula, portfolio: portfolioVal }
@@ -285,7 +306,7 @@ export function OpsBilling() {
             .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([month, total]) => ({ month, total }))
             .slice(-12) // Últimos 12 meses
-    }, [operations, calcRules]) // Depende de operations y reglas
+    }, [operations, calcRules]) 
 
     // --- TOTALES ---
     const { totalNeto, totalPreve, totalMutual, totalXP, totalIVA } = useMemo(() => {
@@ -304,14 +325,15 @@ export function OpsBilling() {
 
     const totalBilling = totalNeto + totalIVA
 
-    // --- PORTFOLIO ---
-    const portfolioOps = approvedOps.reduce((acc, op) => op.prepaga?.toLowerCase().includes('preven') ? acc + calculate(op).portfolio : acc, 0)
+    // --- PORTFOLIO (Suma) ---
+    const portfolioOps = approvedOps.reduce((acc, op) => acc + calculate(op).portfolio, 0)
+    
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => {
          return acc + (parseFloat(item.calculated_liquidation || item.calculatedLiquidation || "0") * calcRules.portfolioRate)
     }, 0)
     const totalPortfolio = portfolioOps + portfolioManualTotal
 
-    // --- COMISIONES VENDEDORAS ---
+    // --- COMISIONES VENDEDORAS (Punto 3 Corregido) ---
     const sellersCommissions = useMemo(() => {
         const result: any[] = []
         const grouped: Record<string, Operation[]> = {}
@@ -320,7 +342,7 @@ export function OpsBilling() {
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
             const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
-            const shiftRules = commissionRules.scales[sellerInfo.shift] // Usa el estado
+            const shiftRules = commissionRules.scales[sellerInfo.shift] 
             
             let specialCommission = 0
             let variableCommission = 0
@@ -329,6 +351,7 @@ export function OpsBilling() {
             
             ops.forEach(op => {
                 const plan = op.plan?.toUpperCase() || ""
+                // Corrección: Usamos las reglas editables para determinar qué es especial (no suma a la escala)
                 const isSpecial = commissionRules.special.plans.some(p => plan.includes(p))
                 
                 if (isSpecial) {
@@ -340,6 +363,8 @@ export function OpsBilling() {
             })
 
             variableOps.sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
+            
+            // Aquí es donde "absorbible" solo cuenta las variables (no especiales)
             const totalVariableCount = variableOps.length
             const absorbableCount = shiftRules.absorbable
             const payableOps = variableOps.slice(absorbableCount) 
@@ -368,7 +393,7 @@ export function OpsBilling() {
             })
         })
         return result.sort((a, b) => b.total - a.total)
-    }, [approvedOps, commissionRules, calcRules]) // Depende de reglas
+    }, [approvedOps, commissionRules, calcRules])
 
     // --- HANDLERS ---
     const handlePriceChange = (id: string, newVal: string) => {
@@ -392,8 +417,7 @@ export function OpsBilling() {
     }
 
     const revertDefer = (id: string) => {
-        // Devuelve al mes original (NULL en billing_period usa created_at, o podríamos calcular el anterior)
-        // La forma más segura de "volver" es poner el billing_period en null para que use created_at
+        // Vuelve al mes original (NULL en billing_period usa created_at)
         updateOpBilling(id, { billing_period: null })
     }
     
@@ -404,7 +428,7 @@ export function OpsBilling() {
         const full = parseFloat(newClient.fullPrice || "0")
         const desc = parseFloat(newClient.descuento || "0")
         if (newClient.prepaga.toLowerCase().includes('preven')) {
-            return (full - desc) * 1.30 
+            return (full - desc) * calcRules.prevencion.default 
         }
         return full 
     }
@@ -891,6 +915,14 @@ export function OpsBilling() {
                                 <div>
                                     <Label className="text-xs">IVA Prevención</Label>
                                     <Input type="number" value={calcRules.prevencionVat} onChange={e => setCalcRules({...calcRules, prevencionVat: parseFloat(e.target.value)})} step="0.01"/>
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Multiplicador Prevención</Label>
+                                    <Input type="number" value={calcRules.prevencion.default} onChange={e => setCalcRules({...calcRules, prevencion: {...calcRules.prevencion, default: parseFloat(e.target.value)}})} step="0.1"/>
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Multiplicador Avalian</Label>
+                                    <Input type="number" value={calcRules.avalian.default} onChange={e => setCalcRules({...calcRules, avalian: {...calcRules.avalian, default: parseFloat(e.target.value)}})} step="0.1"/>
                                 </div>
                                 <div>
                                     <Label className="text-xs">Multiplicador AMPF</Label>

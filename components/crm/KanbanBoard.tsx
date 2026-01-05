@@ -135,7 +135,7 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         const { data } = await supabase.from('leads')
             .select('*')
             .eq('agent_name', CURRENT_USER)
-            // === CORRECCIÓN AQUÍ: Agregamos 'ingresado' a la lista negra ===
+            // === CORRECCIÓN AQUÍ: Agregado 'ingresado' a la lista negra ===
             .not('status', 'in', '("perdido","vendido","rechazado","baja","cumplidas","ingresado")') 
         if (data) setLeads(mapLeads(data))
     }
@@ -159,13 +159,14 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         const channel = supabase.channel('kanban_realtime_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
                 if (payload.eventType === 'INSERT') {
-                    // Solo agregamos si el status es visible en el kanban
+                    // === CORRECCIÓN: Filtrar 'ingresado' en tiempo real ===
                     if (!['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(payload.new.status)) {
                         const newLead = mapLeads([payload.new])[0]
                         setLeads(prev => [newLead, ...prev])
                     }
                 } else if (payload.eventType === 'UPDATE') {
                     const updated = mapLeads([payload.new])[0]
+                    // === CORRECCIÓN: Si pasa a 'ingresado', quitarlo del tablero ===
                     if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
                         setLeads(prev => prev.filter(l => l.id !== updated.id))
                     } else {

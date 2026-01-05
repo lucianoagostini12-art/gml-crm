@@ -147,12 +147,14 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
+    // === AQUÍ ESTÁ LA CORRECCIÓN CRÍTICA EN FETCHOPERATIONS ===
     const fetchOperations = async () => {
         setIsLoading(true)
         const { data } = await supabase
             .from('leads')
             .select('*')
-            .not('status', 'in', '("nuevo","contactado","cotizacion","perdido")') 
+            // CORRECCIÓN: Usamos Array para el filtro .not(), mucho más seguro
+            .not('status', 'in', ['nuevo', 'contactado', 'cotizacion', 'perdido']) 
             .order('last_update', { ascending: false })
 
         if (data) {
@@ -162,6 +164,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 dni: op.dni || "S/D",
                 plan: op.plan || op.quoted_plan || "-",
                 prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
+                // Aseguramos que si viene como 'vendido' se vea como 'ingresado'
                 status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
                 subState: op.sub_state || "Pendiente",
                 seller: op.agent_name || "Desconocido",

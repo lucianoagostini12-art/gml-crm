@@ -94,16 +94,17 @@ export default function Home() {
 
   // 2. RUTEO DE ROLES (Director de Tráfico)
 
-  // A. NIVEL GERENCIAL (GOD MODE)
-  // Ahora incluye 'admin_god' para que vea el Dashboard Global
-  if (role === "supervisor_god" || role === "admin_god") {
+  // A. NIVEL GERENCIAL (SOLO SUPERVISOR)
+  // Corregido: admin_god sacado de aquí
+  if (role === "supervisor_god") {
     return <AdminDashboard onLogout={handleLogout} />
   }
 
-  // B. NIVEL OPERATIVO (OPS)
-  // 'admin_common' y 'ops' van a la gestión diaria
-  if (role === "admin_common" || role === "ops") {
+  // B. NIVEL OPERATIVO (OPS + ADMIN GOD)
+  // Corregido: admin_god agregado aquí para ver OpsManager
+  if (role === "admin_god" || role === "admin_common" || role === "ops") {
     // OpsManager maneja su propio logout internamente o via prop si se actualiza
+    // El rol se pasa para que OpsManager sepa si activar funciones GOD
     return <OpsManager role={role as any} userName={userName} />
   }
 
@@ -120,6 +121,5 @@ export default function Home() {
 
   // E. DEFAULT / ERROR DE ROL
   // Si el rol no coincide con ninguno, mandamos al SellerManager como fallback seguro
-  // o podríamos mostrar un mensaje de "Rol no asignado".
   return <SellerManager userName={userName} onLogout={handleLogout} />
 }

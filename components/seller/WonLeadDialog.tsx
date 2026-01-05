@@ -46,7 +46,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       return alert("Por favor, completá Nombre, DNI y Prepaga como mínimo.")
     }
     
-    // TRADUCTOR PASS: Mapeamos los datos manuales a las columnas de Supabase
+    // TRADUCTOR PASS
     onConfirm({
       type: 'pass',
       name: passData.fullName,
@@ -54,10 +54,10 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       phone: passData.phone,
       prepaga: passData.prepaga,
       plan: passData.plan,
-      notes: passData.observations, // Se guarda en 'notes' para historial
-      status: 'ingresado',          // IMPORTANTE: Para que aparezca en Ops
+      notes: passData.observations,
+      status: 'ingresado',          
       sub_state: 'auditoria_pass',
-      files: passData.files         // Archivos crudos para el uploader
+      files: passData.files         
     })
     handleOpenChange(false)
   }
@@ -70,26 +70,30 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
         onOpenChange={handleOpenChange} 
         onConfirm={(wizardData: any) => {
           
-          // --- FUNCIONES DE LIMPIEZA (EVITAN ERROR 400) ---
+          // --- 1. FUNCIONES DE LIMPIEZA (ESTO EVITA EL ERROR 400) ---
           // Convierte "" en 0 para campos numéricos
-          const cleanNumber = (val: any) => (val && val !== "" && !isNaN(Number(val))) ? parseFloat(val) : 0;
+          const cleanNum = (val: any) => {
+             if (!val || val === "") return 0;
+             const parsed = parseFloat(val);
+             return isNaN(parsed) ? 0 : parsed;
+          };
+          
           // Convierte "" en null para campos de fecha
           const cleanDate = (val: any) => (val && val !== "") ? val : null;
 
-          // --- EL GRAN TRADUCTOR ---
-          // Aquí convertimos el formato del Wizard (JS) al formato de Supabase (SQL)
-          
+          // --- 2. EL GRAN TRADUCTOR (MAPEO EXACTO A TU BASE DE DATOS) ---
           const dbData = {
-            // Campos obligatorios de sistema
+            // Campos de sistema
             type: 'alta',
-            status: 'ingresado', // Entra en la primera columna de Ops
+            status: 'ingresado', // Clave para que aparezca en Ops
             sub_state: 'ingresado',
+            last_update: new Date().toISOString(),
             
             // Datos Personales
             name: wizardData.nombre,
             dni: wizardData.cuit, 
             cuit: wizardData.cuit,
-            dob: cleanDate(wizardData.nacimiento), // SANITIZADO
+            dob: cleanDate(wizardData.nacimiento), // FECHA LIMPIA
             email: wizardData.email,
             phone: wizardData.celular,
             
@@ -99,34 +103,33 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             address_zip: wizardData.cp,
             province: wizardData.provincia,
             
-            // Datos Familiares
+            // Datos Familiares (Usando tus nombres de columna reales)
             affiliation_type: wizardData.tipoGrupo, 
             family_members: wizardData.tipoGrupo === 'matrimonio' ? { c: wizardData.matrimonioNombre, d: wizardData.matrimonioDni } : null,
-            hijos: wizardData.hijosData, // Array de hijos
+            hijos: wizardData.hijosData, 
             capitas: 1 + (wizardData.tipoGrupo === 'matrimonio' ? 1 : 0) + (parseInt(wizardData.cantHijos) || 0),
 
-            // Datos Laborales (Nombres de columna corregidos según tu SQL)
+            // Datos Laborales
             source: wizardData.origen, 
             labor_condition: wizardData.condicion, 
             employer_cuit: wizardData.cuitEmpleador,
             
-            // Nota: catMonotributo y claveFiscal van a notas
+            // Notas concatenadas
             notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}`,
 
             // Datos de Pago
             payment_method: wizardData.tipoPago, 
-            // Concatenamos Banco - Numero para el campo cbu_card
             cbu_card: wizardData.tipoPago === 'tarjeta' 
                 ? `${wizardData.bancoEmisor || ''} - ${wizardData.numeroTarjeta} (Vto: ${wizardData.vencimientoTarjeta})`
                 : `${wizardData.bancoEmisor || ''} - ${wizardData.cbuNumero}`,
             
-            // Valores Económicos (SANITIZADOS)
-            full_price: cleanNumber(wizardData.fullPrice),
-            aportes: cleanNumber(wizardData.aportes),
-            descuento: cleanNumber(wizardData.descuento),
-            price: cleanNumber(wizardData.aPagar), // Mapeamos 'A Pagar' a 'price'
+            // Valores Económicos (NÚMEROS LIMPIOS)
+            full_price: cleanNum(wizardData.fullPrice),
+            aportes: cleanNum(wizardData.aportes),
+            descuento: cleanNum(wizardData.descuento),
+            price: cleanNum(wizardData.aPagar), 
             
-            // Archivos (Se pasan aparte para que KanbanBoard los suba)
+            // Archivos (Se pasan aparte)
             files: wizardData.archivos
           }
 
@@ -152,40 +155,23 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            {/* DATOS PERSONALES */}
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="fullname" className="font-bold flex gap-2 items-center"><User size={14}/> Nombre Completo</Label>
-                <Input 
-                  id="fullname" 
-                  placeholder="Ej: Juan Perez" 
-                  value={passData.fullName}
-                  onChange={(e) => setPassData({...passData, fullName: e.target.value})}
-                />
+                <Label>Nombre Completo</Label>
+                <Input value={passData.fullName} onChange={(e) => setPassData({...passData, fullName: e.target.value})}/>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="dni" className="font-bold flex gap-2 items-center"><FileText size={14}/> DNI / CUIL</Label>
-                <Input 
-                  id="dni" 
-                  placeholder="Sin puntos" 
-                  value={passData.dni}
-                  onChange={(e) => setPassData({...passData, dni: e.target.value})}
-                />
+                <Label>DNI</Label>
+                <Input value={passData.dni} onChange={(e) => setPassData({...passData, dni: e.target.value})}/>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="phone" className="font-bold flex gap-2 items-center"><Phone size={14}/> Teléfono</Label>
-                <Input 
-                  id="phone" 
-                  placeholder="11 1234 5678" 
-                  value={passData.phone}
-                  onChange={(e) => setPassData({...passData, phone: e.target.value})}
-                />
+                <Label>Teléfono</Label>
+                <Input value={passData.phone} onChange={(e) => setPassData({...passData, phone: e.target.value})}/>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="prepaga" className="font-bold flex gap-2 items-center"><CreditCard size={14}/> Prepaga Destino</Label>
+                <Label>Prepaga Destino</Label>
                 <Select onValueChange={(v) => setPassData({...passData, prepaga: v})}>
                   <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
                   <SelectContent>
@@ -199,90 +185,28 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
                 </Select>
               </div>
             </div>
-
-            <div className="grid gap-2">
-               <Label htmlFor="plan" className="font-bold">Plan Elegido</Label>
-               <Input 
-                  id="plan" 
-                  placeholder="Ej: A2, 210, 4000..." 
-                  value={passData.plan}
-                  onChange={(e) => setPassData({...passData, plan: e.target.value})}
-                />
-            </div>
-            
-            <div className="grid gap-2">
-              <Label htmlFor="obs" className="font-bold">Observaciones</Label>
-              <Textarea 
-                id="obs" 
-                placeholder="Detalles adicionales para administración..." 
-                className="resize-none h-20"
-                value={passData.observations}
-                onChange={(e) => setPassData({...passData, observations: e.target.value})}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="font-bold">Adjuntar Documentación (DNI, Recibos)</Label>
-              <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer relative bg-slate-50/50">
-                <input 
-                  type="file" 
-                  multiple 
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                  onChange={(e) => setPassData({...passData, files: e.target.files})}
-                />
-                <UploadCloud className="h-8 w-8 text-blue-500 mb-2"/>
-                <p className="text-sm text-slate-600 font-medium">
-                  {passData.files && passData.files.length > 0 
-                    ? `✅ ${passData.files.length} archivos listos` 
-                    : "Click para subir archivos"}
-                </p>
-              </div>
-            </div>
+            <div className="grid gap-2"><Label>Plan</Label><Input value={passData.plan} onChange={(e) => setPassData({...passData, plan: e.target.value})}/></div>
+            <div className="grid gap-2"><Label>Observaciones</Label><Textarea className="resize-none h-20" value={passData.observations} onChange={(e) => setPassData({...passData, observations: e.target.value})}/></div>
+            <div className="grid gap-2"><Label>Adjuntar Archivos</Label><Input type="file" multiple onChange={(e) => setPassData({...passData, files: e.target.files})}/></div>
           </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="ghost" onClick={() => setSaleType(null)}>Volver</Button>
-            <Button className="bg-blue-600 hover:bg-blue-700 font-bold text-white" onClick={handleConfirmPass}>
-              CONFIRMAR PASS 🚀
-            </Button>
-          </DialogFooter>
+          <DialogFooter><Button variant="ghost" onClick={() => setSaleType(null)}>Volver</Button><Button onClick={handleConfirmPass}>Confirmar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     )
   }
 
-  // PANTALLA INICIAL
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[450px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-        <DialogHeader>
-          <DialogTitle className="text-center text-xl font-black text-slate-800 dark:text-white">¡Venta Cerrada! 🚀</DialogTitle>
-          <DialogDescription className="text-center text-slate-500">
-            Seleccioná el tipo de gestión para continuar.
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className="sm:max-w-[450px]">
+        <DialogHeader><DialogTitle className="text-center">¡Venta Cerrada! 🚀</DialogTitle><DialogDescription className="text-center">Seleccioná el tipo de gestión.</DialogDescription></DialogHeader>
         <div className="grid grid-cols-2 gap-4 py-6">
-          <button 
-            onClick={() => setSaleType('alta')}
-            className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group bg-white"
-          >
-            <div className="bg-green-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform">
-              <UserPlus className="h-8 w-8 text-green-600"/>
-            </div>
-            <span className="font-bold text-slate-700 group-hover:text-green-700">ALTA NUEVA</span>
-            <span className="text-xs text-slate-400 mt-1">Cliente nuevo</span>
+          <button onClick={() => setSaleType('alta')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group bg-white">
+            <div className="bg-green-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform"><UserPlus className="h-8 w-8 text-green-600"/></div>
+            <span className="font-bold text-slate-700">ALTA NUEVA</span>
           </button>
-
-          <button 
-            onClick={() => setSaleType('pass')}
-            className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group bg-white"
-          >
-            <div className="bg-blue-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform">
-              <ArrowRightLeft className="h-8 w-8 text-blue-600"/>
-            </div>
-            <span className="font-bold text-slate-700 group-hover:text-blue-700">TRASPASO (PASS)</span>
-            <span className="text-xs text-slate-400 mt-1">Cambio de productor</span>
+          <button onClick={() => setSaleType('pass')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group bg-white">
+            <div className="bg-blue-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform"><ArrowRightLeft className="h-8 w-8 text-blue-600"/></div>
+            <span className="font-bold text-slate-700">TRASPASO</span>
           </button>
         </div>
       </DialogContent>

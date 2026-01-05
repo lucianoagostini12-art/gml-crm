@@ -8,10 +8,18 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Phone, Linkedin, Facebook, Plus, Search, ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Loader2, Globe, Megaphone } from "lucide-react"
+// Agregamos LogOut a los iconos
+import { Phone, Linkedin, Facebook, Plus, Search, ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Loader2, Globe, Megaphone, LogOut } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-export function SetterDashboard() {
+// 1. Definimos la interfaz de props que espera recibir desde page.tsx
+interface SetterDashboardProps {
+    userName?: string;
+    onLogout?: () => void;
+}
+
+// 2. Recibimos las props en la función
+export function SetterDashboard({ userName, onLogout }: SetterDashboardProps) {
     const supabase = createClient()
     const today = new Date().toISOString().split('T')[0]
     
@@ -272,9 +280,19 @@ export function SetterDashboard() {
                     <h1 className="text-lg font-bold text-slate-800">SETTER MODE</h1>
                     {loading && <RefreshCw className="h-4 w-4 animate-spin text-slate-400"/>}
                 </div>
-                <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-100 border border-green-300">
-                    <div className="w-2.5 h-2.5 bg-green-600 rounded-full animate-pulse"></div>
-                    <span className="text-[11px] font-black text-green-800">SISTEMA VIVO</span>
+                {/* AQUI AGREGAMOS LA VISUALIZACION DE USUARIO Y LOGOUT */}
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-100 border border-green-300">
+                        <div className="w-2.5 h-2.5 bg-green-600 rounded-full animate-pulse"></div>
+                        <span className="text-[11px] font-black text-green-800">SISTEMA VIVO</span>
+                    </div>
+                    {/* Botón de Logout conectado y Nombre de Usuario */}
+                    <div className="flex items-center gap-2 border-l pl-4 ml-2">
+                         <span className="text-xs font-bold text-slate-600 mr-2">{userName}</span>
+                         <Button variant="ghost" size="icon" onClick={onLogout} className="text-red-500 hover:bg-red-50 hover:text-red-700">
+                            <LogOut className="h-4 w-4" />
+                         </Button>
+                    </div>
                 </div>
             </header>
 

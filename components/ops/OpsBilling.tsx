@@ -135,7 +135,6 @@ export function OpsBilling() {
     const fetchData = async () => {
         setLoading(true)
         // 1. Traer Ventas CUMPLIDAS (status = cumplidas)
-        // Mapeamos los campos de la BD a la estructura que usa el componente
         const { data: opsData } = await supabase
             .from('leads')
             .select('*')
@@ -147,13 +146,13 @@ export function OpsBilling() {
                 id: d.id,
                 entryDate: d.created_at,
                 clientName: d.name,
-                dni: d.dni || "", // Asegúrate que tu BD tenga campo DNI o úsalo de metadata
+                dni: d.dni || "",
                 origen: d.source,
                 seller: d.agent_name,
                 prepaga: d.company_name || d.health_insurance || d.prepaga,
                 plan: d.plan_type || d.plan,
                 fullPrice: d.price || "0",
-                aportes: d.aportes || "0", // Asegurarse que existan en DB si se usan
+                aportes: d.aportes || "0",
                 descuento: d.descuento || "0",
                 status: d.status,
                 condicionLaboral: d.employment_status,
@@ -177,7 +176,6 @@ export function OpsBilling() {
     useEffect(() => {
         fetchData()
         
-        // Suscripción a cambios en tiempo real
         const channel = supabase.channel('billing_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: 'status=eq.cumplidas' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchData())
@@ -188,7 +186,7 @@ export function OpsBilling() {
 
     // --- UPDATER A BASE DE DATOS ---
     const updateOpBilling = async (id: string, updates: any) => {
-        // Optimistic update local
+        // Optimistic update
         setOperations(prev => prev.map(op => op.id === id ? { ...op, ...updates } : op))
         
         // Update Real
@@ -199,7 +197,6 @@ export function OpsBilling() {
     const calculate = (op: any) => {
         let val = 0, formula = ""
         
-        // Prioridad: 1. Override DB, 2. Cálculo
         if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
             val = parseFloat(op.billing_price_override)
             formula = "Manual (Editado)"
@@ -242,22 +239,23 @@ export function OpsBilling() {
     // --- LOGICA DE DATOS (Filtrado) ---
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
-            // Chequear si tiene un mes diferido en DB, sino usar fecha de venta (created_at)
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
-            
             const targetMonth = op.billing_period || defaultMonth
             
             if (targetMonth !== selectedMonth) return false
-            
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
             return true
         })
     }, [operations, selectedMonth, filters])
 
-    const pendingOps = opsInPeriod.filter((op: any) => !op.billing_approved)
-    const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved)
+    // --- FILTRADO ESTRICTO DE ESTADOS ---
+    // Pending: Todo lo que NO sea true (false o null)
+    const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
+    
+    // Approved: Solo lo que explícitamente sea true
+    const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
 
     // --- TOTALES ---
     const { totalNeto, totalPreve, totalMutual, totalXP, totalIVA } = useMemo(() => {
@@ -367,8 +365,6 @@ export function OpsBilling() {
     }
     
     const approveOp = (id: string) => {
-        // Al aprobar, si no tiene override, podríamos setear el valor calculado como override
-        // para que quede "congelado". Por ahora, solo marcamos approved.
         updateOpBilling(id, { billing_approved: true })
     }
 

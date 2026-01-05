@@ -75,7 +75,8 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
         bottleneckData, 
         sellerData, 
         dataAging,
-        velocidadPromedio 
+        velocidadPromedio,
+        rejectedCount // AGREGADO PARA SOLUCIONAR ERROR VISUAL
     } = useMemo(() => {
         
         // 1. APLICAR FILTRO DE FECHAS PRIMERO
@@ -90,6 +91,7 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
         // 2. CALCULAR MÉTRICAS SOBRE LOS DATOS FILTRADOS
         const total = filteredOps.length
         const closed = filteredOps.filter((o:any) => o.status === 'cumplidas').length
+        const rejected = filteredOps.filter((o:any) => o.status === 'rechazado').length // CALCULADO AQUI
         const rate = total > 0 ? ((closed / total) * 100).toFixed(1) : "0"
 
         // A. DATOS POR ORIGEN
@@ -186,7 +188,8 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
             bottleneckData: _bottleneckData,
             sellerData: _sellerData,
             dataAging: _dataAging,
-            velocidadPromedio: _velocidad
+            velocidadPromedio: _velocidad,
+            rejectedCount: rejected
         }
     }, [operations, dateRange]) 
 
@@ -288,8 +291,8 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
                         <AlertCircle className="h-4 w-4 text-red-500 group-hover:scale-110 transition-transform" />
                     </CardHeader>
                     <CardContent>
-                        {/* Rechazados dentro del filtro */}
-                        <div className="text-2xl font-black text-slate-800">{filteredOps.filter((o:any) => o.status === 'rechazado').length}</div>
+                        {/* Rechazados dentro del filtro: USAMOS EL CONTADOR CALCULADO */}
+                        <div className="text-2xl font-black text-slate-800">{rejectedCount}</div>
                         <p className="text-xs text-slate-400 mt-1">Clientes caídos</p>
                     </CardContent>
                 </Card>

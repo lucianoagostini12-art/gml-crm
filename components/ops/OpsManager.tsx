@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
-import { Search, Bell, PartyPopper, X, UserPlus, Sparkles, Undo2, Lock, AlertTriangle, Filter, MessageCircle, Clock, Wallet, ShieldCheck, Calendar as CalendarIcon, Trash2, PlusCircle, Building2, User, RefreshCw, Send } from "lucide-react"
+import { Search, Bell, PartyPopper, X, UserPlus, Sparkles, Undo2, Lock, AlertTriangle, Filter, MessageCircle, Clock, Wallet, ShieldCheck, Calendar as CalendarIcon, Trash2, PlusCircle, Building2, User, RefreshCw, Send, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -92,7 +92,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         clientName: "", dni: "", prepaga: "", plan: "", source: "Oficina", specificSeller: ""
     })
 
-    const [notifications, setNotifications] = useState<{id: number, text: string, time: string, read: boolean, type: 'chat'|'sale'|'alert'|'agenda'}[]>([])
+    // --- NOTIFICACIONES REALES (CONECTADAS A DB) ---
+    const [notifications, setNotifications] = useState<any[]>([])
     const [newSaleNotif, setNewSaleNotif] = useState<any>(null)
     const [isBellOpen, setIsBellOpen] = useState(false) 
     const unreadCount = notifications.filter(n => !n.read).length
@@ -121,6 +122,28 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             const p = data.find(c => c.key === 'prepagas_plans')?.value || []
             const s = data.find(c => c.key === 'workflow_substates')?.value || {}
             setGlobalConfig({ prepagas: p, subStates: s })
+        }
+    }
+
+    // --- CARGA DE NOTIFICACIONES (REAL) ---
+    const fetchNotifications = async () => {
+        // Traemos las notificaciones para este usuario o globales si es admin
+        const { data } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_name', userName) // Opcional: Si quieres que Ops vea todo, quita este filtro
+            .eq('read', false)
+            .order('created_at', { ascending: false })
+            .limit(20)
+        
+        if (data) setNotifications(data)
+    }
+
+    const markAllRead = async () => {
+        const ids = notifications.map(n => n.id)
+        setNotifications([]) // UI update rapido
+        if (ids.length > 0) {
+            await supabase.from('notifications').update({ read: true }).in('id', ids)
         }
     }
 
@@ -189,14 +212,22 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchPermissions()
         fetchSystemConfig() 
         fetchOperations()
+        fetchNotifications() // Cargar al inicio
         
+        // --- REALTIME ---
         const channel = supabase.channel('ops-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 if(payload.eventType === 'INSERT' && payload.new.status === 'vendido') {
-                    addNotification(`¡Nueva Venta! ${payload.new.name}`, 'sale')
+                    // Notificación Visual Popup
                     setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
                 }
                 fetchOperations() 
+            })
+            // Escuchar Notificaciones
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
+                if (payload.new.user_name === userName || role === 'admin_god') {
+                    setNotifications(prev => [payload.new, ...prev])
+                }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {
                 fetchPermissions()
@@ -234,21 +265,12 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         return true
     })
 
-    const addNotification = (text: string, type: 'chat'|'sale'|'alert'|'agenda') => {
-        setNotifications(prev => [{ id: Date.now(), text, time: "Ahora", read: false, type }, ...prev])
-        setIsBellOpen(true)
-        setTimeout(() => setIsBellOpen(false), 4000)
-    }
-
     const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000) }
 
     // --- UPDATE SUPABASE (Centralizado y REPARADO) ---
     const updateOpInDb = async (id: string, updates: any) => {
         // 1. NORMALIZACIÓN PARA LA UI (CamelCase)
-        // El Modal envía "snake_case" (ej: sub_state), pero la Lista espera "camelCase" (ej: subState).
-        // Hacemos un merge inteligente para que la UI se actualice al instante sin recargar.
         const uiUpdates = { ...updates }
-        
         if (updates.sub_state !== undefined) uiUpdates.subState = updates.sub_state
         if (updates.agent_name !== undefined) uiUpdates.seller = updates.agent_name
         if (updates.name !== undefined) uiUpdates.clientName = updates.name
@@ -257,25 +279,18 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         setOperations(prev => prev.map(o => o.id === id ? { ...o, ...uiUpdates } : o))
         
         // 3. PREPARACIÓN PARA DB (SnakeCase)
-        // Mapeamos lo que sea que haya llegado a los nombres reales de las columnas en Supabase
         const dbUpdates: any = {}
-        
-        // Mapeo Status
         if (uiUpdates.status) dbUpdates.status = uiUpdates.status
-        
-        // Mapeo SubState (Chequeamos ambas versiones por seguridad)
         if (uiUpdates.subState !== undefined) dbUpdates.sub_state = uiUpdates.subState
         else if (uiUpdates.sub_state !== undefined) dbUpdates.sub_state = uiUpdates.sub_state
         
-        // Mapeo Seller
         if (uiUpdates.seller !== undefined) dbUpdates.agent_name = uiUpdates.seller
         else if (uiUpdates.agent_name !== undefined) dbUpdates.agent_name = uiUpdates.agent_name
 
-        // Mapeo Name
         if (uiUpdates.clientName !== undefined) dbUpdates.name = uiUpdates.clientName
         else if (uiUpdates.name !== undefined) dbUpdates.name = uiUpdates.name
 
-        // Campos directos (que coinciden nombre UI y DB o son simples)
+        // Campos directos
         if (uiUpdates.operator !== undefined) dbUpdates.operator = uiUpdates.operator 
         if (uiUpdates.reminders) dbUpdates.reminders = uiUpdates.reminders
         if (uiUpdates.dni) dbUpdates.dni = uiUpdates.dni
@@ -299,13 +314,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (error) {
             console.error("Error actualizando:", error)
             showToast("Error al guardar cambios en DB", "error")
-            // Si falla, podrías considerar revertir el cambio optimista (fetchOperations)
             fetchOperations() 
         }
     }
 
     const updateOp = (newOp: Operation) => { 
-        // Pasamos el objeto completo, updateOpInDb se encarga de traducir
         updateOpInDb(newOp.id, newOp)
         if (selectedOp && selectedOp.id === newOp.id) setSelectedOp(newOp); 
     }
@@ -447,7 +460,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         <div className="flex h-screen bg-slate-50 dark:bg-[#0F1115] overflow-hidden font-sans relative">
             {toast && <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[9999] animate-in slide-in-from-top-5 pointer-events-none"><div className="bg-slate-900/95 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3">{toast.msg}</div></div>}
 
-            {/* NOTIFICACIÓN VENTA */}
+            {/* NOTIFICACIÓN VENTA FLOTANTE */}
             {newSaleNotif && (
                 <div className="fixed bottom-8 right-8 z-[99999] animate-in slide-in-from-right-10 fade-in duration-500 cursor-pointer hover:translate-y-[-4px] transition-all" onClick={() => {setViewMode('pool'); setNewSaleNotif(null)}}>
                      <div className="bg-[#0f172a] border-l-4 border-l-green-500 border-t border-r border-b border-slate-700 text-white p-0 rounded-lg shadow-2xl w-[350px] relative overflow-hidden group">
@@ -476,6 +489,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     name: userName, 
                     avatar: profiles.find(p => p.full_name === userName)?.avatar_url || "" 
                 }} 
+                onLogout={handleLogout} // ✅ Botón Salir Conectado
             />
 
             <main className="flex-1 flex flex-col min-w-0 bg-slate-100 relative text-slate-900 h-full">
@@ -497,6 +511,38 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     </div>
                     
                     <div className="flex items-center gap-3">
+                        {/* 🔔 CAMPANITA REALTIME */}
+                        <Popover open={isBellOpen} onOpenChange={setIsBellOpen}>
+                            <PopoverTrigger asChild>
+                                <Button size="icon" variant="ghost" className="relative">
+                                    <Bell className="h-5 w-5 text-slate-500" />
+                                    {unreadCount > 0 && <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 p-0" align="end">
+                                <div className="p-3 border-b flex justify-between items-center bg-slate-50">
+                                    <span className="text-xs font-bold text-slate-600">Notificaciones</span>
+                                    {unreadCount > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600" onClick={markAllRead}>Marcar leídas</Button>}
+                                </div>
+                                <div className="max-h-[300px] overflow-y-auto">
+                                    {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
+                                        notifications.map((n) => (
+                                            <div key={n.id} className={`p-3 border-b hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}>
+                                                <div className="flex items-start gap-3">
+                                                    <div className={`mt-1 h-2 w-2 rounded-full ${!n.read ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
+                                                    <div>
+                                                        <h5 className="text-xs font-bold text-slate-800">{n.title}</h5>
+                                                        <p className="text-[10px] text-slate-500 mt-0.5">{n.body}</p>
+                                                        <span className="text-[9px] text-slate-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    }
+                                </div>
+                            </PopoverContent>
+                        </Popover>
+
                         <Button className="bg-[#1e3a8a] hover:bg-blue-900 text-white gap-2 h-9 shadow-md px-4 flex animate-in zoom-in duration-300" onClick={() => setIsManualLoadOpen(true)}>
                             <PlusCircle className="h-4 w-4" /> <span className="hidden md:inline">Nueva Op.</span>
                         </Button>

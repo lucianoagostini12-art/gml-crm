@@ -31,7 +31,6 @@ import { AgendasView } from "@/components/crm/AgendasView"
 import { CreateLeadDialog } from "@/components/crm/CreateLeadDialog"
 import { LeadDetail } from "@/components/crm/LeadDetail"
 
-// ✅ IMPORTANTE: usamos el tipo Lead real que espera LeadDetail (viene de LeadCard)
 import type { Lead as CRMLead } from "@/components/crm/LeadCard"
 
 import { DashboardView } from "@/components/shared/DashboardView"
@@ -42,7 +41,6 @@ import { WikiView } from "@/components/shared/WikiView"
 import { FocusModeView } from "@/components/shared/FocusModeView"
 import { MySalesView } from "@/components/seller/MySalesView"
 
-// ✅ Supabase client (sin auth-helpers)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -86,33 +84,42 @@ export function SellerManager({
 
   // Alertas & Notificaciones
   const [expiredTasks, setExpiredTasks] = useState<any[]>([])
-  const [totalUnreadMessages, setTotalUnreadMessages] = useState(0)
+  
+  // ✅ CONTADORES DE ALERTAS VISUALES
+  const [problematicSalesCount, setProblematicSalesCount] = useState(0) // Ventas rechazadas/demoradas
 
-  // ✅ NOTIFICATIONS (tu tabla real)
   const [unreadNotifications, setUnreadNotifications] = useState<AppNotification[]>([])
   const [isNotifOpen, setIsNotifOpen] = useState(false)
 
-  // ✅ COTIZACIONES (quotes) -> alerta por triángulo
   const [quoteAlertsCount, setQuoteAlertsCount] = useState(0)
   const [isAlertsOpen, setIsAlertsOpen] = useState(false)
 
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
-
-  // ✅ Ahora el lead seleccionado es del tipo REAL que espera LeadDetail/LeadCard
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null)
 
-  // Anti-spam auto-open
   const lastAutoOpenAtRef = useRef<number>(0)
+
+  // --- LÓGICA DE PROBLEMAS EN VENTAS (NUEVO) ---
+  const fetchProblematicSales = async () => {
+      const { count } = await supabase
+          .from('leads')
+          .select('*', { count: 'exact', head: true })
+          .eq('agent_name', currentUser)
+          .in('status', ['rechazado', 'demoras']) // Estados problemáticos que requieren atención
+      
+      setProblematicSalesCount(count || 0)
+  }
 
   useEffect(() => {
     if (!currentUser) return
 
     let notifChannel: any = null
     let quotesChannel: any = null
+    let salesChannel: any = null
     let alive = true
 
     const init = async () => {
-      // Inicial: traemos notificaciones no leídas del vendedor
+      // 1. Notificaciones
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
@@ -123,6 +130,9 @@ export function SellerManager({
 
       if (!alive) return
       if (!error && data) setUnreadNotifications(data as AppNotification[])
+
+      // 2. Chequear ventas rechazadas
+      await fetchProblematicSales()
     }
 
     const openBellSoft = () => {
@@ -141,17 +151,12 @@ export function SellerManager({
       }
     }
 
-    // ✅ Realtime: NOTIFICACIONES
+    // A. Realtime: NOTIFICACIONES
     notifChannel = supabase
       .channel(`rt-notifications-${currentUser}`)
       .on(
         "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_name=eq.${currentUser}`,
-        },
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_name=eq.${currentUser}` },
         (payload: any) => {
           const n = payload.new as AppNotification
           setUnreadNotifications((prev) => [n, ...prev])
@@ -160,35 +165,32 @@ export function SellerManager({
       )
       .subscribe()
 
-    // ✅ Realtime: QUOTES (NO tiene user -> validamos por lead)
+    // B. Realtime: VENTAS (Para actualizar el contador rojo si Ops rechaza algo)
+    salesChannel = supabase
+      .channel(`rt-sales-problems-${currentUser}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "leads", filter: `agent_name=eq.${currentUser}` },
+        (payload: any) => {
+            // Si el estado cambió a rechazado o demoras, o salió de ahí
+            fetchProblematicSales() 
+        }
+      )
+      .subscribe()
+
+    // C. Realtime: QUOTES
     quotesChannel = supabase
       .channel(`rt-quotes-${currentUser}`)
       .on(
         "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "quotes",
-        },
+        { event: "INSERT", schema: "public", table: "quotes" },
         async (payload: any) => {
           const newQuote = payload.new as { id: string; lead_id: string | null }
-
           if (!newQuote?.lead_id) return
-
-          // Buscamos el lead para ver a qué vendedor pertenece
-          const { data: lead, error } = await supabase
-            .from("leads")
-            .select("id, assigned_to, agent_name")
-            .eq("id", newQuote.lead_id)
-            .maybeSingle()
-
+          const { data: lead, error } = await supabase.from("leads").select("id, assigned_to, agent_name").eq("id", newQuote.lead_id).maybeSingle()
           if (error || !lead) return
-
-          const belongsToSeller =
-            lead.assigned_to === currentUser || lead.agent_name === currentUser
-
+          const belongsToSeller = lead.assigned_to === currentUser || lead.agent_name === currentUser
           if (!belongsToSeller) return
-
           setQuoteAlertsCount((c) => c + 1)
           openAlertsSoft()
         }
@@ -201,36 +203,19 @@ export function SellerManager({
       alive = false
       if (notifChannel) supabase.removeChannel(notifChannel)
       if (quotesChannel) supabase.removeChannel(quotesChannel)
+      if (salesChannel) supabase.removeChannel(salesChannel)
     }
   }, [currentUser])
 
-  // ✅ FIX REAL: cuando cambia selectedLeadId, traemos el lead y lo "adaptamos" al tipo CRMLead
+  // Fix Lead Detail
   useEffect(() => {
     let alive = true
-
     const fetchLead = async () => {
-      if (!selectedLeadId) {
-        setSelectedLead(null)
-        return
-      }
-
-      const { data, error } = await supabase
-        .from("leads")
-        .select("*")
-        .eq("id", selectedLeadId)
-        .maybeSingle()
-
+      if (!selectedLeadId) { setSelectedLead(null); return }
+      const { data, error } = await supabase.from("leads").select("*").eq("id", selectedLeadId).maybeSingle()
       if (!alive) return
-
-      if (error || !data) {
-        console.error(error)
-        setSelectedLead(null)
-        return
-      }
-
+      if (error || !data) { setSelectedLead(null); return }
       const row: any = data
-
-      // Adaptamos snake_case -> camelCase y completamos defaults
       const adapted: any = {
         ...row,
         createdAt: row.createdAt ?? row.created_at ?? null,
@@ -239,33 +224,19 @@ export function SellerManager({
         calls: row.calls ?? 0,
         intent: row.intent ?? null,
       }
-
       setSelectedLead(adapted as CRMLead)
     }
-
     fetchLead()
-
-    return () => {
-      alive = false
-    }
+    return () => { alive = false }
   }, [selectedLeadId])
 
-  const handleCreateConfirm = async (_data: any) => {
-    setIsCreateOpen(false)
-  }
+  const handleCreateConfirm = async (_data: any) => { setIsCreateOpen(false) }
 
   const markAllNotificationsAsRead = async () => {
     const ids = unreadNotifications.map((n) => n.id)
     if (ids.length === 0) return
-
-    // UI primero
     setUnreadNotifications([])
-
-    // DB
-    await supabase
-      .from("notifications")
-      .update({ read: true })
-      .in("id", ids)
+    await supabase.from("notifications").update({ read: true }).in("id", ids)
   }
 
   return (
@@ -321,9 +292,11 @@ export function SellerManager({
             <div className="flex items-center gap-3">
               <DollarSign className="h-4 w-4 shrink-0 text-green-600" /> Mis Ventas
             </div>
-            {totalUnreadMessages > 0 && (
-              <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse shadow-sm">
-                {totalUnreadMessages}
+            
+            {/* ✅ CONTADOR ROJO DE PROBLEMAS EN VENTAS */}
+            {problematicSalesCount > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full animate-pulse shadow-sm">
+                {problematicSalesCount}
               </span>
             )}
           </Button>
@@ -588,7 +561,6 @@ export function SellerManager({
         userName={currentUser}
       />
 
-      {/* ✅ FIX: LeadDetail recibe Lead del tipo correcto */}
       {selectedLeadId && (
         <LeadDetail
           lead={selectedLead}

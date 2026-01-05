@@ -24,11 +24,13 @@ import {
   RefreshCw,
   LifeBuoy,
   Megaphone,
+  Bell
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 // IMPORTAMOS TUS COMPONENTES
 import { AdminLeadFactory } from "@/components/admin/AdminLeadFactory"
@@ -166,7 +168,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState("overview")
   const [incomingAlert, setIncomingAlert] = useState<any>(null)
   
-  // ESTADO PARA DATOS DEL USUARIO (Nombre y Foto Real)
+  // ESTADO PARA DATOS DEL USUARIO
   const [userData, setUserData] = useState<{ name: string; email: string; avatar?: string; role?: string }>({
     name: "Cargando...",
     email: "",
@@ -174,99 +176,113 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     role: "Admin"
   })
 
+  // ESTADO PARA NOTIFICACIONES REALES
+  const [notifications, setNotifications] = useState<any[]>([])
+  const [isBellOpen, setIsBellOpen] = useState(false)
+
+  // LOGOUT SEGURO
+  const handleSafeLogout = async () => {
+    await supabase.auth.signOut()
+    onLogout()
+  }
+
+  // MARCAR LEÍDAS
+  const markAllRead = async () => {
+    const ids = notifications.map(n => n.id)
+    setNotifications([]) // Optimistic update
+    if (ids.length > 0) {
+        await supabase.from('notifications').update({ read: true }).in('id', ids)
+    }
+  }
+
   useEffect(() => {
-    // 1. Cargar datos del perfil REAL desde Supabase
     const initUserData = async () => {
-      // a) Obtener usuario autenticado
       const { data: { user } } = await supabase.auth.getUser()
 
       if (user) {
-        // b) Buscar su perfil en la tabla 'profiles'
+        // Cargar Perfil
         const { data: profile } = await supabase
             .from('profiles')
             .select('full_name, avatar_url, role')
             .eq('id', user.id)
             .single()
 
-        // c) Setear estado con los datos reales de la DB
         setUserData({
           name: profile?.full_name || user.email?.split("@")[0] || "Admin",
           email: user.email || "",
-          avatar: profile?.avatar_url, // URL de la foto real
+          avatar: profile?.avatar_url, 
           role: profile?.role || "Admin God"
         })
 
-        // d) Escuchar cambios en la tabla 'profiles' para actualizar foto/nombre en tiempo real
-        const profileChannel = supabase
-          .channel("admin_profile_changes")
-          .on(
-            "postgres_changes",
-            {
-              event: "UPDATE",
-              schema: "public",
-              table: "profiles",
-              filter: `id=eq.${user.id}`, // Solo escuchamos TU usuario
-            },
+        // Cargar Notificaciones Iniciales
+        const { data: notifs } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('read', false)
+            .order('created_at', { ascending: false })
+            .limit(20)
+            
+        if(notifs) setNotifications(notifs)
+
+        // Realtime Perfil
+        const profileChannel = supabase.channel("admin_profile_changes")
+          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${user.id}` },
             (payload) => {
               const newProfile = payload.new as any
-              setUserData((prev) => ({
-                ...prev,
-                name: newProfile.full_name || prev.name,
-                avatar: newProfile.avatar_url || prev.avatar,
-              }))
+              setUserData((prev) => ({ ...prev, name: newProfile.full_name || prev.name, avatar: newProfile.avatar_url || prev.avatar }))
             }
           )
           .subscribe()
 
-        return () => {
-          supabase.removeChannel(profileChannel)
-        }
+        return () => { supabase.removeChannel(profileChannel) }
       }
     }
 
     initUserData()
 
-    // 2. Alertas de Leads (Esto sigue igual)
-    const leadsChannel = supabase
-      .channel("god_mode_alerts")
+    // Realtime GLOBAL (Alertas de Leads Nuevos + Notificaciones de Sistema)
+    const globalChannel = supabase
+      .channel("god_mode_global")
+      // 1. POPUP DE DATO NUEVO (Solo si es status 'nuevo')
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, (payload) => {
         const newLead = payload.new as any
-        setIncomingAlert({
-          section: "leads",
-          name: newLead.name || "Nuevo Prospecto",
-          source: newLead.source || "MetaAds",
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        })
+        if (newLead.status === 'nuevo') {
+            setIncomingAlert({
+              section: "leads",
+              name: newLead.name || "Nuevo Prospecto",
+              source: newLead.source || "MetaAds",
+              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            })
+        }
+      })
+      // 2. CAMPANITA (Notificaciones generales)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
+           setNotifications(prev => [payload.new, ...prev])
       })
       .subscribe()
 
     return () => {
-      supabase.removeChannel(leadsChannel)
+      supabase.removeChannel(globalChannel)
     }
   }, [])
 
   return (
     <div className="flex h-screen w-full bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative overflow-hidden">
-      {/* ALERTA FLOTANTE */}
+      {/* ALERTA FLOTANTE (Solo Datos Nuevos) */}
       {incomingAlert && (
-        <div className="fixed z-[9999] bottom-6 right-6 animate-in slide-in-from-right-full">
-          <div className="bg-slate-900 text-white rounded-xl shadow-2xl border-l-4 border-l-emerald-500 p-4 w-80">
+        <div className="fixed z-[9999] bottom-6 right-6 animate-in slide-in-from-right-full cursor-pointer" onClick={() => {setView("leads"); setIncomingAlert(null)}}>
+          <div className="bg-slate-900 text-white rounded-xl shadow-2xl border-l-4 border-l-emerald-500 p-4 w-80 hover:bg-slate-800 transition-colors">
             <div className="flex justify-between items-center mb-2">
               <h4 className="font-black text-emerald-400 text-xs tracking-widest uppercase flex items-center gap-2">
                 <Sparkles className="h-3 w-3" /> ¡DATO INGRESADO!
               </h4>
-              <X className="h-4 w-4 cursor-pointer text-slate-500" onClick={() => setIncomingAlert(null)} />
+              <button className="text-slate-500 hover:text-white" onClick={(e) => {e.stopPropagation(); setIncomingAlert(null)}}><X className="h-4 w-4"/></button>
             </div>
             <p className="font-bold text-lg">{incomingAlert.name}</p>
-            <Button
-              onClick={() => {
-                setView(incomingAlert.section)
-                setIncomingAlert(null)
-              }}
-              className="w-full mt-3 bg-emerald-600 text-white text-xs h-9 font-bold tracking-tight"
-            >
-              VER AHORA
-            </Button>
+            <div className="flex justify-between items-center mt-2">
+                <span className="text-xs text-slate-400">{incomingAlert.source}</span>
+                <span className="text-xs font-mono text-slate-500">{incomingAlert.time}</span>
+            </div>
           </div>
         </div>
       )}
@@ -355,17 +371,51 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         {/* FOOTER - PERFIL DE USUARIO REAL */}
         <div className="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
           <div className="flex items-center gap-3 mb-4 px-2">
-            <Avatar className="h-10 w-10 border-2 border-blue-500 shadow-sm">
-              <AvatarImage src={userData.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${userData.name}`} />
-              <AvatarFallback className="bg-slate-800 text-blue-400 font-bold">{userData.name.substring(0, 2).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <div className="overflow-hidden">
-              <p className="font-bold text-sm text-white truncate capitalize">{userData.name}</p>
-              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">{userData.role || "Gerencia"}</p>
+             {/* CAMPANITA ADMIN */}
+            <Popover open={isBellOpen} onOpenChange={setIsBellOpen}>
+                <PopoverTrigger asChild>
+                    <Button size="icon" variant="ghost" className="relative hover:bg-slate-800 text-slate-400 hover:text-white">
+                        <Bell className="h-5 w-5" />
+                        {notifications.length > 0 && <span className="absolute top-0 right-0 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-slate-900 animate-pulse"></span>}
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0 bg-white text-slate-900 shadow-xl border-0" align="start" side="top">
+                    <div className="p-3 border-b flex justify-between items-center bg-slate-50">
+                        <span className="text-xs font-bold text-slate-600">Notificaciones</span>
+                        {notifications.length > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600" onClick={markAllRead}>Marcar leídas</Button>}
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto">
+                        {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
+                            notifications.map((n) => (
+                                <div key={n.id} className="p-3 border-b hover:bg-slate-50 transition-colors last:border-0">
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 shrink-0"></div>
+                                        <div>
+                                            <h5 className="text-xs font-bold text-slate-800">{n.title}</h5>
+                                            <p className="text-[10px] text-slate-500 mt-0.5">{n.body}</p>
+                                            <span className="text-[9px] text-slate-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        }
+                    </div>
+                </PopoverContent>
+            </Popover>
+
+            <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                <Avatar className="h-9 w-9 border-2 border-blue-500 shadow-sm shrink-0">
+                <AvatarImage src={userData.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${userData.name}`} />
+                <AvatarFallback className="bg-slate-800 text-blue-400 font-bold">{userData.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <div className="overflow-hidden">
+                <p className="font-bold text-xs text-white truncate capitalize">{userData.name}</p>
+                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">{userData.role || "Gerencia"}</p>
+                </div>
             </div>
           </div>
 
-          <Button variant="destructive" className="w-full h-9 text-xs font-bold" onClick={onLogout}>
+          <Button variant="destructive" className="w-full h-9 text-xs font-bold" onClick={handleSafeLogout}>
             <LogOut className="h-3.5 w-3.5 mr-2" /> CERRAR SESIÓN
           </Button>
         </div>

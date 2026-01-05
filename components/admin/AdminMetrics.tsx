@@ -190,14 +190,17 @@ export function AdminMetrics() {
     setLoading(true)
 
     // --- 1) LEADS (mínimo necesario) ---
+    // Usamos select * para evitar errores si faltan columnas específicas como first_contact_at
+    // pero intentamos mapear lo que existe
     let leadsQuery = supabase
       .from("leads")
-      .select("id,created_at,last_update,first_contact_at,status,agent_name,price,quoted_price,source,loss_reason")
+      .select("*") 
       .gte("created_at", `${dateStart}T00:00:00`)
       .lte("created_at", `${dateEnd}T23:59:59`)
 
     if (agent !== "global") {
       const agentName = agent.charAt(0).toUpperCase() + agent.slice(1)
+      // Intentamos filtrar por columna agent_name si existe
       leadsQuery = leadsQuery.ilike("agent_name", `%${agentName}%`)
     }
 
@@ -207,30 +210,31 @@ export function AdminMetrics() {
     const leads: Lead[] = Array.isArray(leadsRaw) ? (leadsRaw as any) : []
 
     // --- 2) HISTORIAL DE ESTADOS (gestión real) ---
-    // Si existe la tabla, esto trae cambios y permite heatmap/daily/insistencia reales.
+    // Mapeamos las columnas de la BD (status, created_at) a lo que espera este componente (to_status, changed_at)
     let events: StatusEvent[] = []
     try {
       let evQuery = supabase
         .from("lead_status_history")
-        .select("id,lead_id,agent_name,from_status,to_status,changed_at")
-        .gte("changed_at", `${dateStart}T00:00:00`)
-        .lte("changed_at", `${dateEnd}T23:59:59`)
-        .order("changed_at", { ascending: true })
+        .select("id, lead_id, agent_name, to_status:status, changed_at:created_at") // Alias clave para que funcione el gráfico
+        .gte("created_at", `${dateStart}T00:00:00`)
+        .lte("created_at", `${dateEnd}T23:59:59`)
+        .order("created_at", { ascending: true })
 
       if (agent !== "global") {
         const agentName = agent.charAt(0).toUpperCase() + agent.slice(1)
+        // Nota: Si lead_status_history no tiene agent_name, este filtro podría fallar en historial, 
+        // pero seguimos adelante para no romper la app.
         evQuery = evQuery.ilike("agent_name", `%${agentName}%`)
       }
 
       const { data: evRaw, error: evErr } = await evQuery
       if (evErr) {
-        // si no existe tabla o hay RLS, no cortamos todo el tablero
-        console.warn("No se pudo leer lead_status_history (heatmap/daily quedan en 0):", evErr.message)
+        console.warn("No se pudo leer lead_status_history:", evErr.message)
       } else {
         events = Array.isArray(evRaw) ? (evRaw as any) : []
       }
     } catch (e) {
-      console.warn("lead_status_history no disponible:", e)
+      console.warn("lead_status_history no disponible o error de conexión:", e)
     }
 
     // --- CÁLCULOS REALES ---
@@ -256,6 +260,7 @@ export function AdminMetrics() {
 
       // Revenue solo si no es “muy temprano”
       if (!["nuevo", "contactado", "perdido"].includes(s)) {
+        // Fallback a 0 si no hay precio cargado
         totalRevenue += Number(l.price) || Number(l.quoted_price) || 0
       }
     })
@@ -269,8 +274,8 @@ export function AdminMetrics() {
     const strikeRate = totalLeads > 0 ? ((salesCount / totalLeads) * 100).toFixed(1) : "0.0"
 
     // --- Velocidad real (primer “contacto/gestión”) ---
-    // 1) first_contact_at si existe
-    // 2) fallback: primer evento en lead_status_history para ese lead (si existiera)
+    // 1) first_contact_at si existe en la tabla leads
+    // 2) fallback: primer evento en lead_status_history para ese lead
     const firstEventByLead = new Map<string, string>()
     for (const ev of events) {
       if (!firstEventByLead.has(ev.lead_id)) firstEventByLead.set(ev.lead_id, ev.changed_at)

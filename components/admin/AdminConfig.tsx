@@ -12,8 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-// Se agregó 'Globe' que faltaba y 'Headset' para el rol de Setter
-import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe } from "lucide-react"
+import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export function AdminConfig() {
@@ -35,6 +34,15 @@ export function AdminConfig() {
     const [ranges8hs, setRanges8hs] = useState<any[]>([])
     const [absorb5, setAbsorb5] = useState("8")
     const [absorb8, setAbsorb8] = useState("12")
+
+    // Estado Configuración Cementerio (Freeze Times) - NUEVO
+    const [freezeConfig, setFreezeConfig] = useState({
+        fantasmas: 30,
+        precio: 60,
+        interes: 45,
+        quemados: 45,
+        basural: 365
+    })
 
     // Formulario Usuario
     const [formData, setFormData] = useState({
@@ -81,12 +89,14 @@ export function AdminConfig() {
             const r8 = data.find(c => c.key === 'ranges_8hs')?.value
             const a5 = data.find(c => c.key === 'absorb_5hs')?.value
             const a8 = data.find(c => c.key === 'absorb_8hs')?.value
-            
+            const gz = data.find(c => c.key === 'graveyard_config')?.value // Cargar config cementerio
+
             // Si hay datos en DB los usamos, sino usamos defaults vacíos para no romper
             if (r5) setRanges5hs(r5); else setRanges5hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (r8) setRanges8hs(r8); else setRanges8hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (a5) setAbsorb5(a5)
             if (a8) setAbsorb8(a8)
+            if (gz) setFreezeConfig(gz) // Setear estado cementerio
         }
     }
 
@@ -99,7 +109,8 @@ export function AdminConfig() {
             { key: 'ranges_5hs', value: ranges5hs },
             { key: 'ranges_8hs', value: ranges8hs },
             { key: 'absorb_5hs', value: absorb5 },
-            { key: 'absorb_8hs', value: absorb8 }
+            { key: 'absorb_8hs', value: absorb8 },
+            { key: 'graveyard_config', value: freezeConfig } // Guardar config cementerio
         ]
 
         const { error } = await supabase.from('system_config').upsert(updates)
@@ -108,7 +119,7 @@ export function AdminConfig() {
         if (error) {
             alert("❌ Error al guardar: " + error.message)
         } else {
-            alert("✅ Configuración de comisiones guardada correctamente en Base de Datos.")
+            alert("✅ Configuración guardada correctamente en Base de Datos.")
         }
     }
 
@@ -126,7 +137,7 @@ export function AdminConfig() {
         setList(list.filter(i => i.id !== id))
     }
 
-    // --- GESTIÓN USUARIOS ---
+    // --- GESTIÓN USUARIOS (SOLUCIÓN PUNTO 14) ---
     const openCreateModal = () => {
         setEditingUserId(null)
         setFormData({ name: "", email: "", password: "", role: "seller", work_hours: "5", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` })
@@ -162,30 +173,38 @@ export function AdminConfig() {
         setLoading(true)
 
         try {
-            const profileData = {
-                full_name: formData.name,
-                email: formData.email, 
-                role: formData.role, // Aquí viaja 'setter' si se selecciona
-                work_hours: parseInt(formData.work_hours),
-                avatar_url: formData.avatar
-            }
-
             if (editingUserId) {
-                // UPDATE PERFIL EXISTENTE
-                const { error } = await supabase.from('profiles').update(profileData).eq('id', editingUserId)
+                // UPDATE PERFIL EXISTENTE (Solo actualizamos metadata del perfil)
+                const { error } = await supabase.from('profiles').update({
+                    full_name: formData.name,
+                    role: formData.role,
+                    work_hours: parseInt(formData.work_hours),
+                    avatar_url: formData.avatar
+                }).eq('id', editingUserId)
+
                 if (error) throw error
-                if (formData.password) alert("Nota: La contraseña solo se actualiza si el usuario la cambia personalmente o vía email de recuperación.")
+                if (formData.password) alert("Nota: Para cambiar la contraseña de un usuario existente, usá el panel de Supabase Auth o enviá un mail de recuperación.")
                 else alert("Usuario actualizado correctamente.")
 
             } else {
-                // CREAR NUEVO (Nota: Crear usuario Auth requiere API Admin o Signup, aquí guardamos el perfil)
-                const { error } = await supabase.from('profiles').insert([profileData])
+                // CREAR NUEVO USUARIO (Usando la función RPC 'create_new_user')
+                if (!formData.password) {
+                    setLoading(false)
+                    return alert("La contraseña es obligatoria para nuevos usuarios.")
+                }
+
+                const { data, error } = await supabase.rpc('create_new_user', {
+                    email: formData.email,
+                    password: formData.password,
+                    full_name: formData.name,
+                    role: formData.role,
+                    work_hours: parseInt(formData.work_hours)
+                })
                 
                 if (error) {
-                    console.error(error)
-                    alert("Error guardando perfil: " + error.message)
+                    throw error
                 } else {
-                    alert("Perfil de usuario creado. El usuario deberá registrarse con este email.")
+                    alert("Usuario creado exitosamente con acceso al sistema. ✅")
                 }
             }
 
@@ -201,6 +220,8 @@ export function AdminConfig() {
 
     const handleDeleteUser = async (id: string) => {
         if (!confirm("¿Estás seguro? Se borrará el acceso.")) return
+        // Nota: Para borrar completamente, idealmente se debería usar una RPC de borrado de usuario auth.
+        // Por ahora borramos el perfil, lo que quita acceso visual.
         await supabase.from('profiles').delete().eq('id', id)
         setUsers(users.filter(u => u.id !== id))
     }
@@ -302,6 +323,54 @@ export function AdminConfig() {
                 {/* 2. CRM & ESTADOS */}
                 <TabsContent value="crm" className="space-y-6 mt-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        {/* CONFIGURACIÓN CEMENTERIO (NUEVO) */}
+                        <Card className="md:col-span-2 border-l-4 border-l-blue-500">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2"><Snowflake className="h-5 w-5 text-blue-500"/> Configuración de Cementerio</CardTitle>
+                                <CardDescription>Días de congelamiento antes de que un lead pueda ser reciclado.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    <div className="space-y-1">
+                                        <Label className="text-xs text-slate-500 font-bold">Fantasmas (No contesta)</Label>
+                                        <div className="relative">
+                                            <Input type="number" className="pl-2 pr-8" value={freezeConfig.fantasmas} onChange={e => setFreezeConfig({...freezeConfig, fantasmas: parseInt(e.target.value) || 0})}/>
+                                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs text-slate-500 font-bold">Interés Caído</Label>
+                                        <div className="relative">
+                                            <Input type="number" className="pl-2 pr-8" value={freezeConfig.interes} onChange={e => setFreezeConfig({...freezeConfig, interes: parseInt(e.target.value) || 0})}/>
+                                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs text-slate-500 font-bold">Precio / Caro</Label>
+                                        <div className="relative">
+                                            <Input type="number" className="pl-2 pr-8" value={freezeConfig.precio} onChange={e => setFreezeConfig({...freezeConfig, precio: parseInt(e.target.value) || 0})}/>
+                                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs text-red-500 font-bold flex items-center gap-1"><Flame size={10}/> Quemados (+7)</Label>
+                                        <div className="relative">
+                                            <Input type="number" className="pl-2 pr-8 border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
+                                            <span className="absolute right-3 top-2.5 text-xs text-red-400 font-bold">días</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs text-slate-500 font-bold">Basural (Inválidos)</Label>
+                                        <div className="relative">
+                                            <Input type="number" className="pl-2 pr-8" value={freezeConfig.basural} onChange={e => setFreezeConfig({...freezeConfig, basural: parseInt(e.target.value) || 0})}/>
+                                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
                         <Card>
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2"><XCircle className="h-5 w-5 text-red-500"/> Motivos de Pérdida</CardTitle>
@@ -439,7 +508,7 @@ export function AdminConfig() {
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="seller">Vendedora</SelectItem>
-                                        <SelectItem value="setter">Gestora de Leads (Setter)</SelectItem> {/* Opción Setter agregada */}
+                                        <SelectItem value="setter">Gestora de Leads (Setter)</SelectItem> 
                                         <SelectItem value="admin_common">Administrativa Común</SelectItem>
                                         <SelectItem value="admin_god">Administrativa GOD</SelectItem>
                                         <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>

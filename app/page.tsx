@@ -4,11 +4,11 @@ import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase"
 import { Loader2 } from "lucide-react"
 
-// --- IMPORTACIONES ---
+// --- IMPORTACIONES DE PANELES ---
 import { LoginView } from "@/components/auth/LoginView"
 import { AdminDashboard } from "@/components/admin/AdminDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
-import { SellerManager } from "@/components/crm/SellerManager" // <--- CAMBIADO
+import { SellerManager } from "@/components/crm/SellerManager"
 import { SetterDashboard } from "@/components/setter/SetterDashboard"
 
 export default function Home() {
@@ -19,7 +19,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // 1. Verificar sesión activa
+    // 1. Verificar sesión activa al inicio
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       setSession(session)
@@ -33,7 +33,7 @@ export default function Home() {
 
     checkSession()
 
-    // 2. Escuchar cambios (login/logout)
+    // 2. Escuchar cambios de estado (Login / Logout externos)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
@@ -48,6 +48,7 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Buscar rol real en la tabla 'profiles'
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -59,6 +60,8 @@ export default function Home() {
       if (data) {
         setRole(data.role) 
         setUserName(data.full_name || "Usuario")
+      } else {
+        console.warn("Usuario sin perfil:", userId)
       }
     } catch (error) {
       console.error("Error fetching profile:", error)
@@ -67,9 +70,10 @@ export default function Home() {
     }
   }
 
+  // LOGOUT GLOBAL (Limpia todo)
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    // Forzamos recarga para limpiar estados de memoria
+    // Forzamos recarga dura para limpiar estados de memoria (chat, notificaciones, etc.)
     window.location.href = "/" 
   }
 
@@ -83,34 +87,39 @@ export default function Home() {
     )
   }
 
-  // 1. LOGIN
+  // 1. SI NO HAY SESIÓN -> LOGIN
   if (!session) {
     return <LoginView />
   }
 
-  // 2. RUTEO DE ROLES
+  // 2. RUTEO DE ROLES (Director de Tráfico)
 
-  // A. SUPERVISIÓN GOD
-  if (role === "supervisor_god") {
+  // A. NIVEL GERENCIAL (GOD MODE)
+  // Ahora incluye 'admin_god' para que vea el Dashboard Global
+  if (role === "supervisor_god" || role === "admin_god") {
     return <AdminDashboard onLogout={handleLogout} />
   }
 
-  // B. ADMINISTRACIÓN (GOD y COMÚN)
-  if (role === "admin_god" || role === "admin_common" || role === "ops") {
+  // B. NIVEL OPERATIVO (OPS)
+  // 'admin_common' y 'ops' van a la gestión diaria
+  if (role === "admin_common" || role === "ops") {
+    // OpsManager maneja su propio logout internamente o via prop si se actualiza
     return <OpsManager role={role as any} userName={userName} />
   }
 
   // C. SETTER (GESTORA DE LEADS)
   if (role === "setter") {
-    return <SetterDashboard /> 
+    // Le pasamos props por si el componente las acepta
+    return <SetterDashboard userName={userName} onLogout={handleLogout} /> 
   }
 
-  // D. VENDEDORAS
+  // D. VENDEDORAS (SELLER)
   if (role === "seller") {
-    // CAMBIO CLAVE: Llamamos al Manager para que dibuje el Sidebar
     return <SellerManager userName={userName} onLogout={handleLogout} />
   }
 
-  // Default: Por seguridad mandamos al SellerManager
+  // E. DEFAULT / ERROR DE ROL
+  // Si el rol no coincide con ninguno, mandamos al SellerManager como fallback seguro
+  // o podríamos mostrar un mensaje de "Rol no asignado".
   return <SellerManager userName={userName} onLogout={handleLogout} />
 }

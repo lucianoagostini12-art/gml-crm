@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { createClient } from "@/lib/supabase" // Conexión Real
+import { createClient } from "@/lib/supabase"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,12 +12,33 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-// --- CORRECCIÓN: Se agregó 'ArrowRight' a los imports ---
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight } from "lucide-react"
-import { Operation } from "./data"
+import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
-// --- 1. CONFIGURACIÓN (Mantenemos tu config original) ---
+// --- TIPOS ---
+type Operation = {
+    id: string
+    entryDate: string
+    clientName: string
+    dni: string
+    origen: string
+    seller: string
+    prepaga: string
+    plan: string
+    fullPrice: string
+    aportes: string
+    descuento: string
+    status: string
+    condicionLaboral?: string
+    hijos?: any[]
+    // Campos de Billing
+    billing_approved?: boolean
+    billing_period?: string
+    billing_price_override?: number
+    billing_portfolio_override?: number
+}
+
+// --- CONFIGURACIÓN ESTÁTICA ---
 const SELLERS_DB: Record<string, { shift: '5hs' | '8hs', photo: string }> = {
     "Maca": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Maca" },
     "Agus": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Agus" },
@@ -77,17 +98,19 @@ const getSourceIcon = (source: string) => {
     return <Phone size={10} className="mr-1"/>
 }
 
-// --- HELPER FECHA AUTOMÁTICA ---
 const getCurrentMonth = () => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function OpsBilling({ operations }: { operations: Operation[] }) {
+export function OpsBilling() {
     const supabase = createClient()
     
+    // --- ESTADO DE DATOS (Fetch propio) ---
+    const [operations, setOperations] = useState<Operation[]>([])
+    const [loading, setLoading] = useState(true)
+
     const [activeTab, setActiveTab] = useState("audit") 
-    // FECHA AUTOMÁTICA AL INICIAR
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
     const [isLocked, setIsLocked] = useState(false)
     const [rules, setRules] = useState(DEFAULT_RULES)
@@ -108,31 +131,71 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     // Seller Detail Modal
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
     
-    // --- CARGAR DATOS MANUALES ---
-    useEffect(() => {
-        const fetchManual = async () => {
-            const { data } = await supabase.from('billing_manual_clients').select('*').order('created_at', { ascending: false })
-            if (data) setManualPortfolio(data)
-        }
+    // --- CARGAR DATOS DESDE SUPABASE ---
+    const fetchData = async () => {
+        setLoading(true)
+        // 1. Traer Ventas CUMPLIDAS (status = cumplidas)
+        // Mapeamos los campos de la BD a la estructura que usa el componente
+        const { data: opsData } = await supabase
+            .from('leads')
+            .select('*')
+            .eq('status', 'cumplidas') 
+            .order('last_update', { ascending: false })
         
-        fetchManual()
+        if (opsData) {
+            const mapped: Operation[] = opsData.map((d: any) => ({
+                id: d.id,
+                entryDate: d.created_at,
+                clientName: d.name,
+                dni: d.dni || "", // Asegúrate que tu BD tenga campo DNI o úsalo de metadata
+                origen: d.source,
+                seller: d.agent_name,
+                prepaga: d.company_name || d.health_insurance || d.prepaga,
+                plan: d.plan_type || d.plan,
+                fullPrice: d.price || "0",
+                aportes: d.aportes || "0", // Asegurarse que existan en DB si se usan
+                descuento: d.descuento || "0",
+                status: d.status,
+                condicionLaboral: d.employment_status,
+                hijos: d.hijos || [],
+                // Billing fields
+                billing_approved: d.billing_approved,
+                billing_period: d.billing_period,
+                billing_price_override: d.billing_price_override,
+                billing_portfolio_override: d.billing_portfolio_override
+            }))
+            setOperations(mapped)
+        }
 
-        // Suscripción Realtime para cartera manual
-        const channel = supabase.channel('billing_manual')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchManual())
+        // 2. Traer Manual Portfolio
+        const { data: manualData } = await supabase.from('billing_manual_clients').select('*').order('created_at', { ascending: false })
+        if (manualData) setManualPortfolio(manualData)
+        
+        setLoading(false)
+    }
+
+    useEffect(() => {
+        fetchData()
+        
+        // Suscripción a cambios en tiempo real
+        const channel = supabase.channel('billing_realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: 'status=eq.cumplidas' }, () => fetchData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchData())
             .subscribe()
 
         return () => { supabase.removeChannel(channel) }
     }, [])
 
-    // --- UPDATER GENÉRICO PARA SUPABASE ---
+    // --- UPDATER A BASE DE DATOS ---
     const updateOpBilling = async (id: string, updates: any) => {
-        const { error } = await supabase.from('leads').update(updates).eq('id', id)
-        if (error) console.error("Error actualizando billing:", error)
-        // No hace falta actualizar estado local manual, OpsManager (padre) tiene realtime y pasará las nuevas props 'operations'
+        // Optimistic update local
+        setOperations(prev => prev.map(op => op.id === id ? { ...op, ...updates } : op))
+        
+        // Update Real
+        await supabase.from('leads').update(updates).eq('id', id)
     }
 
-    // --- CALCULADORA (Adaptada para leer de las props reales de DB) ---
+    // --- CALCULADORA ---
     const calculate = (op: any) => {
         let val = 0, formula = ""
         
@@ -141,7 +204,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
             val = parseFloat(op.billing_price_override)
             formula = "Manual (Editado)"
         } else {
-            const full = parseFloat(op.fullPrice || op.price || "0") // Adaptado para leer price tambien
+            const full = parseFloat(op.fullPrice || "0")
             const aportes = parseFloat(op.aportes || "0")
             const desc = parseFloat(op.descuento || "0")
             const p = op.prepaga?.toLowerCase() || ""
@@ -176,13 +239,10 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         return { val: Math.round(val), formula, portfolio: portfolioVal }
     }
 
-    // --- LOGICA DE DATOS (Filtrado Real) ---
+    // --- LOGICA DE DATOS (Filtrado) ---
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
-            // Solo operaciones finalizadas
-            if (op.status !== 'cumplidas') return false
-            
-            // Chequear si tiene un mes diferido en DB, sino usar fecha de venta
+            // Chequear si tiene un mes diferido en DB, sino usar fecha de venta (created_at)
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
             
@@ -196,7 +256,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         })
     }, [operations, selectedMonth, filters])
 
-    // Filtros de aprobación basados en DB
     const pendingOps = opsInPeriod.filter((op: any) => !op.billing_approved)
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved)
 
@@ -221,8 +280,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
     const portfolioOps = approvedOps.reduce((acc, op) => op.prepaga?.toLowerCase().includes('preven') ? acc + calculate(op).portfolio : acc, 0)
     
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => {
-         // Si tuviera override manual en DB (future feature), aquí iría logic. Por ahora calculado.
-         return acc + (parseFloat(item.calculated_liquidation || item.calculatedLiquidation) * rules.portfolioRate)
+         return acc + (parseFloat(item.calculated_liquidation || item.calculatedLiquidation || "0") * rules.portfolioRate)
     }, 0)
     
     const totalPortfolio = portfolioOps + portfolioManualTotal
@@ -289,7 +347,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         return result.sort((a, b) => b.total - a.total)
     }, [approvedOps, rules])
 
-    // --- HANDLERS CONECTADOS A DB ---
+    // --- HANDLERS ---
     const handlePriceChange = (id: string, newVal: string) => {
         const num = parseFloat(newVal)
         if (!isNaN(num)) updateOpBilling(id, { billing_price_override: num })
@@ -308,7 +366,12 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         updateOpBilling(id, { billing_period: nextStr })
     }
     
-    const approveOp = (id: string) => updateOpBilling(id, { billing_approved: true })
+    const approveOp = (id: string) => {
+        // Al aprobar, si no tiene override, podríamos setear el valor calculado como override
+        // para que quede "congelado". Por ahora, solo marcamos approved.
+        updateOpBilling(id, { billing_approved: true })
+    }
+
     const unapproveOp = (id: string) => updateOpBilling(id, { billing_approved: false })
     
     const calculateManualLiquidation = () => {
@@ -324,7 +387,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         if(!newClient.name) return
         const val = calculateManualLiquidation()
         
-        // Guardar en DB Real
         const { error } = await supabase.from('billing_manual_clients').insert({
             name: newClient.name,
             dni: newClient.dni,
@@ -340,14 +402,13 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         if (!error) {
             setNewClient({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] })
             setIsAddingClient(false)
-            // El realtime actualizará la lista
         }
     }
 
     const uniqueSellers = Array.from(new Set(operations.map(o => o.seller)))
     const uniquePrepagas = Array.from(new Set(operations.map(o => o.prepaga).filter((p): p is string => !!p)))
 
-    // --- HELPER PARA DETALLE (Visual sin cambios) ---
+    // --- HELPER PARA DETALLE ---
     const getSellerOpsDetail = (sellerName: string | null) => {
         if (!sellerName) return []
         
@@ -375,6 +436,8 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
         return ops.map((op: any) => ({ ...op, payStatus: statusMap[op.id] }))
     }
 
+    if (loading && operations.length === 0) return <div className="h-screen flex items-center justify-center text-slate-400 gap-2"><Loader2 className="animate-spin"/> Cargando Centro Financiero...</div>
+
     return (
         <div className="p-6 h-full flex flex-col gap-6 overflow-hidden max-w-[1900px] mx-auto pb-20">
             {/* 1. HEADER */}
@@ -396,10 +459,9 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                         <Select value={selectedMonth} onValueChange={setSelectedMonth}>
                             <SelectTrigger className="border-0 font-black bg-transparent focus:ring-0 h-auto p-0 text-slate-800 w-[140px] text-sm"><SelectValue/></SelectTrigger>
                             <SelectContent align="end">
-                                {/* GENERADOR DE MESES DINÁMICO */}
                                 {Array.from({length: 6}).map((_, i) => {
                                     const d = new Date();
-                                    d.setMonth(d.getMonth() - i + 2); // Desde 2 meses adelante hacia atrás
+                                    d.setMonth(d.getMonth() - i + 2);
                                     const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                                     const label = d.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
                                     return <SelectItem key={val} value={val} className="capitalize">{label}</SelectItem>
@@ -407,7 +469,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                             </SelectContent>
                         </Select>
                     </div>
-                    {/* ... Resto de botones igual ... */}
                     <div className="h-8 w-px bg-slate-200 mx-2"></div>
                     <Button variant="outline" size="sm" onClick={() => setShowConfig(!showConfig)}>
                         <Settings2 size={14} className="mr-2"/> Reglas
@@ -418,7 +479,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                 </div>
             </div>
 
-            {/* 2. TABLERO DE TOTALES (Igual) */}
+            {/* 2. TABLERO DE TOTALES */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
                 <Card className="bg-slate-900 border-0 text-white shadow-xl relative overflow-hidden">
                     <CardContent className="p-5 flex flex-col justify-between h-full z-10 relative">
@@ -476,7 +537,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                         </TabsTrigger>
                     </TabsList>
                     
-                    {/* FILTROS (Igual) */}
+                    {/* FILTROS */}
                     <div className="flex gap-2 mb-2 items-center">
                         <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                             <PopoverTrigger asChild>
@@ -558,8 +619,11 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                                 </div>
                                                             </PopoverTrigger>
                                                             <PopoverContent className="w-64 p-0 shadow-xl border-slate-200">
-                                                                {/* Contenido Popover igual */}
-                                                                <div className="p-2 text-xs text-slate-500">Detalle de cápitas...</div>
+                                                                <div className="p-2 text-xs text-slate-500">
+                                                                    {op.hijos && op.hijos.length > 0 ? (
+                                                                         op.hijos.map((h: any, i:number) => <div key={i}>{h.name}</div>)
+                                                                    ) : "Solo titular"}
+                                                                </div>
                                                             </PopoverContent>
                                                         </Popover>
                                                     </div>
@@ -570,7 +634,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     <div className="text-xs font-bold text-slate-500">{op.plan}</div>
                                                 </TableCell>
                                                 <TableCell className="text-right text-xs font-mono text-slate-500">
-                                                    <div>FP: ${parseInt(op.fullPrice || op.price || "0").toLocaleString()}</div>
+                                                    <div>FP: ${parseInt(op.fullPrice || "0").toLocaleString()}</div>
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="text-[10px] bg-slate-100 p-1 rounded font-mono text-slate-500 truncate" title={calc.formula}>{calc.formula}</div>
@@ -600,7 +664,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                 {/* --- LIQUIDACIÓN OFICIAL --- */}
                 <TabsContent value="official" className="flex-1 overflow-hidden m-0">
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-green-600">
-                        {/* ... HEADER TOTALES ... */}
+                        {/* HEADER TOTALES */}
                         <div className="bg-white p-3 border-b border-slate-100">
                             <div className="flex justify-between items-center mb-4">
                                 <div className="text-xs text-green-800 font-medium flex items-center gap-2">
@@ -610,7 +674,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                     <Download size={12}/> Exportar Excel
                                 </Button>
                             </div>
-                            {/* ... CAJAS DE TOTALES (Igual) ... */}
                         </div>
 
                         <CardContent className="p-0 flex-1 overflow-auto">
@@ -640,7 +703,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-xs text-slate-600 font-medium">{op.seller}</TableCell>
-                                                <TableCell className="text-right font-mono text-xs text-slate-500">${parseInt(op.fullPrice || op.price || "0").toLocaleString()}</TableCell>
+                                                <TableCell className="text-right font-mono text-xs text-slate-500">${parseInt(op.fullPrice || "0").toLocaleString()}</TableCell>
                                                 <TableCell className="text-center">
                                                     <div className="bg-slate-100 text-[9px] px-2 py-0.5 rounded text-slate-500 truncate inline-block max-w-[150px]" title={calc.formula}>{calc.formula}</div>
                                                 </TableCell>
@@ -737,10 +800,9 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                     </Card>
                 </TabsContent>
 
-                {/* --- COMISIONES (Igual) --- */}
+                {/* --- COMISIONES --- */}
                 <TabsContent value="commissions" className="flex-1 overflow-hidden m-0">
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-pink-500 bg-slate-50/50">
-                        {/* ... Contenido de comisiones visualmente igual ... */}
                         <div className="flex-1 overflow-y-auto p-6">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {sellersCommissions.map((seller, index) => (
@@ -752,7 +814,6 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                             </Button>
                                         </div>
                                         <CardContent className="p-6">
-                                            {/* ... Tarjeta Vendedora Igual ... */}
                                             <div className="flex items-start justify-between mb-4">
                                                 <div className="flex items-center gap-3">
                                                     <Avatar className="h-14 w-14 border-2 border-white shadow-md">
@@ -772,7 +833,17 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                                                     <div className="text-[10px] font-bold text-green-600 uppercase tracking-wider">A Pagar</div>
                                                 </div>
                                             </div>
-                                            {/* ... Detalles Comisiones ... */}
+                                            
+                                            <div className="space-y-2 text-xs text-slate-500 border-t pt-3">
+                                                <div className="flex justify-between">
+                                                    <span>Variables ({seller.variableCount - seller.payableCount < 0 ? 0 : seller.payableCount} a pagar):</span>
+                                                    <span className="font-bold text-slate-700">${Math.round(seller.variableCommission).toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span>Especiales ({seller.specialCount}):</span>
+                                                    <span className="font-bold text-slate-700">${Math.round(seller.specialCommission).toLocaleString()}</span>
+                                                </div>
+                                            </div>
                                         </CardContent>
                                     </Card>
                                 ))}
@@ -782,7 +853,7 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                 </TabsContent>
             </Tabs>
 
-            {/* DIALOGO DETALLE VENDEDOR (Visual igual) */}
+            {/* DIALOGO DETALLE VENDEDOR */}
             <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}>
                 <DialogContent className="max-w-3xl">
                     <DialogHeader>
@@ -823,14 +894,14 @@ export function OpsBilling({ operations }: { operations: Operation[] }) {
                 </DialogContent>
             </Dialog>
 
-            {/* DIALOGO AGREGAR CLIENTE MANUAL (Funcional) */}
+            {/* DIALOGO AGREGAR CLIENTE MANUAL */}
             <Dialog open={isAddingClient} onOpenChange={setIsAddingClient}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2"><UserPlus className="text-blue-600"/> Agregar Cliente a Cartera Manual</DialogTitle>
                         <DialogDescription>Ingresá los datos completos para calcular la liquidación y la cartera estimada.</DialogDescription>
                     </DialogHeader>
-                    {/* ... Formulario Visualmente Igual ... */}
+                    
                     <div className="grid grid-cols-2 gap-6 py-4">
                         <div className="space-y-4">
                             <div className="space-y-1">

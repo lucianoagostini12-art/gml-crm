@@ -20,7 +20,7 @@ import { Lead, LeadCard } from "./LeadCard"
 import { LeadDetail } from "./LeadDetail"
 import { DocConfirmDialog } from "./DocConfirmDialog"
 import { LostLeadDialog } from "@/components/seller/LostLeadDialog"
-import { WonLeadDialog } from "@/components/seller/WonLeadDialog" // Este ya maneja el Wizard internamente
+import { WonLeadDialog } from "@/components/seller/WonLeadDialog" 
 import { QuotationDialog } from "@/components/seller/QuotationDialog"
 
 const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
@@ -111,6 +111,8 @@ export function KanbanBoard({ userName }: { userName?: string }) {
     const [alarmLead, setAlarmLead] = useState<Lead | null>(null)
     const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null)
     const [leadProcessingId, setLeadProcessingId] = useState<string | null>(null)
+    
+    // Dialog States
     const [isLostDialogOpen, setIsLostDialogOpen] = useState(false)
     const [isWonDialogOpen, setIsWonDialogOpen] = useState(false)
     const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false)
@@ -130,7 +132,10 @@ export function KanbanBoard({ userName }: { userName?: string }) {
     }))
 
     const fetchLeads = async () => {
-        const { data } = await supabase.from('leads').select('*').eq('agent_name', CURRENT_USER).not('status', 'in', '("perdido","vendido")')
+        const { data } = await supabase.from('leads')
+            .select('*')
+            .eq('agent_name', CURRENT_USER)
+            .not('status', 'in', '("perdido","vendido","rechazado","baja","cumplidas")') // Filtro estricto para evitar reapariciones
         if (data) setLeads(mapLeads(data))
     }
 
@@ -153,11 +158,14 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         const channel = supabase.channel('kanban_realtime_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
                 if (payload.eventType === 'INSERT') {
-                    const newLead = mapLeads([payload.new])[0]
-                    setLeads(prev => [newLead, ...prev])
+                    // Solo agregamos si el status es visible en el kanban
+                    if (!['perdido', 'vendido', 'rechazado', 'cumplidas'].includes(payload.new.status)) {
+                        const newLead = mapLeads([payload.new])[0]
+                        setLeads(prev => [newLead, ...prev])
+                    }
                 } else if (payload.eventType === 'UPDATE') {
                     const updated = mapLeads([payload.new])[0]
-                    if (['perdido', 'vendido'].includes(updated.status)) {
+                    if (['perdido', 'vendido', 'rechazado', 'cumplidas'].includes(updated.status)) {
                         setLeads(prev => prev.filter(l => l.id !== updated.id))
                     } else {
                         setLeads(prev => prev.map(l => l.id === updated.id ? updated : l))
@@ -174,40 +182,90 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         if (found) setOverdueLead(found);
     }, [leads]);
 
+    // --- FUNCIÓN HELPER: LOGUEAR HISTORIAL ---
+    const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
+        await supabase.from('lead_status_history').insert({
+            lead_id: leadId,
+            agent_name: CURRENT_USER,
+            from_status: fromStatus,
+            to_status: toStatus,
+            changed_at: new Date().toISOString()
+        })
+    }
+
     const handleCallIncrement = async (leadId: string) => {
         const lead = leads.find(l => l.id === leadId); if (!lead) return
         const newCallCount = lead.calls + 1
         const timestamp = new Date().toLocaleString('es-AR', { hour: '2-digit', minute: '2-digit' })
         const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
+        
         let newStatus = lead.status
         const isBurned = newCallCount >= 7 && (lead.status === 'nuevo' || lead.status === 'contactado')
+        
         if (isBurned) newStatus = 'perdido'
 
+        // Optimistic UI Update
         if (isBurned) {
             setLeads(prev => prev.filter(l => l.id !== leadId))
         } else {
             setLeads(prev => prev.map(l => l.id === leadId ? { ...l, calls: newCallCount, notes: updatedNotes } : l))
         }
 
-        await supabase.from('leads').update({ calls: newCallCount, notes: updatedNotes, status: newStatus.toLowerCase(), last_update: new Date().toISOString(), loss_reason: isBurned ? 'Dato quemado (7 llamados)' : null }).eq('id', leadId)
+        // DB Update
+        await supabase.from('leads').update({ 
+            calls: newCallCount, 
+            notes: updatedNotes, 
+            status: newStatus.toLowerCase(), 
+            last_update: new Date().toISOString(), 
+            loss_reason: isBurned ? 'Dato quemado (7 llamados)' : null 
+        }).eq('id', leadId)
+
+        // Log History si cambió el estado
+        if (isBurned) {
+            logHistory(leadId, lead.status, 'perdido')
+        }
     }
 
     const handleDragEnd = async (event: DragEndEvent) => {
-        const { active, over } = event; setActiveId(null); if (!over) return
-        const activeLead = leads.find(l => l.id === active.id); if (!activeLead) return
+        const { active, over } = event; 
+        setActiveId(null); 
+        if (!over) return
+
+        const activeLead = leads.find(l => l.id === active.id); 
+        if (!activeLead) return
+
+        // DropZones Especiales
         if (over.id === 'zone-perdido') { setLeadProcessingId(active.id as string); setIsLostDialogOpen(true); return }
         if (over.id === 'zone-vendido') { setLeadProcessingId(active.id as string); setIsWonDialogOpen(true); return }
+
+        // Columnas Normales
         let overCol = over.id as string
         const leadTarget = leads.find(l => l.id === overCol);
         if (leadTarget) overCol = leadTarget.status;
+
         const colIdx = (id: string) => ACTIVE_COLUMNS.findIndex(c => c.id === id)
         const isTryingToGoBack = colIdx(overCol) < colIdx(activeLead.status);
+        
+        // Regla de negocio: No volver atrás desde estados avanzados (opcional, si querés bloqueo estricto)
         if (['cotizacion', 'documentacion'].includes(activeLead.status) && isTryingToGoBack) return;
+
         if (overCol && overCol !== activeLead.status && ACTIVE_COLUMNS.some(c => c.id === overCol)) {
+            // Validaciones de modales intermedios
             if (overCol === 'cotizacion') { setLeadProcessingId(active.id as string); setIsQuoteDialogOpen(true); return }
             if (overCol === 'documentacion') { setLeadProcessingId(active.id as string); setIsDocConfirmOpen(true); return }
+            
+            // Movimiento directo (ej: Nuevo -> Contactado)
+            // 1. Optimistic Update
             setLeads(prev => prev.map(l => l.id === active.id ? { ...l, status: overCol } : l))
-            await supabase.from('leads').update({ status: overCol.toLowerCase(), last_update: new Date().toISOString() }).eq('id', active.id)
+            
+            // 2. DB Update
+            await supabase.from('leads').update({ 
+                status: overCol.toLowerCase(), 
+                last_update: new Date().toISOString() 
+            }).eq('id', active.id)
+
+            // 3. Log History
+            logHistory(active.id as string, activeLead.status, overCol)
         }
     }
 
@@ -248,57 +306,98 @@ export function KanbanBoard({ userName }: { userName?: string }) {
             <LostLeadDialog 
                 open={isLostDialogOpen} 
                 onOpenChange={setIsLostDialogOpen} 
-                onConfirm={(r) => {
-                    setLeads(prev => prev.filter(l => l.id !== leadProcessingId))
-                    supabase.from('leads').update({ status: 'perdido', loss_reason: r, last_update: new Date().toISOString() }).eq('id', leadProcessingId)
+                onConfirm={async (reason, notes) => {
+                    const leadId = leadProcessingId;
+                    // 1. Limpieza UI
+                    setLeads(prev => prev.filter(l => l.id !== leadId))
                     setIsLostDialogOpen(false)
+                    
+                    // 2. Update DB
+                    if(leadId) {
+                        const oldLead = leads.find(l => l.id === leadId)
+                        await supabase.from('leads').update({ 
+                            status: 'perdido', 
+                            loss_reason: reason, 
+                            notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`,
+                            last_update: new Date().toISOString() 
+                        }).eq('id', leadId)
+                        
+                        // 3. Log
+                        if(oldLead) logHistory(leadId, oldLead.status, 'perdido')
+                    }
                 }} 
             />
             
-            {/* MODAL DE VENTA - INTEGRADO CON SUBIDA DE ARCHIVOS */}
+            {/* MODAL DE VENTA - INTEGRADO CON SUBIDA DE ARCHIVOS + TRADUCTOR */}
             <WonLeadDialog 
                 open={isWonDialogOpen} 
                 onOpenChange={setIsWonDialogOpen} 
                 onConfirm={async (data: any) => {
+                    const leadId = leadProcessingId;
+                    if (!leadId) return;
+
                     const { files, ...leadData } = data;
+                    const oldLead = leads.find(l => l.id === leadId);
                     
-                    // Limpieza optimista inmediata
-                    setLeads(prev => prev.filter(l => l.id !== leadProcessingId))
+                    // 1. Limpieza optimista inmediata
+                    setLeads(prev => prev.filter(l => l.id !== leadId))
+                    setIsWonDialogOpen(false)
                     
-                    if (files && files.length > 0 && leadProcessingId) {
+                    // 2. Subida de Archivos Real
+                    if (files && files.length > 0) {
                         for (const file of Array.from(files as FileList)) {
                             const safeName = file.name.replace(/[^\w.\-() ]+/g, "_")
-                            const path = `${leadProcessingId}/${Date.now()}-${safeName}`
-                            await supabase.storage.from('lead-documents').upload(path, file)
-                            await supabase.from('lead_documents').insert({
-                                lead_id: leadProcessingId,
-                                type: file.type.includes('image') ? 'IMG' : 'PDF',
-                                file_path: path,
-                                name: file.name,
-                                uploaded_at: new Date().toISOString(),
-                                status: 'uploaded'
-                            })
+                            const path = `${leadId}/${Date.now()}-${safeName}`
+                            
+                            // A. Subir al Bucket
+                            const { error: upErr } = await supabase.storage.from('lead-documents').upload(path, file)
+                            
+                            if (!upErr) {
+                                // B. Crear referencia en tabla
+                                await supabase.from('lead_documents').insert({
+                                    lead_id: leadId,
+                                    type: file.type.includes('image') ? 'IMG' : 'PDF',
+                                    file_path: path,
+                                    name: file.name,
+                                    uploaded_at: new Date().toISOString(),
+                                    status: 'uploaded',
+                                    uploaded_by: CURRENT_USER
+                                })
+                            }
                         }
                     }
 
-                    // Guardado final
+                    // 3. Guardado final de la Venta (Con datos traducidos)
                     await supabase.from('leads').update({ 
-                        status: 'vendido', 
-                        last_update: new Date().toISOString(),
-                        ...leadData // Guarda nombre, dni, plan, precio, etc.
-                    }).eq('id', leadProcessingId)
+                        ...leadData, // Aquí vienen full_price, aportes, etc ya traducidos por WonLeadDialog
+                        last_update: new Date().toISOString()
+                    }).eq('id', leadId)
 
-                    setIsWonDialogOpen(false)
+                    // 4. Log Historial
+                    if (oldLead) logHistory(leadId, oldLead.status, 'vendido') // o el estado que mande el dialog
                 }} 
             />
 
             <QuotationDialog 
                 open={isQuoteDialogOpen} 
                 onOpenChange={setIsQuoteDialogOpen} 
-                onConfirm={(data: any) => {
-                    setLeads(prev => prev.map(l => l.id === leadProcessingId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l))
-                    supabase.from('leads').update({ status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price, last_update: new Date().toISOString() }).eq('id', leadProcessingId)
+                onConfirm={async (data: any) => {
+                    const leadId = leadProcessingId;
+                    if(!leadId) return;
+                    const oldLead = leads.find(l => l.id === leadId);
+
+                    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l))
                     setIsQuoteDialogOpen(false)
+
+                    await supabase.from('leads').update({ 
+                        status: 'cotizacion', 
+                        quoted_prepaga: data.prepaga, 
+                        quoted_plan: data.plan, 
+                        quoted_price: data.price, 
+                        last_update: new Date().toISOString() 
+                    }).eq('id', leadId)
+
+                    if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion')
                 }} 
                 onCancel={() => setIsQuoteDialogOpen(false)} 
             />
@@ -306,12 +405,18 @@ export function KanbanBoard({ userName }: { userName?: string }) {
             <DocConfirmDialog 
                 open={isDocConfirmOpen} 
                 onOpenChange={setIsDocConfirmOpen} 
-                onConfirm={() => setIsDocConfirmOpen(false)} 
-                onCancel={() => {
-                    setLeads(prev => prev.map(l => l.id === leadProcessingId ? { ...l, status: 'cotizacion' } : l))
-                    supabase.from('leads').update({ status: 'cotizacion' }).eq('id', leadProcessingId)
+                onConfirm={async () => {
+                    const leadId = leadProcessingId;
+                    if(!leadId) return;
+                    const oldLead = leads.find(l => l.id === leadId);
+
+                    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l))
                     setIsDocConfirmOpen(false)
+
+                    await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId)
+                    if(oldLead) logHistory(leadId, oldLead.status, 'documentacion')
                 }} 
+                onCancel={() => setIsDocConfirmOpen(false)} 
             />
 
             {/* ALERTA VENCIMIENTO 72HS */}

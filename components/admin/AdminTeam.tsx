@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-// AGREGADO "Send" QUE FALTABA AQUÍ:
-import { Users, Eye, Mail, Activity, Megaphone, X, Clock, Pencil, Save, UserCog, Send } from "lucide-react"
+import { Users, Eye, Mail, Activity, Megaphone, X, Clock, Pencil, Save, UserCog, Send, MessageSquare } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle, DialogFooter, DialogHeader, DialogDescription } from "@/components/ui/dialog"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -18,7 +17,7 @@ import { Label } from "@/components/ui/label"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
 
-// --- COLUMNAS DEL VENDEDOR ---
+// --- COLUMNAS DEL VENDEDOR (IGUAL QUE EN KANBANBOARD) ---
 const SELLER_COLUMNS = [
   { id: "nuevo", title: "Sin Trabajar 📥", color: "border-t-slate-400" }, 
   { id: "contactado", title: "En Contacto 📞", color: "border-t-blue-500" },
@@ -34,8 +33,10 @@ export function AdminTeam() {
     const [staffMembers, setStaffMembers] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
 
-    // Estados de Modales
+    // Estados de Modales y Espionaje
     const [spyAgent, setSpyAgent] = useState<any>(null)
+    const [spyLeads, setSpyLeads] = useState<any[]>([]) // Leads en tiempo real
+    
     const [selectedLead, setSelectedLead] = useState<any>(null)
     const [messageModalOpen, setMessageModalOpen] = useState(false)
     const [urgentMessage, setUrgentMessage] = useState("")
@@ -44,13 +45,16 @@ export function AdminTeam() {
     const [editingMember, setEditingMember] = useState<any>(null)
     const [editForm, setEditForm] = useState({ full_name: "", role: "", email: "" })
 
-    // Estado Chat Lead
+    // Estado Chat Lead (NUEVO SISTEMA)
+    const [chatMessages, setChatMessages] = useState<any[]>([])
     const [chatMessage, setChatMessage] = useState("")
+    const scrollRef = useRef<HTMLDivElement>(null)
 
     // --- 1. CARGA DE EQUIPO ---
     const fetchTeam = async () => {
         setLoading(true)
         const { data: profiles } = await supabase.from('profiles').select('*')
+        // Solo para estadísticas iniciales
         const { data: leads } = await supabase.from('leads').select('id, agent_name, status, created_at, last_update')
 
         if (profiles && leads) {
@@ -88,7 +92,7 @@ export function AdminTeam() {
                     name: u.full_name || 'Admin',
                     role: u.role,
                     email: u.email,
-                    avatarSeed: u.email // Usamos email o nombre para generar la cara
+                    avatarSeed: u.email 
                 }))
             setStaffMembers(staff)
         }
@@ -97,20 +101,88 @@ export function AdminTeam() {
 
     useEffect(() => { fetchTeam() }, [])
 
-    // --- 2. ESPIAR TABLERO ---
+    // --- 2. ESPIAR TABLERO (REALTIME) ---
     const handleSpy = async (agent: any) => {
-        const { data: agentLeads } = await supabase
+        setSpyAgent(agent)
+        // Carga inicial
+        const { data } = await supabase
             .from('leads')
             .select('*')
             .eq('agent_name', agent.name)
             .not('status', 'in', '("vendido","perdido","rechazado","baja")')
-
-        if (agentLeads) {
-            setSpyAgent({ ...agent, leads: agentLeads })
-        }
+        
+        if (data) setSpyLeads(data)
     }
 
-    // --- 3. ENVIAR COMUNICADO ---
+    // Suscripción Realtime al Tablero del Agente Espiado
+    useEffect(() => {
+        if (!spyAgent) return
+
+        const channel = supabase.channel(`spy_dashboard_${spyAgent.id}`)
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'leads', 
+                filter: `agent_name=eq.${spyAgent.name}` 
+            }, (payload) => {
+                // Actualizamos la lista local en vivo
+                if (payload.eventType === 'INSERT') {
+                     setSpyLeads(prev => [...prev, payload.new])
+                } else if (payload.eventType === 'UPDATE') {
+                     const updated = payload.new
+                     // Si cambió a estado final, lo sacamos, sino lo actualizamos
+                     if (['vendido','perdido','rechazado'].includes(updated.status)) {
+                        setSpyLeads(prev => prev.filter(l => l.id !== updated.id))
+                     } else {
+                        setSpyLeads(prev => prev.map(l => l.id === updated.id ? updated : l))
+                     }
+                }
+            })
+            .subscribe()
+
+        return () => { supabase.removeChannel(channel) }
+    }, [spyAgent])
+
+
+    // --- 3. CHAT UNIFICADO (REALTIME) ---
+    useEffect(() => {
+        if (!selectedLead) {
+            setChatMessages([])
+            return
+        }
+
+        const fetchMessages = async () => {
+            const { data } = await supabase
+                .from('lead_messages')
+                .select('*')
+                .eq('lead_id', selectedLead.id)
+                .order('created_at', { ascending: true })
+            
+            if (data) setChatMessages(data)
+        }
+        fetchMessages()
+
+        const chatChannel = supabase.channel(`lead_chat_${selectedLead.id}`)
+            .on('postgres_changes', { 
+                event: 'INSERT', 
+                schema: 'public', 
+                table: 'lead_messages', 
+                filter: `lead_id=eq.${selectedLead.id}` 
+            }, (payload) => {
+                setChatMessages(prev => [...prev, payload.new])
+                // Scroll al fondo
+                setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+            })
+            .subscribe()
+
+        return () => { supabase.removeChannel(chatChannel) }
+
+    }, [selectedLead])
+
+
+    // --- 4. ACCIONES ---
+    
+    // Enviar comunicado (alerta en pantalla del vendedor)
     const sendUrgentMessage = async () => {
         if (!spyAgent || !urgentMessage) return
         await supabase.from('profiles').update({ urgent_message: urgentMessage }).eq('id', spyAgent.id)
@@ -118,21 +190,21 @@ export function AdminTeam() {
         alert(`📢 Enviado a ${spyAgent.name}`)
     }
 
-    // --- 4. CHAT LEAD ---
+    // Enviar mensaje al chat unificado
     const sendLeadComment = async () => {
         if (!selectedLead || !chatMessage.trim()) return
-        const newComment = { author: 'Admin', text: chatMessage, date: new Date().toISOString(), role: 'admin' }
-        const currentComments = selectedLead.comments || []
-        const updatedComments = [...currentComments, newComment]
-
-        const { error } = await supabase.from('leads').update({ comments: updatedComments }).eq('id', selectedLead.id)
-        if (!error) {
-            setSelectedLead({ ...selectedLead, comments: updatedComments })
-            setChatMessage("")
-        }
+        
+        await supabase.from('lead_messages').insert({
+            lead_id: selectedLead.id,
+            sender: 'Supervisión',
+            text: chatMessage,
+            target_role: 'seller' // Para que le llegue la notificación al vendedor
+        })
+        
+        setChatMessage("")
     }
 
-    // --- 5. EDITAR STAFF ---
+    // Editar staff
     const openEditStaff = (member: any) => {
         setEditingMember(member)
         setEditForm({ full_name: member.name, role: member.role, email: member.email })
@@ -140,18 +212,9 @@ export function AdminTeam() {
 
     const saveStaffChanges = async () => {
         if (!editingMember) return
-        
-        const { error } = await supabase
-            .from('profiles')
-            .update({ full_name: editForm.full_name, role: editForm.role }) // Email suele ser inmutable en Auth, solo cambiamos display
-            .eq('id', editingMember.id)
-
-        if (!error) {
-            fetchTeam() // Recargar lista
-            setEditingMember(null)
-        } else {
-            alert("Error al actualizar perfil.")
-        }
+        const { error } = await supabase.from('profiles').update({ full_name: editForm.full_name, role: editForm.role }).eq('id', editingMember.id)
+        if (!error) { fetchTeam(); setEditingMember(null) } 
+        else { alert("Error al actualizar perfil.") }
     }
 
     if (loading) return <div className="flex h-full items-center justify-center"><Activity className="animate-spin mr-2"/> Cargando Equipo...</div>
@@ -290,7 +353,6 @@ export function AdminTeam() {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    {/* MEGÁFONO MINIMALISTA */}
                                     <Button size="icon" variant="outline" className="text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => setMessageModalOpen(true)}>
                                         <Megaphone className="h-5 w-5" />
                                     </Button>
@@ -301,7 +363,7 @@ export function AdminTeam() {
                             <ScrollArea className="flex-1 w-full bg-slate-100">
                                 <div className="flex gap-4 p-6 min-w-[1200px] h-full">
                                     {SELLER_COLUMNS.map(col => {
-                                        const colLeads = spyAgent.leads.filter((l:any) => l.status === col.id)
+                                        const colLeads = spyLeads.filter((l:any) => l.status === col.id)
                                         return (
                                             <div key={col.id} className="flex-1 min-w-[280px] max-w-[320px] flex flex-col gap-3">
                                                 <div className={`bg-white p-3 rounded-t-lg border-t-4 ${col.color} shadow-sm flex justify-between`}>
@@ -343,7 +405,7 @@ export function AdminTeam() {
                 </DialogContent>
             </Dialog>
 
-            {/* FICHA LEAD (CHAT) */}
+            {/* FICHA LEAD (CHAT UNIFICADO) */}
             <Sheet open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
                 <SheetContent className="sm:max-w-[500px] flex flex-col p-0">
                     {selectedLead && (
@@ -354,8 +416,8 @@ export function AdminTeam() {
                                     <SheetDescription className="flex gap-2"><Badge variant="outline">{selectedLead.source || 'Sin origen'}</Badge><Badge>{selectedLead.status}</Badge></SheetDescription>
                                 </SheetHeader>
                             </div>
-                            <Tabs defaultValue="info" className="flex-1 flex flex-col">
-                                <TabsList className="w-full rounded-none border-b bg-white"><TabsTrigger value="info" className="flex-1">Datos</TabsTrigger><TabsTrigger value="chat" className="flex-1">Chat Admin</TabsTrigger></TabsList>
+                            <Tabs defaultValue="chat" className="flex-1 flex flex-col">
+                                <TabsList className="w-full rounded-none border-b bg-white"><TabsTrigger value="info" className="flex-1">Datos</TabsTrigger><TabsTrigger value="chat" className="flex-1">Chat Supervisión</TabsTrigger></TabsList>
                                 <TabsContent value="info" className="flex-1 p-6 space-y-4">
                                     <div className="bg-white p-3 rounded border"><p className="text-xs font-bold text-slate-400 uppercase">Teléfono</p><p className="font-mono text-lg">{selectedLead.phone || '-'}</p></div>
                                     <div className="bg-white p-3 rounded border"><p className="text-xs font-bold text-slate-400 uppercase">Notas</p><p className="text-sm italic">{selectedLead.notes || 'Sin notas'}</p></div>
@@ -363,18 +425,28 @@ export function AdminTeam() {
                                 <TabsContent value="chat" className="flex-1 flex flex-col p-0 h-full">
                                     <ScrollArea className="flex-1 p-4 bg-slate-50">
                                         <div className="space-y-4">
-                                            {selectedLead.comments?.map((comment: any, i: number) => (
-                                                <div key={i} className={`flex flex-col ${comment.role === 'admin' ? 'items-end' : 'items-start'}`}>
-                                                    <div className={`max-w-[80%] p-3 rounded-lg text-sm ${comment.role === 'admin' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border rounded-bl-none'}`}>{comment.text}</div>
-                                                    <span className="text-[10px] text-slate-400 mt-1">{comment.author} • {formatDistanceToNow(new Date(comment.date), { addSuffix: true, locale: es })}</span>
+                                            {/* Chat Messages REALES */}
+                                            {chatMessages.length === 0 ? (
+                                                <div className="text-center text-xs text-slate-400 py-10 opacity-50 flex flex-col items-center gap-2">
+                                                    <MessageSquare size={32}/>
+                                                    Inicia el chat con el vendedor.
                                                 </div>
-                                            ))}
-                                            {(!selectedLead.comments || selectedLead.comments.length === 0) && <p className="text-center text-xs text-slate-400 py-10">No hay mensajes en este lead.</p>}
+                                            ) : (
+                                                chatMessages.map((msg: any, i: number) => (
+                                                    <div key={i} className={`flex flex-col ${msg.sender === 'Supervisión' ? 'items-end' : 'items-start'}`}>
+                                                        <div className={`max-w-[80%] p-3 rounded-lg text-sm shadow-sm ${msg.sender === 'Supervisión' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border rounded-bl-none text-slate-700'}`}>
+                                                            {msg.text}
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400 mt-1 font-bold">{msg.sender === 'Supervisión' ? 'Vos' : msg.sender} • {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                                    </div>
+                                                ))
+                                            )}
+                                            <div ref={scrollRef} />
                                         </div>
                                     </ScrollArea>
                                     <div className="p-4 border-t bg-white flex gap-2">
-                                        <Input placeholder="Escribí una nota..." value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendLeadComment()}/>
-                                        <Button size="icon" onClick={sendLeadComment}><Send className="h-4 w-4"/></Button>
+                                        <Input placeholder="Escribí un mensaje..." value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendLeadComment()}/>
+                                        <Button size="icon" onClick={sendLeadComment} className="bg-blue-600 hover:bg-blue-700"><Send className="h-4 w-4 text-white"/></Button>
                                     </div>
                                 </TabsContent>
                             </Tabs>

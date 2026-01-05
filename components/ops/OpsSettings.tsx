@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw } from "lucide-react"
+import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw, ShieldAlert, Crown, Briefcase, Headset, Snowflake, Flame, Eye, EyeOff } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch" 
 import { Separator } from "@/components/ui/separator"
@@ -42,15 +42,26 @@ export function OpsSettings() {
     // 2. EQUIPO (Desde DB Profiles)
     const [users, setUsers] = useState<any[]>([])
     const [isUserModalOpen, setIsUserModalOpen] = useState(false)
+    // Agregamos password al estado para creación
     const [newUser, setNewUser] = useState({ 
-        name: "", email: "", role: "admin_common", avatar: "" 
+        name: "", email: "", role: "admin_common", avatar: "", password: "" 
     })
+    const [showPassword, setShowPassword] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // 3. WORKFLOWS (Desde DB)
     const [selectedStage, setSelectedStage] = useState("ingresado")
     const [subStatesByStage, setSubStatesByStage] = useState<Record<string, string[]>>({})
     const [newSubState, setNewSubState] = useState("")
+
+    // Estado Configuración Cementerio (Freeze Times) - NUEVO EN OPS
+    const [freezeConfig, setFreezeConfig] = useState({
+        fantasmas: 30,
+        precio: 60,
+        interes: 45,
+        quemados: 45,
+        basural: 365
+    })
 
     // 4. PERMISOS (Desde DB)
     const [permissions, setPermissions] = useState({
@@ -72,11 +83,13 @@ export function OpsSettings() {
             const o = data.find(c => c.key === 'sales_origins')?.value
             const s = data.find(c => c.key === 'workflow_substates')?.value
             const perm = data.find(c => c.key === 'ops_permissions')?.value
+            const gz = data.find(c => c.key === 'graveyard_config')?.value
 
             if (p) setPrepagas(p)
             if (o) setOrigins(o)
             if (s) setSubStatesByStage(s)
             if (perm) setPermissions(perm)
+            if (gz) setFreezeConfig(gz)
         }
         setLoading(false)
     }
@@ -102,10 +115,10 @@ export function OpsSettings() {
         await supabase.from('system_config').upsert({ key: 'sales_origins', value: origins })
         await supabase.from('system_config').upsert({ key: 'workflow_substates', value: subStatesByStage })
         await supabase.from('system_config').upsert({ key: 'ops_permissions', value: permissions })
+        await supabase.from('system_config').upsert({ key: 'graveyard_config', value: freezeConfig }) // Guardar config cementerio
         
         setLoading(false)
         alert("✅ Configuración guardada y aplicada al sistema.")
-        // El realtime de los otros componentes debería actualizarse solo si están escuchando
     }
 
     // --- HANDLERS COMERCIAL ---
@@ -117,7 +130,7 @@ export function OpsSettings() {
     const addOrigin = () => { if(newOrigin && !origins.includes(newOrigin)) { setOrigins([...origins, newOrigin]); setNewOrigin("") } }
     const deleteOrigin = (name: string) => setOrigins(origins.filter(o => o !== name))
     
-    // --- HANDLERS USUARIOS (Conectado a Profiles) ---
+    // --- HANDLERS USUARIOS (CORREGIDO PUNTO 14) ---
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (file) {
@@ -128,22 +141,31 @@ export function OpsSettings() {
     }
 
     const handleCreateUser = async () => { 
-        if(!newUser.name || !newUser.email) return alert("Faltan datos")
+        if(!newUser.name || !newUser.email || !newUser.password) return alert("Faltan datos (incluida contraseña)")
         
-        // Crear en DB
-        const { error } = await supabase.from('profiles').insert({
-            full_name: newUser.name,
-            email: newUser.email,
-            role: newUser.role,
-            avatar_url: newUser.avatar
-        })
+        setLoading(true)
+        
+        try {
+            // USAMOS LA FUNCIÓN SQL QUE CREAMOS
+            const { data, error } = await supabase.rpc('create_new_user', {
+                email: newUser.email,
+                password: newUser.password,
+                full_name: newUser.name,
+                role: newUser.role,
+                work_hours: 5 // Default
+            })
 
-        if (!error) {
-            fetchUsers() // Recargar lista
-            setNewUser({ name: "", email: "", role: "admin_common", avatar: "" })
+            if (error) throw error
+
+            alert("Usuario creado exitosamente con acceso al sistema. ✅")
+            fetchUsers()
+            setNewUser({ name: "", email: "", role: "admin_common", avatar: "", password: "" })
             setIsUserModalOpen(false)
-        } else {
-            alert("Error creando usuario: " + error.message)
+        } catch (e: any) {
+            console.error(e)
+            alert("Error creando usuario: " + e.message)
+        } finally {
+            setLoading(false)
         }
     }
 
@@ -312,6 +334,20 @@ export function OpsSettings() {
                                                     <Input placeholder="email@gml.com" value={newUser.email} onChange={e=>setNewUser({...newUser, email: e.target.value})}/>
                                                 </div>
                                                 <div className="grid gap-2">
+                                                    <Label>Contraseña (Acceso)</Label>
+                                                    <div className="relative">
+                                                        <Input 
+                                                            type={showPassword ? "text" : "password"} 
+                                                            placeholder="Mínimo 6 caracteres" 
+                                                            value={newUser.password} 
+                                                            onChange={e=>setNewUser({...newUser, password: e.target.value})}
+                                                        />
+                                                        <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full text-slate-400" onClick={() => setShowPassword(!showPassword)}>
+                                                            {showPassword ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                                <div className="grid gap-2">
                                                     <Label>Rol</Label>
                                                     <Select value={newUser.role} onValueChange={(v)=>setNewUser({...newUser, role: v})}>
                                                         <SelectTrigger><SelectValue placeholder="Rol" /></SelectTrigger>
@@ -320,12 +356,15 @@ export function OpsSettings() {
                                                             <SelectItem value="admin_common">Administrativa</SelectItem>
                                                             <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>
                                                             <SelectItem value="seller">Vendedora</SelectItem>
+                                                            <SelectItem value="setter">Setter</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
                                             </div>
                                             <DialogFooter>
-                                                <Button onClick={handleCreateUser} className="w-full bg-slate-900 text-white">Confirmar</Button>
+                                                <Button onClick={handleCreateUser} disabled={loading} className="w-full bg-slate-900 text-white">
+                                                    {loading ? "Creando..." : "Confirmar"}
+                                                </Button>
                                             </DialogFooter>
                                         </DialogContent>
                                     </Dialog>
@@ -356,9 +395,56 @@ export function OpsSettings() {
                         </div>
                     )}
 
-                    {/* --- TAB WORKFLOWS --- */}
+                    {/* --- TAB WORKFLOWS (CON CEMENTERIO) --- */}
                     {activeTab === 'workflows' && (
                         <div className="space-y-6">
+                             {/* CONFIGURACIÓN CEMENTERIO (NUEVO) */}
+                             <Card className="border-l-4 border-l-blue-500 shadow-sm">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2"><Snowflake className="h-5 w-5 text-blue-500"/> Configuración de Cementerio</CardTitle>
+                                    <CardDescription>Días de congelamiento antes de que un lead pueda ser reciclado.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-slate-500 font-bold">Fantasmas</Label>
+                                            <div className="relative">
+                                                <Input type="number" className="pl-2 pr-8" value={freezeConfig.fantasmas} onChange={e => setFreezeConfig({...freezeConfig, fantasmas: parseInt(e.target.value) || 0})}/>
+                                                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-slate-500 font-bold">Interés Caído</Label>
+                                            <div className="relative">
+                                                <Input type="number" className="pl-2 pr-8" value={freezeConfig.interes} onChange={e => setFreezeConfig({...freezeConfig, interes: parseInt(e.target.value) || 0})}/>
+                                                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-slate-500 font-bold">Precio / Caro</Label>
+                                            <div className="relative">
+                                                <Input type="number" className="pl-2 pr-8" value={freezeConfig.precio} onChange={e => setFreezeConfig({...freezeConfig, precio: parseInt(e.target.value) || 0})}/>
+                                                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-red-500 font-bold flex items-center gap-1"><Flame size={10}/> Quemados (+7)</Label>
+                                            <div className="relative">
+                                                <Input type="number" className="pl-2 pr-8 border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
+                                                <span className="absolute right-3 top-2.5 text-xs text-red-400 font-bold">días</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-slate-500 font-bold">Basural</Label>
+                                            <div className="relative">
+                                                <Input type="number" className="pl-2 pr-8" value={freezeConfig.basural} onChange={e => setFreezeConfig({...freezeConfig, basural: parseInt(e.target.value) || 0})}/>
+                                                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold">días</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+
                             <Card className="border-slate-200 shadow-sm">
                                 <CardHeader>
                                     <div className="flex justify-between items-start">

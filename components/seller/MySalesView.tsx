@@ -17,7 +17,7 @@ import {
   FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock
 } from "lucide-react"
 
-// ✅ Storage config (no toca UI)
+// ✅ Storage config
 const STORAGE_BUCKET = "lead-documents"
 
 // --- COMPONENTES UI INTERNOS ---
@@ -44,7 +44,7 @@ function ReadOnlyField({ label, value, icon, color, prefix }: any) {
   )
 }
 
-function ChatBubble({ user, text, time, isMe, type }: any) {
+function ChatBubble({ user, text, time, isMe }: any) {
   return (
     <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} mb-4 animate-in slide-in-from-bottom-2`}>
       <div className={`px-4 py-2 rounded-2xl max-w-[85%] text-[13px] shadow-sm ${isMe ? "bg-blue-600 text-white rounded-br-none" : "bg-white border text-slate-700 rounded-bl-none"}`}>
@@ -84,9 +84,14 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
   const [loading, setLoading] = useState(true)
   const [selectedSale, setSelectedSale] = useState<any>(null)
   const [activeTab, setActiveTab] = useState("chat")
+  
+  // Estados para Chat Real
+  const [chatMessages, setChatMessages] = useState<any[]>([])
   const [chatMsg, setChatMsg] = useState("")
+  // ✅ Nuevo: Mapa de últimos mensajes para notificaciones visuales
+  const [latestMsgMap, setLatestMsgMap] = useState<Record<string, any>>({})
 
-  // ✅ docs state (no toca UI)
+  // Estados Documentos
   const [docs, setDocs] = useState<any[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -99,9 +104,9 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
     if (selectedSale && scrollRef.current) {
       setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
     }
-  }, [selectedSale?.chat, activeTab, selectedSale])
+  }, [chatMessages, activeTab, selectedSale])
 
-  // --- CARGA DE DATOS ---
+  // --- 1. CARGA DE LISTA DE VENTAS ---
   const fetchSales = async () => {
     setLoading(true)
     const { data } = await supabase
@@ -112,47 +117,48 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
       .order("last_update", { ascending: false })
 
     if (data) {
-      // Mapeamos los comentarios de DB al formato del chat UI
-      const mappedData = data.map((sale) => ({
-        ...sale,
-        chat: (sale.comments || []).map((c: any) => ({
-          user: c.author,
-          text: c.text,
-          time: new Date(c.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          isMe: c.author === userName,
-          rawDate: c.date,
-        })),
-        adminNotes: sale.admin_notes || [],
-      }))
-      setSales(mappedData)
-
-      // Si hay una seleccionada, actualizamos sus datos en tiempo real
+      setSales(data)
+      fetchLatestMessages(data) // Buscamos alertas de mensajes
+      
+      // Si hay una seleccionada, refrescar sus datos básicos (estado, etc)
       if (selectedSale) {
-        const updatedSelected = mappedData.find((s) => s.id === selectedSale.id)
-        if (updatedSelected) setSelectedSale(updatedSelected)
+        const updatedSelected = data.find((s) => s.id === selectedSale.id)
+        if (updatedSelected) setSelectedSale(prev => ({...prev, ...updatedSelected}))
       }
     }
     setLoading(false)
   }
 
-  // ✅ Traer documentos de la venta seleccionada
-  const fetchDocs = async (leadId: string) => {
-    setDocsLoading(true)
-    const { data, error } = await supabase
-      .from("lead_documents")
-      .select("*")
-      .eq("lead_id", leadId)
-      .order("uploaded_at", { ascending: false })
+  // ✅ Función para detectar si hay mensajes nuevos de Ops
+  const fetchLatestMessages = async (salesData: any[]) => {
+      if (!salesData.length) return
+      const ids = salesData.map(s => s.id)
+      
+      // Traemos los mensajes de estos leads ordenados por fecha
+      const { data } = await supabase
+          .from('lead_messages')
+          .select('lead_id, sender, created_at')
+          .in('lead_id', ids)
+          .order('created_at', { ascending: false }) // Los más nuevos primero
 
-    if (!error && data) setDocs(data)
-    setDocsLoading(false)
+      if (data) {
+          const map: any = {}
+          data.forEach((msg: any) => {
+              // Como viene ordenado, el primero que encontramos es el último
+              if (!map[msg.lead_id]) {
+                  map[msg.lead_id] = msg
+              }
+          })
+          setLatestMsgMap(map)
+      }
   }
 
   useEffect(() => {
     fetchSales()
 
+    // Suscripción a cambios en la lista (ej: Ops cambia estado)
     const channel = supabase
-      .channel("my_sales_realtime")
+      .channel("my_sales_list_realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `agent_name=eq.${userName}` }, () => {
         fetchSales()
       })
@@ -161,44 +167,96 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [userName]) // Dependencia userName crítica
+  }, [userName])
 
-  // ✅ cuando cambia selectedSale, actualizo docs
+  // --- 2. CARGA DE DETALLES (CHAT Y DOCS) CUANDO SE ABRE UNA VENTA ---
   useEffect(() => {
-    if (selectedSale?.id) fetchDocs(selectedSale.id)
-    else setDocs([])
-  }, [selectedSale?.id])
+    if (!selectedSale?.id) {
+        setChatMessages([])
+        setDocs([])
+        return
+    }
+
+    // A. Cargar Chat Real
+    const fetchMessages = async () => {
+        const { data } = await supabase
+            .from('lead_messages')
+            .select('*')
+            .eq('lead_id', selectedSale.id)
+            .order('created_at', { ascending: true })
+        
+        if (data) {
+            const mapped = data.map(m => ({
+                id: m.id,
+                user: m.sender,
+                text: m.text,
+                time: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                isMe: m.sender === userName,
+                rawDate: m.created_at
+            }))
+            setChatMessages(mapped)
+        }
+    }
+
+    // B. Cargar Docs Reales
+    const fetchDocs = async () => {
+        setDocsLoading(true)
+        const { data } = await supabase
+          .from("lead_documents")
+          .select("*")
+          .eq("lead_id", selectedSale.id)
+          .order("uploaded_at", { ascending: false })
+    
+        if (data) setDocs(data)
+        setDocsLoading(false)
+    }
+
+    fetchMessages()
+    fetchDocs()
+
+    // C. Suscripción al Chat de ESTA venta
+    const chatChannel = supabase.channel(`sales_chat:${selectedSale.id}`)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'lead_messages', 
+            filter: `lead_id=eq.${selectedSale.id}`
+        }, (payload) => {
+            const m = payload.new
+            setChatMessages(prev => [...prev, {
+                id: m.id,
+                user: m.sender,
+                text: m.text,
+                time: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                isMe: m.sender === userName,
+                rawDate: m.created_at
+            }])
+        })
+        .subscribe()
+
+    return () => { supabase.removeChannel(chatChannel) }
+
+  }, [selectedSale?.id]) // Se ejecuta solo cuando cambia el ID seleccionado
 
   // --- ACCIONES ---
+  
   const sendMessage = async () => {
     if (!chatMsg.trim() || !selectedSale) return
 
-    const newMessage = {
-      text: chatMsg,
-      author: userName,
-      date: new Date().toISOString(),
+    // Insertar en la tabla real
+    const { error } = await supabase.from('lead_messages').insert({
+        lead_id: selectedSale.id,
+        sender: userName,
+        text: chatMsg,
+        target_role: 'admin' // Para que Ops sepa que es para ellos
+    })
+
+    if (!error) {
+        setChatMsg("")
+        // El realtime actualiza la UI
     }
-
-    // 1. Obtener comentarios actuales frescos de la DB para no pisar nada
-    const { data: currentData } = await supabase.from("leads").select("comments").eq("id", selectedSale.id).single()
-    const currentComments = currentData?.comments || []
-
-    // 2. Agregar el nuevo
-    const updatedComments = [...currentComments, newMessage]
-
-    // 3. Guardar
-    await supabase
-      .from("leads")
-      .update({
-        comments: updatedComments,
-        last_update: new Date().toISOString(),
-      })
-      .eq("id", selectedSale.id)
-
-    setChatMsg("")
   }
 
-  // ✅ Upload real a Storage + insert a lead_documents
   const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       if (!selectedSale?.id) return
@@ -207,14 +265,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
 
       setUploading(true)
 
-      const { data: authData, error: authErr } = await supabase.auth.getUser()
-      if (authErr || !authData?.user) {
-        console.error("No auth user for upload", authErr)
-        return
-      }
-
       const leadId = selectedSale.id
-      const uploaderId = authData.user.id
 
       for (const file of Array.from(files)) {
         const safeName = file.name.replace(/[^\w.\-() ]+/g, "_")
@@ -230,28 +281,27 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
           continue
         }
 
-        const { error: insErr } = await supabase.from("lead_documents").insert({
+        await supabase.from("lead_documents").insert({
           lead_id: leadId,
-          type: file.type || "file",
+          type: file.type.includes('image') ? 'IMG' : 'PDF',
           file_path: path,
-          uploaded_by: uploaderId,
+          name: file.name,
+          uploaded_by: userName,
           uploaded_at: new Date().toISOString(),
           status: "uploaded",
         })
-
-        if (insErr) {
-          console.error("insert lead_documents error:", insErr)
-        }
       }
 
-      // refresco lista
-      await fetchDocs(selectedSale.id)
+      // Refresco manual de docs
+      const { data } = await supabase
+          .from("lead_documents")
+          .select("*")
+          .eq("lead_id", leadId)
+          .order("uploaded_at", { ascending: false })
+      if(data) setDocs(data)
 
-      // opcional: tocar last_update para que admin lo vea
-      await supabase.from("leads").update({ last_update: new Date().toISOString() }).eq("id", selectedSale.id)
     } finally {
       setUploading(false)
-      // reset input (para poder subir el mismo archivo de nuevo)
       if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
@@ -261,7 +311,6 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
     return data.publicUrl
   }
 
-  // Helper precio
   const priceFormatter = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })
 
   return (
@@ -295,10 +344,11 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
 
         {sales.map((sale) => {
           const adminStatus = getAdminStatus(sale.status)
-          // Calculamos mensajes no leídos (si el último no soy yo)
-          const lastMsg = sale.chat[sale.chat.length - 1]
-          const hasNewMsg = lastMsg && !lastMsg.isMe
           const isRejected = sale.status === "rechazado" || sale.status === "demoras"
+          
+          // ✅ LÓGICA DE AVISO VISUAL (Si el último mensaje NO es mío, es una respuesta)
+          const lastMsg = latestMsgMap[sale.id]
+          const hasNewMessage = lastMsg && lastMsg.sender !== userName
 
           return (
             <Card
@@ -306,16 +356,18 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
               onClick={() => setSelectedSale(sale)}
               className={`cursor-pointer hover:shadow-lg transition-all border-l-4 relative group ${isRejected ? "border-l-red-500 bg-red-50/10" : "border-l-blue-500"}`}
             >
-              {hasNewMsg && (
-                <span className="absolute -top-2 -right-2 h-6 w-6 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white shadow-lg animate-pulse z-10">
-                  1
-                </span>
-              )}
-
               <CardContent className="p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                 <div>
-                  <h4 className="font-bold text-lg text-slate-800">
-                    {sale.name || "Sin Nombre"} <Badge variant="secondary" className="text-[10px] ml-2">{sale.prepaga}</Badge>
+                  <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                    {sale.name || "Sin Nombre"} 
+                    <Badge variant="secondary" className="text-[10px]">{sale.prepaga}</Badge>
+                    
+                    {/* ✅ BADGE DE MENSAJE NUEVO */}
+                    {hasNewMessage && (
+                        <Badge className="bg-orange-100 text-orange-700 border border-orange-200 animate-pulse text-[10px] gap-1 px-2">
+                            <MessageSquare size={10} fill="currentColor"/> Nueva Respuesta
+                        </Badge>
+                    )}
                   </h4>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -406,25 +458,23 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                 </section>
 
                 {/* SECCION NOTAS ADMIN */}
-                {selectedSale?.adminNotes?.length > 0 && (
+                {selectedSale?.admin_notes && (
                   <section className="space-y-4 pt-4 border-t border-red-100">
                     <h4 className="text-xs font-black text-red-500 uppercase tracking-widest flex gap-2">
                       <AlertTriangle size={14} /> Notas de Administración
                     </h4>
                     <div className="space-y-2">
-                      {selectedSale.adminNotes.map((note: any, i: number) => (
-                        <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm text-red-800">
-                          <p>{note.text || note.action}</p>
-                          <span className="text-[10px] opacity-70 font-bold mt-1 block">{note.user} • {note.date}</span>
+                        {/* Renderizado de notas JSON o Texto */}
+                        <div className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm text-red-800">
+                          {typeof selectedSale.admin_notes === 'string' ? selectedSale.admin_notes : 'Ver historial'}
                         </div>
-                      ))}
                     </div>
                   </section>
                 )}
               </div>
             </ScrollArea>
 
-            {/* COLUMNA DER: CHAT INTERACTIVO */}
+            {/* COLUMNA DER: CHAT INTERACTIVO REAL */}
             <div className="flex-1 flex flex-col bg-slate-50/50">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
                 <div className="px-8 pt-4 border-b bg-white">
@@ -443,18 +493,17 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                     }}
                   >
                     <div className="space-y-4">
-                      {selectedSale?.chat.length === 0 && (
+                      {chatMessages.length === 0 && (
                         <div className="text-center p-4 bg-white/80 rounded-lg text-xs text-slate-500 shadow-sm mx-auto w-fit">
                           Inicio del chat con Administración
                         </div>
                       )}
-                      {selectedSale?.chat.map((msg: any, i: number) => <ChatBubble key={i} {...msg} />)}
+                      {chatMessages.map((msg: any, i: number) => <ChatBubble key={i} {...msg} />)}
                       <div ref={scrollRef} />
                     </div>
                   </ScrollArea>
 
                   <div className="p-4 bg-white border-t flex gap-3 shadow-lg z-10">
-                    {/* ✅ ahora sí abre el file picker y sube real (mismo ícono y layout) */}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -466,7 +515,6 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                       <Paperclip size={20} />
                     </Button>
 
-                    {/* ✅ input real (se usa en chat y en files tab) */}
                     <input
                       type="file"
                       ref={fileInputRef}
@@ -494,7 +542,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                 </TabsContent>
 
                 <TabsContent value="files" className="p-8 flex flex-col gap-4 m-0 h-full">
-                  {/* ✅ MISMA CAJA, ahora sube real */}
+                  {/* CAJA DE SUBIDA */}
                   <div
                     className="border-2 border-dashed border-slate-300 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:bg-blue-50 cursor-pointer transition-colors"
                     onClick={() => fileInputRef.current?.click()}
@@ -506,7 +554,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                     <p className="text-xs text-slate-400 mt-1">Fotos DNI, Recibos, Formularios</p>
                   </div>
 
-                  {/* ✅ LISTA de archivos (sin romper visual) */}
+                  {/* LISTA DE ARCHIVOS REAL */}
                   <div className="flex-1 overflow-hidden">
                     <div className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">
                       Archivos cargados
@@ -521,7 +569,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                             <div className="text-center text-xs text-slate-400 py-6">Todavía no hay archivos.</div>
                           ) : (
                             docs.map((d: any) => {
-                              const filename = (d.file_path || "").split("/").pop()
+                              const filename = d.name || (d.file_path || "").split("/").pop()
                               const created = d.uploaded_at ? new Date(d.uploaded_at).toLocaleString("es-AR") : ""
                               const url = d.file_path ? getPublicUrl(d.file_path) : "#"
 
@@ -536,7 +584,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                       <div className="text-sm font-bold text-slate-800 truncate">
-                                        {filename || "Archivo"}
+                                        {filename}
                                       </div>
                                       <div className="text-[10px] text-slate-400 font-bold mt-1">
                                         {created}
@@ -553,10 +601,6 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                         </div>
                       </ScrollArea>
                     </div>
-
-                    <p className="text-center text-[10px] text-slate-400 mt-3">
-                      Tip: podés adjuntar desde el clip del chat o desde esta pestaña.
-                    </p>
                   </div>
                 </TabsContent>
               </Tabs>

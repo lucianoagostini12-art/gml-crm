@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Layers, Recycle, RefreshCw, ExternalLink } from "lucide-react"
+import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 
+// --- CONFIGURACIÓN DE TIEMPOS DE CONGELAMIENTO (DÍAS) ---
+const FREEZE_CONFIG: Record<string, number> = {
+    fantasmas: 30,  // "No contesta"
+    precio: 60,     // "Caro"
+    interes: 45,    // "Lo pienso"
+    quemados: 45,   // "+7 llamados"
+    basural: 365    // Datos malos
+}
+
 type Lead = {
   id: string
   created_at: string
@@ -36,6 +45,7 @@ type Lead = {
   agent_name?: string | null
   last_update?: string | null
   loss_reason?: string | null
+  calls?: number
 }
 
 const normPhone = (v?: string | null) => (v || "").replace(/\D/g, "")
@@ -62,7 +72,10 @@ export function AdminLeadFactory() {
   // SELECCIÓN
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
   const [targetAgent, setTargetAgent] = useState("")
+  
+  // AUTOMATIZACIÓN (ROUND ROBIN)
   const [autoAssignEnabled, setAutoAssignEnabled] = useState(false)
+  const [nextAgentIdx, setNextAgentIdx] = useState(0) // Índice del vendedor al que le toca
 
   // LISTA DE VENDEDORES (Idealmente vendría de la tabla profiles)
   const AGENTS = ["Maca", "Gonza", "Sofi", "Lucas", "Brenda", "Cami"]
@@ -78,6 +91,7 @@ export function AdminLeadFactory() {
     fantasmas: 0,
     precio: 0,
     interes: 0,
+    quemados: 0, // ✅ AGREGADO: Contador para datos quemados
     basural: 0,
   })
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null)
@@ -97,6 +111,62 @@ export function AdminLeadFactory() {
     fetchGraveyardStats()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // --- 🤖 MOTOR DE ASIGNACIÓN AUTOMÁTICA (ROUND ROBIN) ---
+  useEffect(() => {
+    let timeout: NodeJS.Timeout
+
+    const processAutoAssign = async () => {
+        // Solo corre si está activado, hay leads libres y no estamos cargando
+        if (autoAssignEnabled && unassignedLeads.length > 0 && !loading) {
+            
+            const leadToAssign = unassignedLeads[0] // Tomamos el primero de la pila
+            const agentToAssign = AGENTS[nextAgentIdx] // El vendedor de turno
+
+            // 1. Actualización Optimista (Visual inmediata)
+            const remainingLeads = unassignedLeads.slice(1)
+            setUnassignedLeads(remainingLeads)
+            
+            // 2. Rotar el turno para el siguiente
+            setNextAgentIdx((prev) => (prev + 1) % AGENTS.length)
+
+            // 3. Guardar en Supabase
+            // Nota: No esperamos el await para no bloquear la UI, se hace en background
+            await supabase.from('leads').update({
+                agent_name: agentToAssign,
+                status: 'nuevo', // Aseguramos que entre como nuevo
+                last_update: new Date().toISOString()
+            }).eq('id', leadToAssign.id)
+
+            // Si quedan leads, el useEffect se volverá a disparar automáticamente 
+            // porque 'unassignedLeads' cambió de tamaño.
+        }
+    }
+
+    if (autoAssignEnabled && unassignedLeads.length > 0) {
+        // Pequeño delay de 1.5s para que se vea el proceso y no sature la base
+        timeout = setTimeout(processAutoAssign, 1500)
+    }
+
+    return () => clearTimeout(timeout)
+  }, [autoAssignEnabled, unassignedLeads, nextAgentIdx, loading])
+
+
+  // --- LÓGICA DE CONGELAMIENTO (NUEVA) ---
+  const checkFreezeStatus = (lead: Lead, drawerType: string) => {
+      if (!lead.last_update) return { isFrozen: false, remainingDays: 0 }
+      
+      const lostDate = new Date(lead.last_update)
+      const now = new Date()
+      // Diferencia en días
+      const daysPassed = Math.floor((now.getTime() - lostDate.getTime()) / (1000 * 60 * 60 * 24))
+      const requiredDays = FREEZE_CONFIG[drawerType] || 0
+      
+      if (daysPassed < requiredDays) {
+          return { isFrozen: true, remainingDays: requiredDays - daysPassed }
+      }
+      return { isFrozen: false, remainingDays: 0 }
+  }
 
   // --- 1. BANDEJA DE ENTRADA (SIN DUEÑO) + DETECCIÓN DUPLICADOS ---
   const fetchInbox = async () => {
@@ -139,9 +209,7 @@ export function AdminLeadFactory() {
       return
     }
 
-    // Traemos candidatos "originales" (ya asignados), por phone_norm y/o email
-    // Nota: evitamos contar como "original" a los que están sin asignar
-    // (agent_name NOT NULL y NOT 'Sin Asignar')
+    // Traemos candidatos "originales" (ya asignados)
     const candidates: Lead[] = []
 
     if (phones.length > 0) {
@@ -204,7 +272,6 @@ export function AdminLeadFactory() {
     let query = supabase.from("leads").select("*").eq("agent_name", sourceAgent)
 
     if (filterStage !== "all") query = query.eq("status", filterStage.toLowerCase())
-    // if (filterSource !== 'all') query = query.eq('source', filterSource)
     if (filterDateLimit) query = query.lt("created_at", `${filterDateLimit}T23:59:59`)
 
     const { data, error } = await query
@@ -219,10 +286,13 @@ export function AdminLeadFactory() {
     if (error) console.error(error)
 
     if (data) {
-      const stats = { fantasmas: 0, precio: 0, interes: 0, basural: 0 }
+      const stats = { fantasmas: 0, precio: 0, interes: 0, quemados: 0, basural: 0 }
       ;(data as any[]).forEach((l: any) => {
         const reason = l.loss_reason?.toLowerCase() || ""
-        if (reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
+        
+        // ✅ LÓGICA DE CLASIFICACIÓN CON QUEMADOS
+        if (reason.includes("quemado") || reason.includes("7 llamados")) stats.quemados++
+        else if (reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
         else if (reason.includes("precio") || reason.includes("caro")) stats.precio++
         else if (reason.includes("interes") || reason.includes("no quiere")) stats.interes++
         else stats.basural++
@@ -233,17 +303,25 @@ export function AdminLeadFactory() {
 
   const fetchDrawerLeads = async (category: string) => {
     let reasonFilter = ""
-    if (category === "fantasmas") reasonFilter = "no contesta"
-    if (category === "precio") reasonFilter = "precio"
-    if (category === "interes") reasonFilter = "interes"
+    let query = supabase.from("leads").select("*").eq("status", "perdido").limit(100)
 
-    const { data, error } = await supabase
-      .from("leads")
-      .select("*")
-      .eq("status", "perdido")
-      // .ilike('loss_reason', `%${reasonFilter}%`)
-      .limit(50)
+    // ✅ FILTRO ESPECÍFICO PARA CADA CAJÓN
+    if (category === "quemados") {
+        query = query.ilike('loss_reason', '%quemado%')
+    } else if (category === "fantasmas") {
+        reasonFilter = "no contesta"
+        query = query.ilike('loss_reason', `%${reasonFilter}%`)
+    } else if (category === "precio") {
+        reasonFilter = "precio"
+        query = query.ilike('loss_reason', `%${reasonFilter}%`)
+    } else if (category === "interes") {
+        reasonFilter = "interes"
+        query = query.ilike('loss_reason', `%${reasonFilter}%`)
+    } else if (category === "basural") {
+        query = query.not('loss_reason', 'ilike', '%quemado%').not('loss_reason', 'ilike', '%precio%').not('loss_reason', 'ilike', '%no contesta%').not('loss_reason', 'ilike', '%interes%')
+    }
 
+    const { data, error } = await query
     if (error) console.error(error)
     if (data) setDrawerLeads(data as Lead[])
   }
@@ -252,7 +330,7 @@ export function AdminLeadFactory() {
   const executeAssign = async (origin: "inbox" | "redistribucion" | "cementerio") => {
     if (selectedLeads.length === 0 || !targetAgent) return alert("Seleccioná leads y un destino.")
 
-    // Si estás en inbox y elegiste duplicados, avisamos (pero no bloqueamos duro)
+    // Si estás en inbox y elegiste duplicados, avisamos
     if (origin === "inbox") {
       const dupSelected = selectedLeads.filter((id) => !!dupMap[id])
       if (dupSelected.length > 0) {
@@ -273,6 +351,7 @@ export function AdminLeadFactory() {
     if (origin === "cementerio") {
       updates.status = "nuevo"
       updates.loss_reason = null
+      updates.calls = 0 // ✅ Reseteamos llamadas para que no vuelva a caer en quemados al toque
     }
 
     const { error } = await supabase.from("leads").update(updates).in("id", selectedLeads)
@@ -302,7 +381,6 @@ export function AdminLeadFactory() {
     setOrigLead(original)
     setDupModalOpen(true)
 
-    // si querés, refrescamos original completo por id (por si el select lo trae parcial)
     if (original?.id) {
       const { data, error } = await supabase.from("leads").select("*").eq("id", original.id).maybeSingle()
       if (error) console.error(error)
@@ -354,7 +432,6 @@ export function AdminLeadFactory() {
     fetchInbox()
   }
 
-  // Opción MÁS PRÁCTICA: mandar el duplicado al mismo dueño del original (para evitar doble asignación)
   const assignDuplicateToSameOwner = async () => {
     if (!dupLead?.id) return
     if (!origLead?.agent_name) return alert("El original no tiene dueño claro para copiar.")
@@ -379,13 +456,22 @@ export function AdminLeadFactory() {
 
   // --- HELPERS UI ---
   const handleSelectAll = (list: Lead[], checked: boolean) => {
-    if (checked) setSelectedLeads(list.map((l) => l.id))
-    else setSelectedLeads([])
+    // ✅ Solo seleccionamos los disponibles (no congelados)
+    if(activeDrawer) {
+        const available = list.filter(l => !checkFreezeStatus(l, activeDrawer).isFrozen)
+        if (checked) setSelectedLeads(available.map((l) => l.id))
+        else setSelectedLeads([])
+    } else {
+        if (checked) setSelectedLeads(list.map((l) => l.id))
+        else setSelectedLeads([])
+    }
   }
+  
   const handleSelectOne = (id: string, checked: boolean) => {
     if (checked) setSelectedLeads((prev) => [...prev, id])
     else setSelectedLeads((prev) => prev.filter((l) => l !== id))
   }
+  
   const openDrawer = (category: string) => {
     setActiveDrawer(category)
     fetchDrawerLeads(category)
@@ -398,18 +484,12 @@ export function AdminLeadFactory() {
       <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h2 className="text-3xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-            <Layers className="h-8 w-8 text-orange-500" /> LEADS
+            <Layers className="h-8 w-8 text-orange-500" /> LEADS FACTORY
             {loading && <RefreshCw className="h-5 w-5 animate-spin text-slate-400" />}
           </h2>
           <p className="text-slate-500">
             Gestión de flujo, redistribución y reciclaje.
-            {dupLoading ? (
-              <span className="ml-2 text-xs text-slate-400">Revisando duplicados…</span>
-            ) : inboxDupCount > 0 ? (
-              <span className="ml-2 text-xs text-red-600 font-bold">
-                ⚠️ {inboxDupCount} duplicado(s) detectado(s) en Bandeja
-              </span>
-            ) : null}
+            {inboxDupCount > 0 && <span className="ml-2 text-xs text-red-600 font-bold">⚠️ {inboxDupCount} duplicados en bandeja</span>}
           </p>
         </div>
 
@@ -426,7 +506,9 @@ export function AdminLeadFactory() {
               {autoAssignEnabled ? "⚡ Round Robin ACTIVO" : "💤 Asignación Manual"}
             </Label>
             <span className="text-[10px] text-slate-500">
-              {autoAssignEnabled ? "El sistema reparte solo." : "Los leads esperan en Bandeja."}
+              {autoAssignEnabled ? (
+                  <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500"/> Repartiendo a: {AGENTS[nextAgentIdx]}</span>
+              ) : "Los leads esperan en Bandeja."}
             </span>
           </div>
           <Switch id="auto-mode" checked={autoAssignEnabled} onCheckedChange={setAutoAssignEnabled} />
@@ -693,8 +775,25 @@ export function AdminLeadFactory() {
         {/* --- 3. CEMENTERIO --- */}
         <TabsContent value="graveyard" className="space-y-6">
           {!activeDrawer ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="hover:border-blue-400 cursor-pointer group" onClick={() => openDrawer("fantasmas")}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              
+              {/* ✅ TARJETA: QUEMADOS (NUEVA) */}
+              <Card className="hover:border-red-500 cursor-pointer group border-l-4 border-l-red-500 shadow-md bg-red-50/30" onClick={() => { setActiveDrawer("quemados"); fetchDrawerLeads("quemados"); }}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-black text-red-600 uppercase tracking-widest group-hover:text-red-700 flex items-center gap-2">
+                    <Flame className="h-4 w-4 animate-pulse"/> Datos Quemados
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex justify-between items-end">
+                    <span className="text-4xl font-black text-slate-800 dark:text-white">{graveyardStats.quemados}</span>
+                    <Badge className="bg-red-200 text-red-800 hover:bg-red-300">Reciclar</Badge>
+                  </div>
+                  <p className="text-xs text-red-400 mt-2 font-medium">+7 Llamados s/c</p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:border-blue-400 cursor-pointer group" onClick={() => { setActiveDrawer("fantasmas"); fetchDrawerLeads("fantasmas"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-blue-600">
                     Fantasmas
@@ -709,7 +808,7 @@ export function AdminLeadFactory() {
                 </CardContent>
               </Card>
 
-              <Card className="hover:border-green-400 cursor-pointer group" onClick={() => openDrawer("precio")}>
+              <Card className="hover:border-green-400 cursor-pointer group" onClick={() => { setActiveDrawer("precio"); fetchDrawerLeads("precio"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-green-600">
                     Precio / Fríos
@@ -724,7 +823,7 @@ export function AdminLeadFactory() {
                 </CardContent>
               </Card>
 
-              <Card className="hover:border-orange-400 cursor-pointer group" onClick={() => openDrawer("interes")}>
+              <Card className="hover:border-orange-400 cursor-pointer group" onClick={() => { setActiveDrawer("interes"); fetchDrawerLeads("interes"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-orange-600">
                     Interés Caído
@@ -760,7 +859,9 @@ export function AdminLeadFactory() {
                     ← Volver
                   </Button>
                   <CardTitle className="capitalize flex items-center gap-2">
-                    <Recycle className="h-5 w-5" /> Cajón: {activeDrawer}
+                    {/* ✅ ÍCONO DINÁMICO */}
+                    {activeDrawer === 'quemados' ? <Flame className="h-5 w-5 text-red-500 animate-pulse"/> : <Recycle className="h-5 w-5" />} 
+                    Cajón: {activeDrawer}
                   </CardTitle>
                 </div>
                 <div className="flex gap-2 items-center bg-white p-2 rounded-lg border">
@@ -783,7 +884,7 @@ export function AdminLeadFactory() {
                 </div>
               </CardHeader>
 
-              <CardContent className="p-0">
+              <CardContent className="p-0 max-h-[500px] overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -794,6 +895,8 @@ export function AdminLeadFactory() {
                         />
                       </TableHead>
                       <TableHead>Nombre</TableHead>
+                      {/* ✅ COLUMNA EXTRA DE ESTADO CONGELADO */}
+                      <TableHead>Disponibilidad</TableHead>
                       <TableHead>Motivo Muerte</TableHead>
                       <TableHead>Último Dueño</TableHead>
                     </TableRow>
@@ -802,26 +905,48 @@ export function AdminLeadFactory() {
                   <TableBody>
                     {drawerLeads.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center py-8">
+                        <TableCell colSpan={5} className="text-center py-8">
                           No hay leads en este cajón.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      drawerLeads.map((l) => (
-                        <TableRow key={l.id}>
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedLeads.includes(l.id)}
-                              onCheckedChange={(c) => handleSelectOne(l.id, c as boolean)}
-                            />
-                          </TableCell>
-                          <TableCell className="font-bold">{l.name}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{l.loss_reason || "Desconocido"}</Badge>
-                          </TableCell>
-                          <TableCell className="text-xs">{l.agent_name}</TableCell>
-                        </TableRow>
-                      ))
+                      drawerLeads.map((l) => {
+                        // ✅ CHEQUEO DE TIEMPO
+                        const { isFrozen, remainingDays } = checkFreezeStatus(l, activeDrawer || "")
+                        
+                        return (
+                          <TableRow key={l.id} className={isFrozen ? "bg-slate-50 opacity-60" : ""}>
+                            <TableCell>
+                              {isFrozen ? (
+                                <Lock className="h-4 w-4 text-slate-300" />
+                              ) : (
+                                <Checkbox
+                                  checked={selectedLeads.includes(l.id)}
+                                  onCheckedChange={(c) => handleSelectOne(l.id, c as boolean)}
+                                />
+                              )}
+                            </TableCell>
+                            <TableCell className="font-bold">{l.name}</TableCell>
+                            <TableCell>
+                                {isFrozen ? (
+                                    <Badge variant="outline" className="border-blue-200 text-blue-400 bg-blue-50">
+                                        <Snowflake size={10} className="mr-1"/> Faltan {remainingDays} días
+                                    </Badge>
+                                ) : (
+                                    <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-0">
+                                        Disponible
+                                    </Badge>
+                                )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={activeDrawer === 'quemados' ? 'text-red-600 border-red-200 bg-red-50' : ''}>
+                                  {l.loss_reason || "Desconocido"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs">{l.agent_name}</TableCell>
+                          </TableRow>
+                        )
+                      })
                     )}
                   </TableBody>
                 </Table>

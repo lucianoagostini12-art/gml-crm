@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-// Import corregido para evitar errores de Build en Vercel
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -25,7 +24,7 @@ export function AdminConteo() {
   const [selectedMonth, setSelectedMonth] = useState((new Date().getMonth() + 1).toString())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
 
-  // ✅ Años dinámicos
+  // Años dinámicos
   const [yearOptions, setYearOptions] = useState<string[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -45,7 +44,7 @@ export function AdminConteo() {
     return d
   }
 
-  // ✅ Genera años desde el primer lead hasta el año actual + 1
+  // Genera años desde el primer lead hasta el año actual + 1
   const buildYearOptions = async () => {
     const currentYear = new Date().getFullYear()
     let minYear = currentYear
@@ -94,11 +93,11 @@ export function AdminConteo() {
     const now = new Date()
     const weekStart = startOfWeekMonday(now)
 
-    // ✅ Estos 4 SIEMPRE se tratan como MANUALES (aunque existan como profiles)
+    // Estos 4 SIEMPRE se tratan como MANUALES
     const MANUAL_BUCKETS = ["Iara", "Oficina", "Calle", "Otros"]
     const manualBucketSet = new Set(MANUAL_BUCKETS.map((n) => norm(n)))
 
-    // ✅ 2) Vendedores reales desde profiles (role='seller')
+    // 2) Vendedores reales desde profiles (role='seller')
     let sellerNames: string[] = []
     try {
       const { data: sellers, error: sellersErr } = await supabase
@@ -112,26 +111,20 @@ export function AdminConteo() {
         sellerNames = (sellers || [])
           .map((s: any) => String(s.full_name ?? "").trim())
           .filter(Boolean)
-          // ✅ IMPORTANTÍSIMO: si alguno de estos 4 está en profiles, NO lo tratamos como seller
           .filter((n: string) => !manualBucketSet.has(norm(n)))
       }
     } catch (e) {
       console.warn("profiles no disponible:", e)
     }
 
-    // ✅ 3) Manuales SOLO si hay ventas en el período
-    // Incluye: Iara/Oficina/Calle/Otros + cualquier otro manual que aparezca en agent_name ese mes
+    // 3) Manuales SOLO si hay ventas en el período
     const manualNamesThisPeriod = [...new Set(
       safeLeads
         .map((l: any) => String(l.agent_name ?? "").trim())
         .filter(Boolean)
-        // manual = no es seller (por nombre)
         .filter((n: string) => !sellerNames.some((s) => norm(s) === norm(n)))
     )]
 
-    // ✅ Unión final:
-    // - sellers SIEMPRE
-    // - manuales SOLO si están en leads del mes
     const agentNames = [...new Set([...sellerNames, ...manualNamesThisPeriod])]
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b, "es"))
@@ -196,12 +189,24 @@ export function AdminConteo() {
 
     setAgents(processedAgents)
     setPrepagaStats(pStats)
+
+    // --- CÁLCULO DE TOTALES (CONECTADO A FACTURACIÓN OPS) ---
+    const fulfilledLeads = safeLeads.filter((l: any) => norm(l.status) === "cumplidas")
+    
+    // Aquí ocurre la magia de la conexión con Billing:
+    // Si Ops hizo un override (ajuste manual en auditoría), usamos eso. Si no, usamos el precio de venta.
+    const totalRevenue = fulfilledLeads.reduce((acc: number, curr: any) => {
+        const billingVal = Number(curr.billing_price_override)
+        const salesVal = Number(curr.price)
+        // Prioridad: 1. Valor Auditoría Ops, 2. Valor Venta, 3. Cero
+        const finalVal = !isNaN(billingVal) && billingVal !== 0 ? billingVal : (salesVal || 0)
+        return acc + finalVal
+    }, 0)
+
     setGlobalTotals({
       monthly: safeLeads.length,
-      fulfilled: safeLeads.filter((l: any) => norm(l.status) === "cumplidas").length,
-      revenue: safeLeads
-        .filter((l: any) => norm(l.status) === "cumplidas")
-        .reduce((acc: number, curr: any) => acc + (Number(curr.price) || 0), 0),
+      fulfilled: fulfilledLeads.length,
+      revenue: totalRevenue,
     })
 
     setLoading(false)
@@ -214,6 +219,7 @@ export function AdminConteo() {
 
   useEffect(() => {
     fetchData()
+    // Escuchamos cambios en leads para actualizar si Ops toca la facturación
     const channel = supabase
       .channel("conteo_realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => fetchData())
@@ -268,7 +274,7 @@ export function AdminConteo() {
 
           <div className="h-6 w-[1px] bg-slate-200"></div>
 
-          {/* ✅ Año dinámico */}
+          {/* Año dinámico */}
           <Select value={selectedYear} onValueChange={setSelectedYear}>
             <SelectTrigger className="w-[90px] border-none shadow-none font-bold">
               <SelectValue />
@@ -421,7 +427,7 @@ export function AdminConteo() {
           </div>
           <div>
             <h3 className="text-xl font-bold tracking-tight">Caja de Cobranza (Mes)</h3>
-            <p className="text-slate-400 text-sm font-medium">Suma de Price en ventas cumplidas del periodo.</p>
+            <p className="text-slate-400 text-sm font-medium">Suma de Price (o Liquidación Ops) en ventas cumplidas.</p>
           </div>
         </div>
         <div className="text-right">

@@ -1,33 +1,71 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
+import { createClient } from "@/lib/supabase" // Conexión a Supabase
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { ArrowUpRight, TrendingUp, AlertCircle, Target, Users, Trophy, AlertTriangle, Clock, Filter, X, Calendar } from "lucide-react"
+import { ArrowUpRight, TrendingUp, AlertCircle, Target, Users, Trophy, AlertTriangle, Clock, Filter, X, Calendar, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 // COLORES PARA GRAFICOS
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 interface OpsMetricsProps {
-    operations: any[];
+    // operations ya no es obligatorio porque se carga internamente
     onApplyFilter?: (type: string, value: string) => void;
 }
 
-export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
-    
-    // --- ESTADO DEL FILTRO DE FECHA ---
+export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
+    const supabase = createClient()
+
+    // --- ESTADO DE DATOS Y FILTRO ---
+    const [operations, setOperations] = useState<any[]>([]) // Estado local para los datos de BD
+    const [loading, setLoading] = useState(true)
     const [dateRange, setDateRange] = useState({ start: "", end: "" })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
 
+    // --- CONEXIÓN A SUPABASE ---
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true)
+            // Traemos todos los leads. Puedes ajustar el .select() si quieres columnas específicas
+            const { data, error } = await supabase
+                .from('leads')
+                .select('*')
+                .order('created_at', { ascending: false })
+            
+            if (data) {
+                // Mapeamos los datos de Supabase (snake_case) al formato que usa tu componente (camelCase)
+                const mappedData = data.map((l: any) => ({
+                    id: l.id,
+                    entryDate: l.created_at,        // Fecha de ingreso
+                    status: l.status,               // Estado actual
+                    origen: l.source,               // Fuente (Facebook, Google, etc)
+                    seller: l.agent_name,           // Vendedor asignado
+                    lastUpdate: l.last_update,      // Para calcular velocidad
+                    
+                    // INTENTO DE MAPEO INTELIGENTE PARA PREPAGA/PLAN
+                    // Si tus columnas en Supabase se llaman distinto, ajusta aquí:
+                    prepaga: l.company_name || l.health_insurance || l.prepaga || 'Sin Dato', 
+                    plan: l.plan_type || l.plan || 'General' 
+                }))
+                setOperations(mappedData)
+            }
+            setLoading(false)
+        }
+
+        fetchData()
+    }, [])
+
     // --- 1. PROCESAMIENTO DE DATOS (CON FILTRO APLICADO) ---
+    // (Lógica original intacta)
     
     const { 
-        filteredCount, // Para mostrar cuántos quedan tras el filtro
+        filteredCount, 
         totalOps, 
         cumplidas, 
         tasaExito, 
@@ -104,7 +142,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
             return { name: seller || "Sin Asignar", total: totalS, ok: okS, rate: rateS }
         }).sort((a:any, b:any) => b.ok - a.ok).slice(0, 5)
 
-        // F. AGING DE STOCK (Calculado al momento actual vs fecha ingreso filtrada)
+        // F. AGING DE STOCK
         const now = new Date()
         const agingBuckets = { '< 7 días': 0, '7-15 días': 0, '15-30 días': 0, '> 30 días': 0 }
         
@@ -150,7 +188,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
             dataAging: _dataAging,
             velocidadPromedio: _velocidad
         }
-    }, [operations, dateRange]) // <-- SE RECALCULA CUANDO CAMBIA DATE RANGE
+    }, [operations, dateRange]) 
 
     // Helper para clicks en gráficos
     const handleFilter = (type: string, val: string) => {
@@ -158,6 +196,10 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
     }
 
     const hasActiveFilter = dateRange.start || dateRange.end
+
+    if (loading && operations.length === 0) {
+        return <div className="h-96 flex items-center justify-center text-slate-400 gap-2"><RefreshCw className="animate-spin h-5 w-5"/> Cargando Operaciones...</div>
+    }
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
@@ -236,8 +278,6 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                     </CardHeader>
                     <CardContent>
                         {/* Calcula sobre los datos filtrados */}
-                        <div className="text-2xl font-black text-slate-800">{totalOps - cumplidas - filteredCount + totalOps - (totalOps - cumplidas - bottleneckData.reduce((acc, b) => acc + b.cantidad, 0))}</div> 
-                        {/* Nota: Usamos la suma del bottleneckData que son los estados activos filtrados */}
                         <div className="text-2xl font-black text-slate-800">{bottleneckData.reduce((acc, curr) => acc + curr.cantidad, 0)}</div>
                         <p className="text-xs text-slate-400 mt-1">Operaciones activas</p>
                     </CardContent>
@@ -249,7 +289,7 @@ export function OpsMetrics({ operations, onApplyFilter }: OpsMetricsProps) {
                     </CardHeader>
                     <CardContent>
                         {/* Rechazados dentro del filtro */}
-                        <div className="text-2xl font-black text-slate-800">{totalOps - cumplidas - bottleneckData.reduce((acc, curr) => acc + curr.cantidad, 0)}</div>
+                        <div className="text-2xl font-black text-slate-800">{filteredOps.filter((o:any) => o.status === 'rechazado').length}</div>
                         <p className="text-xs text-slate-400 mt-1">Clientes caídos</p>
                     </CardContent>
                 </Card>

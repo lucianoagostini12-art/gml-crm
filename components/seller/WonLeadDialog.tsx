@@ -19,7 +19,7 @@ interface WonLeadDialogProps {
 export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogProps) {
   const [saleType, setSaleType] = useState<'alta' | 'pass' | null>(null)
 
-  // Estados para el formulario PASS (Ahora mucho más completo para que Ops no reciba vacíos)
+  // Estados para el formulario PASS
   const [passData, setPassData] = useState({
     fullName: "",
     dni: "",
@@ -46,46 +46,94 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       return alert("Por favor, completá Nombre, DNI y Prepaga como mínimo.")
     }
     
-    // Mapeamos los datos para que coincidan con las columnas SQL creadas
+    // TRADUCTOR PASS: Mapeamos los datos manuales a las columnas de Supabase
     onConfirm({
       type: 'pass',
-      name: passData.fullName, // Se guarda en column 'name'
-      dni: passData.dni,       // Se guarda en column 'dni' (nueva)
-      phone: passData.phone,   // Se guarda en column 'phone'
-      prepaga: passData.prepaga, // Se guarda en column 'prepaga'
-      plan: passData.plan,     // Se guarda en column 'plan' (nueva)
-      notes: passData.observations,
-      sub_state: "auditoria_pass", // Estado inicial para Ops
-      // Pasamos los archivos crudos para que Kanban los suba
-      files: passData.files
+      name: passData.fullName,
+      dni: passData.dni,
+      phone: passData.phone,
+      prepaga: passData.prepaga,
+      plan: passData.plan,
+      notes: passData.observations, // Se guarda en 'notes' para historial
+      status: 'ingresado',          // IMPORTANTE: Para que aparezca en Ops
+      sub_state: 'auditoria_pass',
+      files: passData.files         // Archivos crudos para el uploader
     })
     handleOpenChange(false)
   }
 
-  // SI ELIGIÓ ALTA -> Mostramos el Wizard (Asumimos que el Wizard ya devuelve la estructura correcta)
+  // SI ELIGIÓ ALTA -> Mostramos el Wizard
   if (saleType === 'alta') {
     return (
       <SaleWizardDialog 
         open={open} 
         onOpenChange={handleOpenChange} 
-        onConfirm={(data: any) => {
-          // Aseguramos que el Wizard mande todo lo necesario
-          onConfirm({ 
+        onConfirm={(wizardData: any) => {
+          
+          // --- EL GRAN TRADUCTOR ---
+          // Aquí convertimos el formato del Wizard (JS) al formato de Supabase (SQL)
+          // Esto soluciona que Ops reciba los datos vacíos.
+          
+          const dbData = {
+            // Campos obligatorios de sistema
             type: 'alta',
+            status: 'ingresado', // Entra en la primera columna de Ops
             sub_state: 'ingresado',
-            ...data // Esto debe traer full_price, aportes, hijos, etc.
-          })
+            
+            // Datos Personales
+            name: wizardData.nombre,
+            dni: wizardData.cuit, // Usamos el CUIT/CUIL como DNI principal
+            cuit: wizardData.cuit,
+            dob: wizardData.nacimiento,
+            email: wizardData.email,
+            phone: wizardData.celular,
+            
+            // Dirección
+            address_street: wizardData.domicilio,
+            address_city: wizardData.localidad,
+            address_zip: wizardData.cp,
+            province: wizardData.provincia,
+            
+            // Datos Familiares
+            tipo_afiliacion: wizardData.tipoGrupo, // Mapeo clave: tipoGrupo -> tipo_afiliacion
+            family_members: wizardData.tipoGrupo === 'matrimonio' ? { c: wizardData.matrimonioNombre, d: wizardData.matrimonioDni } : null,
+            hijos: wizardData.hijosData, // Array de hijos
+            capitas: 1 + (wizardData.tipoGrupo === 'matrimonio' ? 1 : 0) + (parseInt(wizardData.cantHijos) || 0),
+
+            // Datos Laborales
+            source: wizardData.origen, // Mapeo clave: origen -> source
+            condicion_laboral: wizardData.condicion,
+            cuit_empleador: wizardData.cuitEmpleador,
+            // Nota: catMonotributo y claveFiscal podrían ir a 'notes' o columnas nuevas si las creamos.
+            // Por ahora las concatenamos en notas para no perderlas:
+            notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo}`,
+
+            // Datos de Pago
+            metodo_pago: wizardData.tipoPago, // tarjeta o cbu
+            banco: wizardData.bancoEmisor,
+            cbu_tarjeta: wizardData.tipoPago === 'tarjeta' ? wizardData.numeroTarjeta : wizardData.cbuNumero,
+            
+            // Valores Económicos (CRÍTICO PARA OPS)
+            full_price: parseFloat(wizardData.fullPrice || 0),
+            aportes: parseFloat(wizardData.aportes || 0),
+            descuento: parseFloat(wizardData.descuento || 0),
+            
+            // Archivos (Se pasan aparte para que KanbanBoard los suba)
+            files: wizardData.archivos
+          }
+
+          onConfirm(dbData)
           handleOpenChange(false)
         }} 
       />
     )
   }
 
-  // SI ELIGIÓ PASS -> Formulario Mejorado
+  // SI ELIGIÓ PASS -> Formulario
   if (saleType === 'pass') {
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[600px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-blue-600 font-black text-xl">
               <ArrowRightLeft className="h-6 w-6"/> Registrar Traspaso (PASS)
@@ -133,7 +181,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
                 <Select onValueChange={(v) => setPassData({...passData, prepaga: v})}>
                   <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Prevencion Salud">Prevención Salud</SelectItem>
+                    <SelectItem value="Prevención Salud">Prevención Salud</SelectItem>
                     <SelectItem value="Sancor Salud">Sancor Salud</SelectItem>
                     <SelectItem value="Avalian">Avalian</SelectItem>
                     <SelectItem value="Swiss Medical">Swiss Medical</SelectItem>
@@ -186,7 +234,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="ghost" onClick={() => setSaleType(null)}>Volver</Button>
-            <Button className="bg-blue-600 hover:bg-blue-700 font-bold" onClick={handleConfirmPass}>
+            <Button className="bg-blue-600 hover:bg-blue-700 font-bold text-white" onClick={handleConfirmPass}>
               CONFIRMAR PASS 🚀
             </Button>
           </DialogFooter>
@@ -198,10 +246,10 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
   // PANTALLA INICIAL
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[450px]">
+      <DialogContent className="sm:max-w-[450px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
         <DialogHeader>
-          <DialogTitle className="text-center text-xl font-black">¡Venta Cerrada! 🚀</DialogTitle>
-          <DialogDescription className="text-center">
+          <DialogTitle className="text-center text-xl font-black text-slate-800 dark:text-white">¡Venta Cerrada! 🚀</DialogTitle>
+          <DialogDescription className="text-center text-slate-500">
             Seleccioná el tipo de gestión para continuar.
           </DialogDescription>
         </DialogHeader>
@@ -209,7 +257,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
         <div className="grid grid-cols-2 gap-4 py-6">
           <button 
             onClick={() => setSaleType('alta')}
-            className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group"
+            className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group bg-white"
           >
             <div className="bg-green-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform">
               <UserPlus className="h-8 w-8 text-green-600"/>
@@ -220,13 +268,13 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
 
           <button 
             onClick={() => setSaleType('pass')}
-            className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"
+            className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group bg-white"
           >
             <div className="bg-blue-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform">
               <ArrowRightLeft className="h-8 w-8 text-blue-600"/>
             </div>
             <span className="font-bold text-slate-700 group-hover:text-blue-700">TRASPASO (PASS)</span>
-            <span className="text-xs text-slate-400 mt-1">Cambio de Obra Social</span>
+            <span className="text-xs text-slate-400 mt-1">Cambio de productor</span>
           </button>
         </div>
       </DialogContent>

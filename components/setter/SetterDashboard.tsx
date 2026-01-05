@@ -26,6 +26,7 @@ export function SetterDashboard() {
     const [loading, setLoading] = useState(true)
     const [selectedItem, setSelectedItem] = useState<any>(null)
     const [draggedItem, setDraggedItem] = useState<any>(null)
+    const [userId, setUserId] = useState<string | null>(null)
     
     // CONFIG STATES (Desde Supabase)
     const [origins, setOrigins] = useState<string[]>([]) 
@@ -42,6 +43,24 @@ export function SetterDashboard() {
     const [discardReason, setDiscardReason] = useState("")
 
     // --- 1. CARGA INICIAL DE DATOS Y CONFIGURACIÓN ---
+    useEffect(() => {
+        const getUser = async () => {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) setUserId(user.id)
+        }
+        getUser()
+        fetchConfig()
+        fetchItems()
+
+        // Escuchar cambios en leads Y en mensajes para actualizar el chat en tiempo real
+        const channel = supabase.channel('setter_realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchItems())
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages' }, () => fetchItems())
+            .subscribe()
+            
+        return () => { supabase.removeChannel(channel) }
+    }, [])
+
     const fetchConfig = async () => {
         const { data } = await supabase.from('system_config').select('*').eq('key', 'sales_origins').single()
         if (data) setOrigins(data.value || ["Linkedin", "Facebook", "Instagram", "Llamador"])
@@ -49,39 +68,60 @@ export function SetterDashboard() {
 
     const fetchItems = async () => {
         setLoading(true)
-        // Solo traemos leads que NO estén cerrados (vendidos o perdidos) para mantener el panel limpio
-        // Y que sean de tipo 'prospecto' (para diferenciar de ventas ya cargadas)
-        const { data } = await supabase
+        
+        // 1. Traemos los leads
+        const { data: leadsData, error } = await supabase
             .from('leads')
-            .select('*')
-            .not('status', 'in', '("vendido","perdido")')
+            .select(`
+                *,
+                lead_messages (
+                    created_at,
+                    content,
+                    sender_role
+                )
+            `)
+            .not('status', 'in', '("vendido","perdido")') // Filtramos vendidos/perdidos
             .order('created_at', { ascending: false })
         
-        if (data) {
-            const mappedItems = data.map((i: any) => ({
-                id: i.id,
-                name: i.name,
-                source: i.source,
-                phone: i.phone,
-                notes: i.comments ? i.comments.map((c:any) => `[${new Date(c.date).toLocaleDateString()}]: ${c.text}`).join('\n') : '', // Aplanamos chat para vista simple
-                scheduled_for: i.scheduled_for, // Fecha ISO de la cita
-                status: i.status
-            }))
+        if (leadsData) {
+            const mappedItems = leadsData.map((i: any) => {
+                // Mapeamos los mensajes de la tabla lead_messages al formato string que usa tu UI
+                // Ordenamos por fecha para que el chat tenga sentido
+                const messages = i.lead_messages || []
+                const sortedMessages = messages.sort((a:any, b:any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                const notesString = sortedMessages.map((m:any) => `[${new Date(m.created_at).toLocaleDateString()} ${m.sender_role || 'Sist'}]: ${m.content}`).join('\n')
+
+                return {
+                    id: i.id,
+                    name: i.name,
+                    source: i.source,
+                    phone: i.phone,
+                    notes: notesString, 
+                    scheduled_for: i.scheduled_for,
+                    status: i.status
+                }
+            })
             setItems(mappedItems)
+            
+            // Si hay un item seleccionado, lo refrescamos para ver los chats nuevos al instante
+            if (selectedItem) {
+                const updatedSelected = mappedItems.find(item => item.id === selectedItem.id)
+                if (updatedSelected) setSelectedItem(updatedSelected)
+            }
         }
         setLoading(false)
     }
 
-    useEffect(() => {
-        fetchConfig()
-        fetchItems()
-
-        const channel = supabase.channel('setter_realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchItems())
-            .subscribe()
-            
-        return () => { supabase.removeChannel(channel) }
-    }, [])
+    // --- HELPER PARA MÉTRICAS (CRUCIAL PARA ADMIN) ---
+    const logHistory = async (leadId: string, newStatus: string) => {
+        if (!userId) return
+        await supabase.from('lead_status_history').insert({
+            lead_id: leadId,
+            status: newStatus,
+            changed_by: userId,
+            created_at: new Date().toISOString()
+        })
+    }
 
     // --- FILTROS COMPUTADOS ---
     const inboxItems = useMemo(() => items.filter(i => 
@@ -98,25 +138,32 @@ export function SetterDashboard() {
     const handleCreate = async () => {
         if (!createData.title) return
         
-        const initialComment = createData.note ? [{
-            text: createData.note,
-            author: 'Setter',
-            date: new Date().toISOString()
-        }] : []
-
-        const { error } = await supabase.from('leads').insert({
+        // 1. Crear el Lead
+        const { data: newLead, error } = await supabase.from('leads').insert({
             name: createData.title,
             source: createData.source,
             phone: createData.phone,
-            comments: initialComment,
-            status: 'nuevo', // Estado inicial para que Admin lo vea como ingreso
-            type: 'prospecto', // Marcamos que es un prospecto crudo
+            status: 'nuevo',
+            type: 'prospecto',
             last_update: new Date().toISOString()
-        })
+        }).select().single()
 
-        if (!error) {
+        if (!error && newLead) {
+            // 2. Si hay nota inicial, agregarla a lead_messages
+            if (createData.note) {
+                await supabase.from('lead_messages').insert({
+                    lead_id: newLead.id,
+                    content: createData.note,
+                    sender_role: 'setter',
+                    created_at: new Date().toISOString()
+                })
+            }
+            // 3. Registrar en Historial (Para Métricas de Ingreso)
+            await logHistory(newLead.id, 'nuevo')
+
             setIsCreateOpen(false)
             setCreateData({ title: "", source: "Linkedin", note: "", phone: "" })
+            fetchItems() // Refrescar manual por seguridad
         }
     }
 
@@ -125,61 +172,73 @@ export function SetterDashboard() {
         if (!idToUpdate) return
         const isoDateTime = `${dateStr}T${timeStr}:00`
 
-        await supabase.from('leads').update({
+        // Actualizar Lead
+        const { error } = await supabase.from('leads').update({
             scheduled_for: isoDateTime,
-            status: 'contactado', // Cambia estado al agendar
+            status: 'contactado', // El setter "Contacta" y agenda
             last_update: new Date().toISOString()
         }).eq('id', idToUpdate)
 
-        setIsScheduleOpen(false)
-        setDraggedItem(null)
+        if (!error) {
+            // Métricas: Contar como 'contactado'
+            await logHistory(idToUpdate, 'contactado')
+            
+            setIsScheduleOpen(false)
+            setDraggedItem(null)
+            fetchItems()
+        }
     }
 
     const handleDiscard = async () => {
         if (!selectedItem) return
         
-        // Agregar nota de descarte al historial
-        const { data: current } = await supabase.from('leads').select('comments').eq('id', selectedItem.id).single()
-        const newComments = [...(current?.comments || []), {
-            text: `[DESCARTADO]: ${discardReason}`,
-            author: 'Setter',
-            date: new Date().toISOString()
-        }]
+        // 1. Agregar el motivo como mensaje final
+        await supabase.from('lead_messages').insert({
+            lead_id: selectedItem.id,
+            content: `[DESCARTADO]: ${discardReason}`,
+            sender_role: 'setter',
+            created_at: new Date().toISOString()
+        })
 
-        await supabase.from('leads').update({
+        // 2. Actualizar estado a perdido
+        const { error } = await supabase.from('leads').update({
             status: 'perdido',
-            comments: newComments,
             last_update: new Date().toISOString()
         }).eq('id', selectedItem.id)
 
-        setSelectedItem(null)
-        setIsDiscardOpen(false)
+        if (!error) {
+            // Métricas: Contar como 'perdido'
+            await logHistory(selectedItem.id, 'perdido')
+
+            setSelectedItem(null)
+            setIsDiscardOpen(false)
+            fetchItems()
+        }
     }
 
     const addNote = async () => {
         if (!selectedItem || !newNoteText.trim()) return
         
-        const { data: current } = await supabase.from('leads').select('comments').eq('id', selectedItem.id).single()
-        const newComments = [...(current?.comments || []), {
-            text: newNoteText,
-            author: 'Setter',
-            date: new Date().toISOString()
-        }]
+        // Insertar en la tabla real de mensajes
+        const { error } = await supabase.from('lead_messages').insert({
+            lead_id: selectedItem.id,
+            content: newNoteText,
+            sender_role: 'setter', // O 'system' si prefieres
+            created_at: new Date().toISOString()
+        })
 
-        await supabase.from('leads').update({
-            comments: newComments,
-            last_update: new Date().toISOString()
-        }).eq('id', selectedItem.id)
-
-        // Actualizamos vista local para feedback inmediato
-        setSelectedItem((prev: any) => ({
-            ...prev,
-            notes: (prev.notes || '') + `\n[HOY]: ${newNoteText}`
-        }))
-        setNewNoteText("")
+        if (!error) {
+            // Feedback inmediato (simulado hasta que el realtime dispare)
+            setSelectedItem((prev: any) => ({
+                ...prev,
+                notes: (prev.notes || '') + `\n[${new Date().toLocaleDateString()} Setter]: ${newNoteText}`
+            }))
+            setNewNoteText("")
+            // FetchItems se disparará solo por el realtime subscription
+        }
     }
 
-    // --- UTILS ---
+    // --- UTILS (Visuales sin cambios) ---
     const getSourceIcon = (src: string) => {
         const s = src?.toLowerCase() || ""
         if (s.includes('linkedin')) return <Linkedin className="h-4 w-4 text-blue-700" />

@@ -135,7 +135,8 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         const { data } = await supabase.from('leads')
             .select('*')
             .eq('agent_name', CURRENT_USER)
-            .not('status', 'in', '("perdido","vendido","rechazado","baja","cumplidas")') // Filtro estricto para evitar reapariciones
+            // === CORRECCIÓN AQUÍ: Agregamos 'ingresado' a la lista negra ===
+            .not('status', 'in', '("perdido","vendido","rechazado","baja","cumplidas","ingresado")') 
         if (data) setLeads(mapLeads(data))
     }
 
@@ -159,13 +160,13 @@ export function KanbanBoard({ userName }: { userName?: string }) {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
                 if (payload.eventType === 'INSERT') {
                     // Solo agregamos si el status es visible en el kanban
-                    if (!['perdido', 'vendido', 'rechazado', 'cumplidas'].includes(payload.new.status)) {
+                    if (!['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(payload.new.status)) {
                         const newLead = mapLeads([payload.new])[0]
                         setLeads(prev => [newLead, ...prev])
                     }
                 } else if (payload.eventType === 'UPDATE') {
                     const updated = mapLeads([payload.new])[0]
-                    if (['perdido', 'vendido', 'rechazado', 'cumplidas'].includes(updated.status)) {
+                    if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
                         setLeads(prev => prev.filter(l => l.id !== updated.id))
                     } else {
                         setLeads(prev => prev.map(l => l.id === updated.id ? updated : l))

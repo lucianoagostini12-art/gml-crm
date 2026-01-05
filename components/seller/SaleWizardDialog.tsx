@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CheckCircle2, UploadCloud, Users, CreditCard, FileText, User, DollarSign, PartyPopper } from "lucide-react"
+import { UploadCloud, Users, CreditCard, FileText, User, DollarSign, PartyPopper, Loader2, Trash2 } from "lucide-react"
 
 interface SaleWizardDialogProps {
   open: boolean
@@ -17,6 +17,7 @@ interface SaleWizardDialogProps {
 export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDialogProps) {
   const [step, setStep] = useState(1)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   
   const [formData, setFormData] = useState<any>({
       // Parte 1: Titular
@@ -32,24 +33,47 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
       // Parte 4: Pago
       tipoPago: 'cbu', bancoEmisor: '', numeroTarjeta: '', vencimientoTarjeta: '', cbuNumero: '',
       // Parte 5: Archivos
-      archivos: null,
+      archivos: [], 
       // Parte 6: Valores
-      fullPrice: '', aportes: '', descuento: ''
+      fullPrice: '', aportes: '', descuento: '', aPagar: ''
   })
 
   // --- NAVEGACIÓN LIBRE ---
-  const nextStep = () => {
-      setStep(prev => prev + 1)
-  }
-  
+  const nextStep = () => setStep(prev => prev + 1)
   const prevStep = () => setStep(prev => prev - 1)
   
+  // --- MANEJO DE ARCHIVOS ---
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+          const newFiles = Array.from(e.target.files)
+          setFormData((prev: any) => ({
+              ...prev,
+              archivos: [...(prev.archivos || []), ...newFiles]
+          }))
+      }
+  }
+
+  const removeFile = (indexToRemove: number) => {
+      setFormData((prev: any) => ({
+          ...prev,
+          archivos: prev.archivos.filter((_: any, index: number) => index !== indexToRemove)
+      }))
+  }
+
+  // --- FINALIZAR (SOLO PASA DATOS) ---
   const handleFinish = () => {
-      setShowSuccess(true)
+      setIsSubmitting(true)
+      // Simulamos un pequeño delay visual
+      setTimeout(() => {
+          setShowSuccess(true)
+          setIsSubmitting(false)
+      }, 500)
   }
 
   const closeFinal = () => {
+      // AQUÍ PASAMOS LA DATA LIMPIA AL PADRE
       onConfirm(formData)
+      
       setShowSuccess(false)
       onOpenChange(false)
       setStep(1)
@@ -62,8 +86,8 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
           origen: 'obligatorio', condicion: 'empleado', 
           cuitEmpleador: '', catMonotributo: '', claveFiscal: '',
           tipoPago: 'cbu', bancoEmisor: '', numeroTarjeta: '', vencimientoTarjeta: '', cbuNumero: '',
-          archivos: null,
-          fullPrice: '', aportes: '', descuento: ''
+          archivos: [],
+          fullPrice: '', aportes: '', descuento: '', aPagar: ''
       })
   }
 
@@ -303,16 +327,34 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
                                 type="file" 
                                 multiple 
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                onChange={(e) => updateForm('archivos', e.target.files)}
+                                onChange={handleFileSelect}
                             />
                         </div>
-                        
-                        {formData.archivos && formData.archivos.length > 0 && (
-                            <div className="mt-4 bg-blue-50 text-blue-700 px-3 py-2 rounded text-sm font-bold animate-in fade-in">
-                                ✅ {formData.archivos.length} archivos seleccionados
-                            </div>
-                        )}
                     </div>
+                    
+                    {formData.archivos && formData.archivos.length > 0 && (
+                        <div className="space-y-2 mt-4 text-left">
+                            <Label className="text-xs text-slate-500 uppercase font-bold">Archivos seleccionados</Label>
+                            {formData.archivos.map((file: File, index: number) => (
+                                <div key={index} className="flex items-center justify-between bg-white border rounded-lg p-3 shadow-sm animate-in slide-in-from-bottom-2">
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                        <div className="h-8 w-8 bg-blue-50 rounded flex items-center justify-center text-blue-600">
+                                            <FileText size={16}/>
+                                        </div>
+                                        <p className="text-sm truncate max-w-[200px] font-medium text-slate-700">{file.name}</p>
+                                    </div>
+                                    <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                        onClick={() => removeFile(index)}
+                                    >
+                                        <Trash2 size={16}/>
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -359,7 +401,7 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
                             </div>
                         </div>
 
-                        {/* DESCUENTO (AHORA EN $) */}
+                        {/* DESCUENTO */}
                         <div className="space-y-1">
                             <Label>Descuento / Bonificación ($)</Label>
                             <div className="relative">
@@ -370,6 +412,21 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
                                     className="pl-8"
                                     value={formData.descuento} 
                                     onChange={e => updateForm('descuento', e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        {/* A PAGAR (NUEVO) */}
+                        <div className="space-y-1 pt-2">
+                            <Label className="text-blue-600 font-bold uppercase tracking-wide">Total A Pagar (Cliente)</Label>
+                            <div className="relative shadow-sm">
+                                <span className="absolute left-3 top-2.5 text-blue-600 font-black">$</span>
+                                <Input 
+                                    type="number" 
+                                    placeholder="0.00" 
+                                    className="pl-8 text-xl font-black bg-blue-50/50 border-blue-200 text-blue-800 focus-visible:ring-blue-500"
+                                    value={formData.aPagar} 
+                                    onChange={e => updateForm('aPagar', e.target.value)}
                                 />
                             </div>
                         </div>
@@ -388,8 +445,8 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
                     Siguiente
                 </Button>
             ) : (
-                <Button onClick={handleFinish} className="bg-green-600 hover:bg-green-700 w-full sm:w-auto font-bold shadow-lg shadow-green-500/20">
-                    Finalizar Carga 🎉
+                <Button onClick={handleFinish} disabled={isSubmitting} className="bg-green-600 hover:bg-green-700 w-full sm:w-auto font-bold shadow-lg shadow-green-500/20">
+                    {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin"/> Guardando...</> : "Finalizar Carga 🎉"}
                 </Button>
             )}
         </DialogFooter>

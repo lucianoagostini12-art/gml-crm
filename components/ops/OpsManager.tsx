@@ -150,12 +150,18 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     // === AQUÍ ESTÁ LA CORRECCIÓN CRÍTICA EN FETCHOPERATIONS ===
     const fetchOperations = async () => {
         setIsLoading(true)
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('leads')
             .select('*')
-            // CORRECCIÓN: Usamos Array para el filtro .not(), mucho más seguro
-            .not('status', 'in', ['nuevo', 'contactado', 'cotizacion', 'perdido']) 
+            // CORRECCIÓN: Usamos Array para el filtro .in(). 
+            // Esto elimina el error 400 y trae explícitamente 'ingresado' y el resto del flujo de Ops.
+            .in('status', ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'vendido']) 
             .order('last_update', { ascending: false })
+
+        if (error) {
+            console.error("Error fetching ops:", error)
+            showToast("Error de conexión al cargar operaciones", "error")
+        }
 
         if (data) {
             const mappedOps: any = data.map((op: any) => ({
@@ -164,7 +170,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 dni: op.dni || "S/D",
                 plan: op.plan || op.quoted_plan || "-",
                 prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
-                // Aseguramos que si viene como 'vendido' se vea como 'ingresado'
+                // Aseguramos que si viene como 'vendido' se vea como 'ingresado' para Ops
                 status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
                 subState: op.sub_state || "Pendiente",
                 seller: op.agent_name || "Desconocido",
@@ -220,7 +226,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         // --- REALTIME ---
         const channel = supabase.channel('ops-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
-                if(payload.eventType === 'INSERT' && payload.new.status === 'vendido') {
+                if(payload.eventType === 'INSERT' && (payload.new.status === 'vendido' || payload.new.status === 'ingresado')) {
                     // Notificación Visual Popup
                     setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
                 }
@@ -258,6 +264,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'mine' && op.operator !== userName) return false
+        // FILTRO DE PILETA: Oculta si ya tiene operador o si está cumplido/rechazado
         if (viewMode === 'pool' && (op.operator || ['cumplidas','rechazado'].includes(op.status))) return false
         
         if (filterStatus !== 'all' && op.status !== filterStatus) return false

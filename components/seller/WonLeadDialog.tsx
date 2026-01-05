@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { UserPlus, ArrowRightLeft, UploadCloud } from "lucide-react"
+import { UserPlus, ArrowRightLeft, UploadCloud, CreditCard, User, Phone, FileText } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface WonLeadDialogProps {
   open: boolean
@@ -19,9 +19,13 @@ interface WonLeadDialogProps {
 export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogProps) {
   const [saleType, setSaleType] = useState<'alta' | 'pass' | null>(null)
 
-  // Estados para el formulario PASS
+  // Estados para el formulario PASS (Ahora mucho más completo para que Ops no reciba vacíos)
   const [passData, setPassData] = useState({
     fullName: "",
+    dni: "",
+    phone: "",
+    prepaga: "",
+    plan: "",
     observations: "",
     files: null as FileList | null
   })
@@ -31,99 +35,159 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
     if (!isOpen) {
       setTimeout(() => {
         setSaleType(null)
-        setPassData({ fullName: "", observations: "", files: null })
+        setPassData({ fullName: "", dni: "", phone: "", prepaga: "", plan: "", observations: "", files: null })
       }, 300)
     }
     onOpenChange(isOpen)
   }
 
   const handleConfirmPass = () => {
-    if (!passData.fullName) return alert("Por favor, ingresá el nombre completo.")
+    if (!passData.fullName || !passData.dni || !passData.prepaga) {
+      return alert("Por favor, completá Nombre, DNI y Prepaga como mínimo.")
+    }
     
-    // Acá confirmamos con los datos del PASS
+    // Mapeamos los datos para que coincidan con las columnas SQL creadas
     onConfirm({
       type: 'pass',
-      ...passData,
-      // Simulamos carga de archivos (en una app real iría a Storage)
-      fileCount: passData.files?.length || 0
+      name: passData.fullName, // Se guarda en column 'name'
+      dni: passData.dni,       // Se guarda en column 'dni' (nueva)
+      phone: passData.phone,   // Se guarda en column 'phone'
+      prepaga: passData.prepaga, // Se guarda en column 'prepaga'
+      plan: passData.plan,     // Se guarda en column 'plan' (nueva)
+      notes: passData.observations,
+      sub_state: "auditoria_pass", // Estado inicial para Ops
+      // Pasamos los archivos crudos para que Kanban los suba
+      files: passData.files
     })
     handleOpenChange(false)
   }
 
-  // SI ELIGIÓ ALTA -> Mostramos el Wizard Original (NO TOCAMOS NADA)
+  // SI ELIGIÓ ALTA -> Mostramos el Wizard (Asumimos que el Wizard ya devuelve la estructura correcta)
   if (saleType === 'alta') {
     return (
       <SaleWizardDialog 
         open={open} 
         onOpenChange={handleOpenChange} 
-        onConfirm={(data) => {
-          onConfirm({ type: 'alta', ...data }) // Le avisamos que fue ALTA
+        onConfirm={(data: any) => {
+          // Aseguramos que el Wizard mande todo lo necesario
+          onConfirm({ 
+            type: 'alta',
+            sub_state: 'ingresado',
+            ...data // Esto debe traer full_price, aportes, hijos, etc.
+          })
           handleOpenChange(false)
         }} 
       />
     )
   }
 
-  // SI ELIGIÓ PASS -> Mostramos el Formulario Nuevo
+  // SI ELIGIÓ PASS -> Formulario Mejorado
   if (saleType === 'pass') {
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-blue-600">
-              <ArrowRightLeft className="h-5 w-5"/> Registrar Traspaso (PASS)
+            <DialogTitle className="flex items-center gap-2 text-blue-600 font-black text-xl">
+              <ArrowRightLeft className="h-6 w-6"/> Registrar Traspaso (PASS)
             </DialogTitle>
             <DialogDescription>
-              Completá los datos obligatorios para procesar el cambio.
+              Ingresá los datos del titular para la auditoría de traspaso.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
+            {/* DATOS PERSONALES */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="fullname" className="font-bold flex gap-2 items-center"><User size={14}/> Nombre Completo</Label>
+                <Input 
+                  id="fullname" 
+                  placeholder="Ej: Juan Perez" 
+                  value={passData.fullName}
+                  onChange={(e) => setPassData({...passData, fullName: e.target.value})}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="dni" className="font-bold flex gap-2 items-center"><FileText size={14}/> DNI / CUIL</Label>
+                <Input 
+                  id="dni" 
+                  placeholder="Sin puntos" 
+                  value={passData.dni}
+                  onChange={(e) => setPassData({...passData, dni: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="phone" className="font-bold flex gap-2 items-center"><Phone size={14}/> Teléfono</Label>
+                <Input 
+                  id="phone" 
+                  placeholder="11 1234 5678" 
+                  value={passData.phone}
+                  onChange={(e) => setPassData({...passData, phone: e.target.value})}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="prepaga" className="font-bold flex gap-2 items-center"><CreditCard size={14}/> Prepaga Destino</Label>
+                <Select onValueChange={(v) => setPassData({...passData, prepaga: v})}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Prevencion Salud">Prevención Salud</SelectItem>
+                    <SelectItem value="Sancor Salud">Sancor Salud</SelectItem>
+                    <SelectItem value="Avalian">Avalian</SelectItem>
+                    <SelectItem value="Swiss Medical">Swiss Medical</SelectItem>
+                    <SelectItem value="Galeno">Galeno</SelectItem>
+                    <SelectItem value="Omint">Omint</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="grid gap-2">
-              <Label htmlFor="fullname" className="font-bold">Nombre Completo del Titular</Label>
-              <Input 
-                id="fullname" 
-                placeholder="Ej: Juan Carlos Perez" 
-                value={passData.fullName}
-                onChange={(e) => setPassData({...passData, fullName: e.target.value})}
-              />
+               <Label htmlFor="plan" className="font-bold">Plan Elegido</Label>
+               <Input 
+                  id="plan" 
+                  placeholder="Ej: A2, 210, 4000..." 
+                  value={passData.plan}
+                  onChange={(e) => setPassData({...passData, plan: e.target.value})}
+                />
             </div>
             
             <div className="grid gap-2">
-              <Label htmlFor="obs" className="font-bold">Observaciones / Motivo</Label>
+              <Label htmlFor="obs" className="font-bold">Observaciones</Label>
               <Textarea 
                 id="obs" 
-                placeholder="Ej: No tiene contacto con la persona que le vendió" 
-                className="resize-none h-24"
+                placeholder="Detalles adicionales para administración..." 
+                className="resize-none h-20"
                 value={passData.observations}
                 onChange={(e) => setPassData({...passData, observations: e.target.value})}
               />
             </div>
 
             <div className="grid gap-2">
-              <Label className="font-bold">Adjuntar Documentación</Label>
-              <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
+              <Label className="font-bold">Adjuntar Documentación (DNI, Recibos)</Label>
+              <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer relative bg-slate-50/50">
                 <input 
                   type="file" 
                   multiple 
                   className="absolute inset-0 opacity-0 cursor-pointer"
                   onChange={(e) => setPassData({...passData, files: e.target.files})}
                 />
-                <UploadCloud className="h-8 w-8 text-slate-400 mb-2"/>
+                <UploadCloud className="h-8 w-8 text-blue-500 mb-2"/>
                 <p className="text-sm text-slate-600 font-medium">
                   {passData.files && passData.files.length > 0 
-                    ? `✅ ${passData.files.length} archivos seleccionados` 
-                    : "Click para subir archivos (DNI, Recibos)"}
+                    ? `✅ ${passData.files.length} archivos listos` 
+                    : "Click para subir archivos"}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">Soporta PDF, JPG, PNG</p>
               </div>
             </div>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="ghost" onClick={() => setSaleType(null)}>Volver</Button>
-            <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleConfirmPass}>
-              Confirmar PASS
+            <Button className="bg-blue-600 hover:bg-blue-700 font-bold" onClick={handleConfirmPass}>
+              CONFIRMAR PASS 🚀
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -131,14 +195,14 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
     )
   }
 
-  // PANTALLA INICIAL: SELECCIÓN (ALTA vs PASS)
+  // PANTALLA INICIAL
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[450px]">
         <DialogHeader>
-          <DialogTitle className="text-center text-xl font-black">¡Felicitaciones! 🎉</DialogTitle>
+          <DialogTitle className="text-center text-xl font-black">¡Venta Cerrada! 🚀</DialogTitle>
           <DialogDescription className="text-center">
-            ¿Qué tipo de venta acabás de cerrar?
+            Seleccioná el tipo de gestión para continuar.
           </DialogDescription>
         </DialogHeader>
 
@@ -162,7 +226,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
               <ArrowRightLeft className="h-8 w-8 text-blue-600"/>
             </div>
             <span className="font-bold text-slate-700 group-hover:text-blue-700">TRASPASO (PASS)</span>
-            <span className="text-xs text-slate-400 mt-1">Cambio de Productor - Prevención Salud</span>
+            <span className="text-xs text-slate-400 mt-1">Cambio de Obra Social</span>
           </button>
         </div>
       </DialogContent>

@@ -242,30 +242,55 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000) }
 
-    // --- UPDATE SUPABASE (Centralizado) ---
+    // --- UPDATE SUPABASE (Centralizado y REPARADO) ---
     const updateOpInDb = async (id: string, updates: any) => {
-        setOperations(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o))
+        // 1. NORMALIZACIÓN PARA LA UI (CamelCase)
+        // El Modal envía "snake_case" (ej: sub_state), pero la Lista espera "camelCase" (ej: subState).
+        // Hacemos un merge inteligente para que la UI se actualice al instante sin recargar.
+        const uiUpdates = { ...updates }
         
+        if (updates.sub_state !== undefined) uiUpdates.subState = updates.sub_state
+        if (updates.agent_name !== undefined) uiUpdates.seller = updates.agent_name
+        if (updates.name !== undefined) uiUpdates.clientName = updates.name
+        
+        // 2. ACTUALIZACIÓN VISUAL (Optimista)
+        setOperations(prev => prev.map(o => o.id === id ? { ...o, ...uiUpdates } : o))
+        
+        // 3. PREPARACIÓN PARA DB (SnakeCase)
+        // Mapeamos lo que sea que haya llegado a los nombres reales de las columnas en Supabase
         const dbUpdates: any = {}
-        if (updates.status) dbUpdates.status = updates.status
-        if (updates.subState) dbUpdates.sub_state = updates.subState
-        if (updates.operator !== undefined) dbUpdates.operator = updates.operator 
-        if (updates.reminders) dbUpdates.reminders = updates.reminders
-        if (updates.clientName) dbUpdates.name = updates.clientName
-        if (updates.dni) dbUpdates.dni = updates.dni
-        if (updates.seller) dbUpdates.agent_name = updates.seller 
         
-        if (updates.email) dbUpdates.email = updates.email
-        if (updates.phone) dbUpdates.phone = updates.phone
-        if (updates.prepaga) dbUpdates.prepaga = updates.prepaga
-        if (updates.plan) dbUpdates.plan = updates.plan
-        if (updates.address_street) dbUpdates.address_street = updates.address_street
-        if (updates.address_city) dbUpdates.address_city = updates.address_city
-        if (updates.address_zip) dbUpdates.address_zip = updates.address_zip
-        if (updates.hijos) dbUpdates.family_members = updates.hijos
-        if (updates.fullPrice) dbUpdates.full_price = updates.fullPrice
-        if (updates.aportes) dbUpdates.aportes = updates.aportes
-        if (updates.descuento) dbUpdates.descuento = updates.descuento
+        // Mapeo Status
+        if (uiUpdates.status) dbUpdates.status = uiUpdates.status
+        
+        // Mapeo SubState (Chequeamos ambas versiones por seguridad)
+        if (uiUpdates.subState !== undefined) dbUpdates.sub_state = uiUpdates.subState
+        else if (uiUpdates.sub_state !== undefined) dbUpdates.sub_state = uiUpdates.sub_state
+        
+        // Mapeo Seller
+        if (uiUpdates.seller !== undefined) dbUpdates.agent_name = uiUpdates.seller
+        else if (uiUpdates.agent_name !== undefined) dbUpdates.agent_name = uiUpdates.agent_name
+
+        // Mapeo Name
+        if (uiUpdates.clientName !== undefined) dbUpdates.name = uiUpdates.clientName
+        else if (uiUpdates.name !== undefined) dbUpdates.name = uiUpdates.name
+
+        // Campos directos (que coinciden nombre UI y DB o son simples)
+        if (uiUpdates.operator !== undefined) dbUpdates.operator = uiUpdates.operator 
+        if (uiUpdates.reminders) dbUpdates.reminders = uiUpdates.reminders
+        if (uiUpdates.dni) dbUpdates.dni = uiUpdates.dni
+        if (uiUpdates.email) dbUpdates.email = uiUpdates.email
+        if (uiUpdates.phone) dbUpdates.phone = uiUpdates.phone
+        if (uiUpdates.prepaga) dbUpdates.prepaga = uiUpdates.prepaga
+        if (uiUpdates.plan) dbUpdates.plan = uiUpdates.plan
+        if (uiUpdates.address_street) dbUpdates.address_street = uiUpdates.address_street
+        if (uiUpdates.address_city) dbUpdates.address_city = uiUpdates.address_city
+        if (uiUpdates.address_zip) dbUpdates.address_zip = uiUpdates.address_zip
+        if (uiUpdates.hijos) dbUpdates.family_members = uiUpdates.hijos
+        if (uiUpdates.fullPrice) dbUpdates.full_price = uiUpdates.fullPrice
+        if (uiUpdates.aportes) dbUpdates.aportes = uiUpdates.aportes
+        if (uiUpdates.descuento) dbUpdates.descuento = uiUpdates.descuento
+        if (uiUpdates.adminNotes) dbUpdates.admin_notes = uiUpdates.adminNotes
 
         dbUpdates.last_update = new Date().toISOString()
 
@@ -274,12 +299,14 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (error) {
             console.error("Error actualizando:", error)
             showToast("Error al guardar cambios en DB", "error")
+            // Si falla, podrías considerar revertir el cambio optimista (fetchOperations)
             fetchOperations() 
         }
     }
 
     const updateOp = (newOp: Operation) => { 
-        updateOpInDb(newOp.id, { ...newOp, clientName: newOp.clientName })
+        // Pasamos el objeto completo, updateOpInDb se encarga de traducir
+        updateOpInDb(newOp.id, newOp)
         if (selectedOp && selectedOp.id === newOp.id) setSelectedOp(newOp); 
     }
 
@@ -291,33 +318,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
         if (!error) {
-            // FIX: Use 'message' key to match ChatMsg type, but ensure it's correct
-            // If your ChatMsg type expects 'message', use 'message'. If it expects 'text', use 'text'.
-            // Based on error: 'message' does not exist in ChatMsg. So ChatMsg probably uses 'text'.
-            // Let's assume ChatMsg has a 'message' property for UI display purposes based on previous context, 
-            // BUT the error says it DOES NOT. 
-            // Looking at the fetchOperations mapping:
-            // chat: (op.comments || []).map((c: any) => ({
-            //     message: c.text, ...
-            // So the UI expects 'message'.
-            
-            // Wait, looking at the error image again: 
-            // "Object literal may only specify known properties, and 'message' does not exist in type 'ChatMsg'"
-            // This strongly suggests ChatMsg is defined as { text: string; ... } in data.ts
-            
-            // However, in fetchOperations you map it as:
-            // message: c.text
-            
-            // This means your local 'operations' state has objects with 'message', but the Type 'Operation' 
-            // likely defines 'chat' as 'ChatMsg[]', and 'ChatMsg' likely has 'text' not 'message'.
-            
-            // Let's try to align with what we see in fetchOperations which uses 'message'.
-            // If ChatMsg really expects 'text', then fetchOperations is also wrong (but maybe suppressed by 'any').
-            
-            // OPTION A: Change 'message' to 'text' here to satisfy the type definition.
             const uiMsg: any = { 
-                message: text, // Keep message for UI consistency if that's what renders
-                text: text,    // Add text to satisfy potential Type definition
+                message: text,
+                text: text,
                 user: userName, 
                 time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
                 isMe: true 
@@ -345,11 +348,21 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         } 
     }
 
+    // --- LÓGICA DE ASIGNACIÓN + AUTO APERTURA ---
     const confirmAssignment = async (operator: string) => { 
         if (!assigningOp) return; 
+        
+        // 1. Actualizar en DB
         await updateOpInDb(assigningOp.id, { operator })
+        
+        // 2. Preparar el objeto actualizado para abrirlo
+        const updatedOp = { ...assigningOp, operator: operator }
+        
+        // 3. Limpiar estado de asignación y ABRIR MODAL AUTOMÁTICAMENTE
         setAssigningOp(null); 
-        showToast(`👍 Asignado a ${operator}.`, 'success'); 
+        setSelectedOp(updatedOp); 
+        
+        showToast(`👍 Asignado a ${operator} y abierto.`, 'success'); 
     }
 
     const requestAdvance = () => { if(!selectedOp) return; const idx = FLOW_STATES.indexOf(selectedOp.status); if(idx !== -1 && idx < FLOW_STATES.length - 1) setConfirmingAdvance({ op: selectedOp, nextStage: FLOW_STATES[idx+1] }); }

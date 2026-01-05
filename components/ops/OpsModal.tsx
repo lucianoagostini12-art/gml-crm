@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,10 +16,9 @@ import {
   Phone, UploadCloud, MessageSquare, Calendar as CalendarIcon, 
   FileUp, MessageCircle, UserPlus, ArrowRightLeft, Plus, ImageIcon, 
   Users, CheckSquare, Save, Clock, FileText, DollarSign, Wallet, Percent,
-  Eye, Download, X, AlertTriangle, Send, UserCog
+  Eye, Download, X, AlertTriangle, Send, UserCog, CalendarDays, Loader2, Check
 } from "lucide-react"
-// NOTA: Se quitaron PLANES_POR_EMPRESA y SUB_STATES del import porque ahora vienen de DB
-import { OpStatus, ChatMsg, AuditLog, AdminNote, getStatusColor, getSubStateStyle } from "./data"
+import { OpStatus, getStatusColor, getSubStateStyle } from "./data"
 
 // --- COMPONENTES UI INTERNOS ---
 
@@ -31,7 +30,16 @@ function TabTrigger({ value, label, icon }: any) {
     )
 }
 
-function EditableField({ label, value, onChange, icon, color, prefix, suffix }: any) {
+function EditableField({ label, value, onBlur, onChange, icon, color, prefix, suffix, type="text" }: any) {
+    const [localValue, setLocalValue] = useState(value || "")
+    
+    // Sincronización inteligente: Solo actualiza si el valor externo cambia Y no estamos editando
+    useEffect(() => { 
+        if (value !== undefined && value !== null) {
+            setLocalValue(value)
+        }
+    }, [value])
+
     return (
         <div className="flex flex-col gap-1 items-start w-full group">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -40,9 +48,14 @@ function EditableField({ label, value, onChange, icon, color, prefix, suffix }: 
             <div className="relative w-full">
                 {prefix && <span className="absolute left-0 bottom-1.5 text-xs text-slate-400 font-bold">{prefix}</span>}
                 <Input 
+                    type={type}
                     className={`text-sm font-medium border-0 border-b border-transparent group-hover:border-slate-200 focus-visible:border-blue-500 focus-visible:ring-0 px-0 h-7 rounded-none transition-all ${color || 'text-slate-800'} ${prefix ? 'pl-4' : ''}`}
-                    value={value || ""}
-                    onChange={(e) => onChange(e.target.value)}
+                    value={localValue}
+                    onChange={(e) => { 
+                        setLocalValue(e.target.value)
+                        if(onChange) onChange(e.target.value) 
+                    }}
+                    onBlur={() => onBlur && onBlur(localValue)}
                 />
                 {suffix && <span className="absolute right-0 bottom-1.5 text-xs text-slate-400 font-bold">{suffix}</span>}
             </div>
@@ -51,15 +64,18 @@ function EditableField({ label, value, onChange, icon, color, prefix, suffix }: 
 }
 
 function FileCard({ file, onPreview, onDownload }: any) {
+    const isImg = file.type === 'IMG' || (file.name && file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i))
+    const size = file.metadata?.size ? `${(file.metadata.size / 1024 / 1024).toFixed(2)} MB` : "Doc"
+
     return (
         <div className="bg-white border border-slate-200 rounded-xl p-3 flex items-center gap-3 hover:shadow-md transition-all group relative overflow-hidden">
-            <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 ${file.type === 'PDF' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
-                {file.type === 'PDF' ? <FileText size={18}/> : <ImageIcon size={18}/>}
+            <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 ${!isImg ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                {!isImg ? <FileText size={18}/> : <ImageIcon size={18}/>}
             </div>
             
             <div className="overflow-hidden flex-1 flex flex-col justify-center cursor-pointer" onClick={() => onPreview(file)}>
                 <p className="text-xs font-bold truncate text-slate-700 group-hover:text-blue-600">{file.name}</p>
-                <p className="text-[10px] text-slate-400">{file.size}</p>
+                <p className="text-[10px] text-slate-400">{size}</p>
             </div>
 
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -74,18 +90,12 @@ function FileCard({ file, onPreview, onDownload }: any) {
     )
 }
 
-function ChatBubble({ user, text, time, isMe, file, onFileClick }: any) {
+function ChatBubble({ user, text, time, isMe }: any) {
     return (
         <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 animate-in slide-in-from-bottom-2`}>
             <div className={`px-4 py-2 rounded-2xl max-w-[85%] text-[13px] ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border text-slate-700 rounded-bl-none shadow-sm'}`}>
                 {!isMe && <p className="text-[10px] font-black text-blue-500 uppercase mb-1 tracking-tighter">{user}</p>}
                 {text}
-                {file && (
-                    <div onClick={() => onFileClick(file)} className="mt-2 p-2 bg-black/10 rounded-lg flex items-center gap-2 cursor-pointer hover:bg-black/20 border border-white/20">
-                        <ImageIcon size={14}/>
-                        <span className="text-[10px] font-bold truncate max-w-[150px]">{file.name}</span>
-                    </div>
-                )}
             </div>
             <span className="text-[9px] text-slate-400 mt-1 px-1 font-bold">{time}</span>
         </div>
@@ -96,14 +106,27 @@ function ChatBubble({ user, text, time, isMe, file, onFileClick }: any) {
 
 export function OpsModal({ 
     op, isOpen, onClose, onRelease, onStatusChange, requestAdvance, requestBack, onPick, 
-    onSendChat, onAddNote, onAddReminder, currentUser, role, onUpdateOp, 
+    onAddNote, onAddReminder, currentUser, role, onUpdateOp, 
     onSubStateChange, getSubStateStyle, getStatusColor,
-    globalConfig // <--- RECIBIMOS LA CONFIG REAL DESDE OPSMANAGER
+    globalConfig 
 }: any) {
     const supabase = createClient()
     const [activeTab, setActiveTab] = useState("chat")
     const [chatInput, setChatInput] = useState("")
     
+    // --- ESTADO LOCAL MAESTRO (BLINDAJE DE DATOS) ---
+    // Usamos esto como "Fuente de la Verdad" mientras el modal está abierto
+    const [localOp, setLocalOp] = useState<any>(null)
+
+    // Estados de Datos Externos
+    const [realDocs, setRealDocs] = useState<any[]>([])
+    const [realChat, setRealChat] = useState<any[]>([])
+    const [realHistory, setRealHistory] = useState<any[]>([])
+    
+    // Estados UX
+    const [isUploading, setIsUploading] = useState(false)
+    const [isSaving, setIsSaving] = useState(false) // Indicador de guardado
+
     // Estados Agenda
     const [reminderDate, setReminderDate] = useState("")
     const [reminderTime, setReminderTime] = useState("")
@@ -118,80 +141,265 @@ export function OpsModal({
     const [correctionReason, setCorrectionReason] = useState("")
     const [correctionComment, setCorrectionComment] = useState("")
 
-    // Estado Cambio Vendedora
     const [isSellerChangeOpen, setIsSellerChangeOpen] = useState(false)
     const [newSeller, setNewSeller] = useState("")
     const [sellersList, setSellersList] = useState<any[]>([])
 
-    // Cargar vendedores al abrir
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const STATE_SEQUENCE = ['ingresado', 'precarga', 'medicas', 'legajo', 'cumplidas']
+    const STATE_LABELS: Record<string, string> = {
+        'ingresado': 'INGRESADO',
+        'precarga': 'PRECARGA',
+        'medicas': 'MÉDICAS',
+        'legajo': 'LEGAJO',
+        'cumplidas': 'CUMPLIDA',
+        'demoras': 'DEMORAS',
+        'rechazado': 'RECHAZADO'
+    }
+
+    // --- CARGA INICIAL ---
     useEffect(() => {
-        if(isOpen) {
-            const fetchSellers = async () => {
-                const { data } = await supabase.from('profiles').select('full_name').eq('role', 'seller')
-                if(data) setSellersList(data)
-            }
-            fetchSellers()
+        if(isOpen && op?.id) {
+            // Inicializamos el estado local con lo que viene del padre o de DB
+            fetchFullData()
+            
+            // Suscripción Chat
+            const channel = supabase.channel('ops_chat_room')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages', filter: `lead_id=eq.${op.id}` }, (payload) => {
+                setRealChat(prev => [...prev, payload.new])
+            })
+            .subscribe()
+
+            return () => { supabase.removeChannel(channel) }
         }
-    }, [isOpen])
+    }, [isOpen, op?.id])
 
-    if (!op) return null
+    const fetchFullData = async () => {
+        // 1. Datos Principales (Lead) - Aseguramos tener la última versión
+        const { data: leadData } = await supabase.from('leads').select('*').eq('id', op.id).single()
+        if (leadData) {
+            setLocalOp(leadData) // Aquí inicializamos la verdad local
+        } else {
+            setLocalOp(op) // Fallback
+        }
 
-    // Archivos Demo (Mientras no tengamos storage real para archivos)
-    const demoFiles = [
-        { id: 1, name: "DNI_Titular_Frente.jpg", type: "IMG", size: "2.4 MB", url: "https://via.placeholder.com/600x400?text=DNI+Frente" },
-        { id: 2, name: "Recibo_Sueldo_Sept.pdf", type: "PDF", size: "1.1 MB", url: "https://via.placeholder.com/600x800?text=PDF+Document" }, 
-        { id: 3, name: "Formulario_Alta_Firmado.pdf", type: "PDF", size: "0.5 MB", url: "https://via.placeholder.com/600x800?text=Formulario" },
-    ]
+        // 2. Auxiliares
+        fetchRealDocs()
+        fetchRealChat()
+        fetchRealHistory()
+        fetchSellers()
+    }
 
-    // --- LOGICA DE PLANES REALES DESDE DB ---
-    // Usamos globalConfig en lugar de la constante borrada
-    const prepagasList = globalConfig?.prepagas || []
-    const availablePlans = prepagasList.find((p: any) => p.name === (op.prepaga || "Otra"))?.plans || []
-    const subStatesList = globalConfig?.subStates?.[op.status] || []
+    const fetchRealDocs = async () => {
+        const { data } = await supabase.from('lead_documents').select('*').eq('lead_id', op.id).order('uploaded_at', { ascending: false })
+        if(data) setRealDocs(data)
+    }
+    const fetchRealChat = async () => {
+        const { data } = await supabase.from('lead_messages').select('*').eq('lead_id', op.id).order('created_at', { ascending: true })
+        if(data) setRealChat(data)
+    }
+    const fetchRealHistory = async () => {
+        const { data } = await supabase.from('lead_status_history').select('*').eq('lead_id', op.id).order('changed_at', { ascending: true })
+        if(data) setRealHistory(data)
+    }
+    const fetchSellers = async () => {
+        const { data } = await supabase.from('leads').select('agent_name').not('agent_name', 'is', null)
+        if (data) {
+            const unique = Array.from(new Set(data.map(i => i.agent_name))).map(name => ({ full_name: name }))
+            setSellersList(unique)
+        }
+    }
 
-    const handleSellerChange = () => {
+    // --- MOTOR DE GUARDADO INTELIGENTE (Solución Punto 1 y 2) ---
+    const updateField = async (field: string, value: any) => {
+        if (!localOp) return
+
+        setIsSaving(true)
+
+        // 1. Actualizamos Estado Local INMEDIATAMENTE (Sin esperar a DB)
+        setLocalOp((prev: any) => ({ ...prev, [field]: value }))
+        
+        // 2. Avisamos al padre (para que el tablero se actualice si es necesario)
+        onUpdateOp({ ...localOp, [field]: value }) 
+
+        // 3. Guardamos en DB (Silenciosamente)
+        const { error } = await supabase.from('leads').update({ [field]: value }).eq('id', localOp.id)
+        
+        if (error) {
+            console.error(`Error guardando ${field}:`, error)
+            // Aquí podrías revertir el localOp si quisieras ser muy estricto
+        }
+        
+        // Pequeño delay para que se vea el "Guardando..."
+        setTimeout(() => setIsSaving(false), 500)
+    }
+
+    // --- NAVEGACIÓN ESTADOS ---
+    const getNextState = () => {
+        if (!localOp) return null
+        const currentIndex = STATE_SEQUENCE.indexOf(localOp.status)
+        if (currentIndex !== -1 && currentIndex < STATE_SEQUENCE.length - 1) {
+            return STATE_SEQUENCE[currentIndex + 1]
+        }
+        return null
+    }
+
+    const getPrevState = () => {
+        if (!localOp) return null
+        if (localOp.status === 'rechazado') return 'ingresado'
+        const currentIndex = STATE_SEQUENCE.indexOf(localOp.status)
+        if (currentIndex > 0) {
+            return STATE_SEQUENCE[currentIndex - 1]
+        }
+        return null
+    }
+
+    const handleAdvanceStage = async () => {
+        const next = getNextState()
+        if (next) {
+            // Al cambiar de etapa mayor, limpiamos subestado para evitar incoherencias
+            await updateField('sub_state', null)
+            await updateField('status', next)
+            requestAdvance() // Trigger evento padre
+        }
+    }
+
+    const handleBackStage = async () => {
+        const prev = getPrevState()
+        if (prev) {
+            await updateField('status', prev)
+            requestBack()
+        }
+    }
+
+    // --- OTROS HANDLERS ---
+    const handleSellerChange = async () => {
         if(!newSeller) return
-        onUpdateOp({...op, seller: newSeller})
+        await updateField('agent_name', newSeller)
         setIsSellerChangeOpen(false)
     }
 
-    const openWhatsApp = () => {
-        const cleanPhone = op.phone?.replace(/[^0-9]/g, '') || ""
-        window.open(`https://wa.me/${cleanPhone}`, '_blank')
+    const forceDownload = async (file: any) => {
+        const { data, error } = await supabase.storage.from('lead-documents').download(file.file_path)
+        if (error) { alert("Error al descargar archivo."); return }
+        const url = window.URL.createObjectURL(data)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = file.name || "documento"
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
     }
 
-    const handleSaveNote = () => {
-        if (!newNoteInput.trim()) return
-        onAddNote(newNoteInput)
-        setNewNoteInput("")
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files
+        if (!files || files.length === 0) return
+        setIsUploading(true)
+        const bucket = "lead-documents"
+        try {
+            for (const file of Array.from(files)) {
+                const safeName = file.name.replace(/[^\w.\-]+/g, "_")
+                const path = `${op.id}/${Date.now()}_${safeName}`
+                const { error: upErr } = await supabase.storage.from(bucket).upload(path, file)
+                if (upErr) throw upErr
+                const { error: insErr } = await supabase.from('lead_documents').insert({
+                    lead_id: op.id,
+                    type: file.type.includes('image') ? 'IMG' : 'PDF',
+                    file_path: path,
+                    name: file.name,
+                    uploaded_at: new Date().toISOString(),
+                    status: 'uploaded',
+                    uploaded_by: currentUser || "System"
+                })
+                if (insErr) throw insErr
+            }
+            await fetchRealDocs()
+        } catch (error: any) {
+            alert(`Error: ${error.message}`)
+        } finally {
+            setIsUploading(false)
+            if(fileInputRef.current) fileInputRef.current.value = ""
+        }
     }
 
-    const handleSubmitCorrection = () => {
+    const sendChatMessage = async () => {
+        if(!chatInput.trim()) return
+        const msg = {
+            lead_id: op.id,
+            sender: currentUser || "Administración",
+            text: chatInput,
+            target_role: 'seller',
+            created_at: new Date().toISOString()
+        }
+        setRealChat(prev => [...prev, msg])
+        setChatInput("")
+        await supabase.from('lead_messages').insert(msg)
+    }
+
+    const handleSubmitCorrection = async () => {
         if (!correctionReason) return
-        onStatusChange(op.id, 'rechazado')
-        onSendChat(`⚠️ Se solicita corrección: ${correctionReason}. ${correctionComment ? `(${correctionComment})` : ''}`)
+        await updateField('status', 'rechazado')
+        onStatusChange(op.id, 'rechazado') // Sync visual inmediato padre
+        
+        const reasonText = `⚠️ Se solicita corrección: ${correctionReason}. ${correctionComment ? `(${correctionComment})` : ''}`
+        const msg = {
+            lead_id: op.id,
+            sender: currentUser || "Administración",
+            text: reasonText,
+            target_role: 'seller',
+            created_at: new Date().toISOString()
+        }
+        setRealChat(prev => [...prev, msg])
+        await supabase.from('lead_messages').insert(msg)
+
         setCorrectionReason("")
         setCorrectionComment("")
         setIsCorrectionOpen(false)
         setActiveTab("chat") 
     }
 
-    const handleDownload = (file: any) => {
-        alert(`Descargando archivo: ${file.name}`)
+    const handleSaveNote = async () => {
+        if (!newNoteInput.trim()) return
+        const timestamp = new Date().toLocaleString('es-AR')
+        const noteEntry = `ADMIN_NOTE|${timestamp}|${currentUser || 'Admin'}|${newNoteInput}`
+        const currentNotes = localOp.notes || ""
+        const updatedNotes = currentNotes ? `${currentNotes}|||${noteEntry}` : noteEntry
+        await updateField('notes', updatedNotes)
+        setNewNoteInput("")
     }
 
-    // Agenda Helpers
+    const handlePreview = (file: any) => {
+        const { data } = supabase.storage.from('lead-documents').getPublicUrl(file.file_path)
+        if(data?.publicUrl) setPreviewFile({ ...file, url: data.publicUrl })
+    }
+
+    // --- RENDERS ---
+    if (!localOp) return null // Esperamos a que cargue la "Verdad Local"
+
+    const prepagasList = globalConfig?.prepagas || []
+    const availablePlans = prepagasList.find((p: any) => p.name === (localOp.prepaga || "Otra"))?.plans || []
+    const subStatesList = globalConfig?.subStates?.[localOp.status] || []
+
+    const nextStateLabel = getNextState() ? STATE_LABELS[getNextState()!] : 'FINALIZAR'
+    const prevStateLabel = getPrevState() ? STATE_LABELS[getPrevState()!] : 'ANTERIOR'
+
     const today = new Date().toISOString().split('T')[0]
-    const sortedReminders = [...(op.reminders || [])].sort((a: any, b: any) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime())
+    const sortedReminders = [...(localOp.reminders || [])].sort((a: any, b: any) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime())
     const todayReminders = sortedReminders.filter((r: any) => r.date === today)
-
     const hasEvent = (day: number) => {
-        const checkDate = new Date(); 
-        checkDate.setDate(day);
+        const checkDate = new Date(); checkDate.setDate(day);
         const dateStr = checkDate.toISOString().split('T')[0];
-        return op.reminders?.some((r: any) => r.date === dateStr);
+        return localOp.reminders?.some((r: any) => r.date === dateStr);
     }
-
+    const getReminderColor = (type: string) => {
+        switch(type) {
+            case 'call': return 'border-l-blue-500 bg-blue-50/30'
+            case 'meeting': return 'border-l-purple-500 bg-purple-50/30'
+            default: return 'border-l-emerald-500 bg-emerald-50/30'
+        }
+    }
     const getReminderIcon = (type: string) => {
         switch(type) {
             case 'call': return <Phone size={14} className="text-blue-600"/>
@@ -200,53 +408,47 @@ export function OpsModal({
         }
     }
 
-    const getReminderColor = (type: string) => {
-        switch(type) {
-            case 'call': return 'border-l-blue-500 bg-blue-50/30'
-            case 'meeting': return 'border-l-purple-500 bg-purple-50/30'
-            default: return 'border-l-emerald-500 bg-emerald-50/30'
-        }
-    }
-
     return (
         <>
             <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-                <DialogContent style={{ maxWidth: '1200px', width: '95%', height: '90vh' }} className="flex flex-col p-0 gap-0 bg-white border-0 shadow-2xl overflow-hidden rounded-2xl text-slate-900">
+                <DialogContent style={{ maxWidth: '1200px', width: '95%', height: '90vh' }} 
+                    className="flex flex-col p-0 gap-0 bg-white border-0 shadow-2xl overflow-hidden rounded-2xl text-slate-900"
+                    onPointerDownOutside={(e) => e.preventDefault()}
+                    onEscapeKeyDown={(e) => e.preventDefault()}
+                >
                     
                     {/* CABECERA */}
                     <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between shrink-0">
                         <div className="flex items-center gap-6">
-                            <div className={`h-16 w-16 rounded-2xl flex items-center justify-center shadow-md ${op.type==='alta'?'bg-green-100 text-green-600':'bg-purple-600 text-white'}`}>
-                                {op.type==='alta' ? <UserPlus size={32}/> : <ArrowRightLeft size={32}/>}
+                            <div className={`h-16 w-16 rounded-2xl flex items-center justify-center shadow-md ${localOp.source==='alta' || localOp.type==='alta' ?'bg-green-100 text-green-600':'bg-purple-600 text-white'}`}>
+                                {localOp.source==='alta' || localOp.type==='alta' ? <UserPlus size={32}/> : <ArrowRightLeft size={32}/>}
                             </div>
                             <div className="space-y-1">
                                 <div className="flex items-center gap-3">
-                                    <DialogTitle className="text-3xl font-black text-slate-800 leading-none">{op.clientName}</DialogTitle>
-                                    <Button size="sm" className="h-7 bg-[#25D366] hover:bg-[#20bd5a] text-white gap-2 px-3 rounded-full" onClick={openWhatsApp}>
+                                    <DialogTitle className="text-3xl font-black text-slate-800 leading-none">{localOp.name || "Sin Nombre"}</DialogTitle>
+                                    <Button size="sm" className="h-7 bg-[#25D366] hover:bg-[#20bd5a] text-white gap-2 px-3 rounded-full" onClick={() => window.open(`https://wa.me/${localOp.phone?.replace(/[^0-9]/g, '')}`, '_blank')}>
                                         <MessageCircle size={14} className="text-white"/> WhatsApp
                                     </Button>
                                     <Button size="sm" className="h-7 bg-slate-800 hover:bg-slate-700 text-white gap-2 px-3 rounded-full shadow-sm border border-slate-700" onClick={() => setActiveTab("agenda")}>
                                         <Clock size={14} className="text-white"/> Agendar
                                     </Button>
+                                    {isSaving && <Badge variant="outline" className="text-xs border-blue-200 text-blue-600 animate-pulse bg-blue-50"><Loader2 className="w-3 h-3 mr-1 animate-spin"/> Guardando...</Badge>}
                                 </div>
                                 <div className="flex items-center gap-3 mt-2">
-                                    {/* SELECTOR PREPAGA (REAL) */}
-                                    <Select value={op.prepaga} onValueChange={(val) => onUpdateOp({...op, prepaga: val})}>
+                                    <Select value={localOp.prepaga} onValueChange={(val) => updateField('prepaga', val)}>
                                         <SelectTrigger className="h-8 text-xs font-bold bg-white border-slate-300 w-[160px] shadow-sm"><SelectValue placeholder="Prepaga"/></SelectTrigger>
                                         <SelectContent>{prepagasList.map((p: any)=><SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>)}</SelectContent>
                                     </Select>
                                     
-                                    {/* SELECTOR PLAN (REAL) */}
-                                    <Select value={op.plan} onValueChange={(val) => onUpdateOp({...op, plan: val})}>
+                                    <Select value={localOp.plan} onValueChange={(val) => updateField('plan', val)}>
                                         <SelectTrigger className="h-8 text-xs font-bold bg-white border-slate-300 w-[120px] shadow-sm"><SelectValue placeholder="Plan"/></SelectTrigger>
                                         <SelectContent>{availablePlans.map((p:string)=><SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                                     </Select>
 
-                                    {/* CAMBIO DE VENDEDORA */}
                                     <Popover open={isSellerChangeOpen} onOpenChange={setIsSellerChangeOpen}>
                                         <PopoverTrigger asChild>
                                             <Button variant="outline" size="sm" className="h-8 gap-2 border-dashed border-slate-300 text-slate-500 hover:text-blue-600 hover:border-blue-300 ml-2">
-                                                <UserCog size={14}/> {op.seller || "Sin Vendedor"}
+                                                <UserCog size={14}/> {localOp.agent_name || "Sin Vendedor"}
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent className="w-56 p-3">
@@ -260,36 +462,38 @@ export function OpsModal({
                                             <Button size="sm" className="w-full bg-blue-600 text-white h-7 text-xs" onClick={handleSellerChange}>Confirmar Cambio</Button>
                                         </PopoverContent>
                                     </Popover>
-                                    
-                                    <Badge variant="outline" className="ml-2 bg-slate-100 text-slate-500 font-medium"><CalendarIcon size={12} className="mr-1"/> Ingreso: {op.entryDate}</Badge>
                                 </div>
                             </div>
                         </div>
 
-                        {/* ESTADO Y SUB-ESTADO (REAL) */}
+                        {/* ESTADO Y SUB-ESTADO (Sync con LocalOp) */}
                         <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-bold text-slate-400 uppercase">Etapa:</span>
-                                <Select value={op.status} onValueChange={(val) => onStatusChange(op.id, val as OpStatus)}>
-                                    <SelectTrigger className={`h-8 w-[140px] text-xs font-bold uppercase tracking-widest ${getStatusColor(op.status)} border-0 focus:ring-0 text-center shadow-sm`}>
+                                <Select value={localOp.status} onValueChange={(val) => { 
+                                    // Limpiamos subestado al cambiar etapa principal para evitar conflictos
+                                    updateField('sub_state', null); 
+                                    updateField('status', val); 
+                                }}>
+                                    <SelectTrigger className={`h-8 w-[140px] text-xs font-bold uppercase tracking-widest ${getStatusColor(localOp.status)} border-0 focus:ring-0 text-center shadow-sm`}>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent align="end">
-                                        <SelectItem value="ingresado" className="font-medium text-slate-600">INGRESADO</SelectItem>
-                                        <SelectItem value="precarga" className="font-medium text-blue-600">PRECARGA</SelectItem>
-                                        <SelectItem value="medicas" className="font-medium text-purple-600">MÉDICAS</SelectItem>
-                                        <SelectItem value="legajo" className="font-medium text-yellow-600">LEGAJO</SelectItem>
-                                        <SelectItem value="cumplidas" className="font-medium text-emerald-600">CUMPLIDAS</SelectItem>
+                                        <SelectItem value="ingresado">INGRESADO</SelectItem>
+                                        <SelectItem value="precarga">PRECARGA</SelectItem>
+                                        <SelectItem value="medicas">MÉDICAS</SelectItem>
+                                        <SelectItem value="legajo">LEGAJO</SelectItem>
+                                        <SelectItem value="cumplidas">CUMPLIDAS</SelectItem>
                                         <div className="border-t my-1"></div>
-                                        <SelectItem value="demoras" className="font-black text-amber-600">⚠ DEMORAS</SelectItem>
-                                        <SelectItem value="rechazado" className="font-black text-red-600">⛔ RECHAZADO</SelectItem>
+                                        <SelectItem value="demoras">⚠ DEMORAS</SelectItem>
+                                        <SelectItem value="rechazado">⛔ RECHAZADO</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
                             
                             <div className="flex items-center gap-2">
-                                <Select value={op.subState || ""} onValueChange={(val) => onSubStateChange(op.id, val)}>
-                                    <SelectTrigger className={`h-9 w-[260px] text-xs font-bold text-right justify-between shadow-sm border-2 ${getSubStateStyle(op.subState)}`}>
+                                <Select value={localOp.sub_state || ""} onValueChange={(val) => updateField('sub_state', val)}>
+                                    <SelectTrigger className={`h-9 w-[260px] text-xs font-bold text-right justify-between shadow-sm border-2 ${getSubStateStyle(localOp.sub_state)}`}>
                                         <SelectValue placeholder="Estado..." />
                                     </SelectTrigger>
                                     <SelectContent align="end">
@@ -303,81 +507,124 @@ export function OpsModal({
                     <div className="flex-1 flex overflow-hidden">
                         <ScrollArea style={{ width: '55%' }} className="border-r border-slate-100 bg-white shrink-0">
                             <div className="p-8 space-y-10">
-                                {/* SECCIÓN 1: DATOS TITULAR */}
+                                
+                                <section className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                    <EditableField 
+                                        label="Fecha Ingreso" 
+                                        type="date" 
+                                        value={localOp.fecha_ingreso || localOp.created_at?.split('T')[0]} 
+                                        onBlur={(v: string) => updateField('fecha_ingreso', v)} 
+                                        icon={<CalendarDays size={14}/>}
+                                    />
+                                    <EditableField 
+                                        label="Fecha Alta" 
+                                        type="date" 
+                                        value={localOp.fecha_alta} 
+                                        onBlur={(v: string) => updateField('fecha_alta', v)} 
+                                        icon={<CheckSquare size={14}/>}
+                                        color="text-emerald-700 font-bold"
+                                    />
+                                </section>
+
                                 <section className="space-y-5">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><User size={14}/> 1. Datos Titular</h4>
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-6">
-                                        <EditableField label="Nombre Completo" value={op.clientName} onChange={(v: string) => onUpdateOp({...op, clientName: v})} />
-                                        <EditableField label="CUIL/CUIT" value={op.dni} onChange={(v: string) => onUpdateOp({...op, dni: v})} />
-                                        <EditableField label="Nacimiento" value={op.dob} onChange={(v: string) => onUpdateOp({...op, dob: v})} />
-                                        <EditableField label="Email" value={op.email} onChange={(v: string) => onUpdateOp({...op, email: v})} />
-                                        <EditableField label="Teléfono" value={op.phone} onChange={(v: string) => onUpdateOp({...op, phone: v})} />
+                                        <EditableField label="Nombre Completo" value={localOp.name} onBlur={(v: string) => updateField('name', v)} />
+                                        <EditableField label="CUIL/CUIT" value={localOp.dni} onBlur={(v: string) => updateField('dni', v)} />
+                                        <EditableField label="Nacimiento" value={localOp.dob} onBlur={(v: string) => updateField('dob', v)} />
+                                        <EditableField label="Email" value={localOp.email} onBlur={(v: string) => updateField('email', v)} />
+                                        <EditableField label="Teléfono" value={localOp.phone} onBlur={(v: string) => updateField('phone', v)} />
                                         
                                         <div className="col-span-2 pt-1">
                                             <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={10}/> Domicilio</p>
                                             <div className="grid grid-cols-3 gap-2">
-                                                <Input className="text-xs h-8" placeholder="Calle y Nro" value={op.address_street} onChange={e => onUpdateOp({...op, address_street: e.target.value})} />
-                                                <Input className="text-xs h-8" placeholder="Localidad" value={op.address_city} onChange={e => onUpdateOp({...op, address_city: e.target.value})} />
-                                                <Input className="text-xs h-8" placeholder="CP" value={op.address_zip} onChange={e => onUpdateOp({...op, address_zip: e.target.value})} />
+                                                <Input className="text-xs h-8" placeholder="Calle y Nro" value={localOp.address_street || ""} onBlur={e => updateField('address_street', e.target.value)} onChange={e => setLocalOp({...localOp, address_street: e.target.value})} />
+                                                <Input className="text-xs h-8" placeholder="Localidad" value={localOp.address_city || ""} onBlur={e => updateField('address_city', e.target.value)} onChange={e => setLocalOp({...localOp, address_city: e.target.value})} />
+                                                <Input className="text-xs h-8" placeholder="CP" value={localOp.address_zip || ""} onBlur={e => updateField('address_zip', e.target.value)} onChange={e => setLocalOp({...localOp, address_zip: e.target.value})} />
                                             </div>
                                         </div>
                                     </div>
                                 </section>
 
-                                {/* SECCIÓN 2: GRUPO */}
                                 <section className="space-y-5">
                                     <div className="flex justify-between items-center border-b pb-3">
                                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={14}/> 2. Grupo Familiar</h4>
-                                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600 hover:bg-blue-50" onClick={() => onUpdateOp({...op, hijos: [...(op.hijos || []), {nombre: "", dni: ""}]})}>
+                                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600 hover:bg-blue-50" onClick={() => updateField('hijos', [...(localOp.hijos || []), {nombre: "", dni: ""}])}>
                                             <Plus size={12} className="mr-1"/> Agregar
                                         </Button>
                                     </div>
                                     <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-100">
                                         <div className="grid grid-cols-2 gap-4 mb-4">
-                                            <EditableField label="Tipo Afiliación" value={op.affiliation_type} onChange={(v: string) => onUpdateOp({...op, affiliation_type: v})} color="text-purple-600 font-bold" />
-                                            <EditableField label="Cápitas Total" value={op.capitas} onChange={(v: any) => onUpdateOp({...op, capitas: v})} />
+                                            <div className="flex flex-col gap-1 w-full">
+                                                <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1.5">Tipo Afiliación</span>
+                                                <Select value={localOp.tipo_afiliacion} onValueChange={(val) => updateField('tipo_afiliacion', val)}>
+                                                    <SelectTrigger className="h-8 text-xs font-bold bg-white"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="Individual">Individual</SelectItem>
+                                                        <SelectItem value="Matrimonio / Grupo">Matrimonio / Grupo</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <EditableField label="Cápitas Total" value={localOp.capitas} onBlur={(v: any) => updateField('capitas', v)} />
                                         </div>
                                         <div className="pt-3 border-t border-slate-200 space-y-2">
-                                            {op.hijos && op.hijos.length > 0 ? op.hijos.map((h: any, i: number) => (
+                                            {localOp.hijos && localOp.hijos.length > 0 ? localOp.hijos.map((h: any, i: number) => (
                                                 <div key={i} className="flex gap-2 items-center">
-                                                    <Input className="h-7 text-xs bg-white" placeholder="Nombre" value={h.nombre} onChange={(e) => { const newHijos = [...op.hijos!]; newHijos[i].nombre = e.target.value; onUpdateOp({...op, hijos: newHijos}) }}/>
-                                                    <Input className="h-7 text-xs bg-white w-24 font-mono" placeholder="DNI" value={h.dni} onChange={(e) => { const newHijos = [...op.hijos!]; newHijos[i].dni = e.target.value; onUpdateOp({...op, hijos: newHijos}) }}/>
+                                                    <Input className="h-7 text-xs bg-white" placeholder="Nombre" value={h.nombre} 
+                                                        onChange={(e) => { const newHijos = [...localOp.hijos]; newHijos[i].nombre = e.target.value; setLocalOp({...localOp, hijos: newHijos}) }}
+                                                        onBlur={() => updateField('hijos', localOp.hijos)}
+                                                    />
+                                                    <Input className="h-7 text-xs bg-white w-24 font-mono" placeholder="DNI" value={h.dni} 
+                                                        onChange={(e) => { const newHijos = [...localOp.hijos]; newHijos[i].dni = e.target.value; setLocalOp({...localOp, hijos: newHijos}) }}
+                                                        onBlur={() => updateField('hijos', localOp.hijos)}
+                                                    />
                                                 </div>
                                             )) : <p className="text-xs text-slate-400 italic">Sin integrantes adicionales.</p>}
                                         </div>
                                     </div>
                                 </section>
 
-                                {/* SECCIÓN 3: PAGO Y LABORAL */}
                                 <section className="space-y-5">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><Briefcase size={14}/> 3. Laboral & Pago</h4>
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-                                        <EditableField label="Condición" value={op.condicionLaboral} onChange={(v: string) => onUpdateOp({...op, condicionLaboral: v})} />
-                                        <EditableField label="CUIT Empleador" value={op.cuitEmpleador} onChange={(v: string) => onUpdateOp({...op, cuitEmpleador: v})} />
+                                        <div className="flex flex-col gap-1 w-full">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">Condición</span>
+                                            <Select value={localOp.condicion_laboral} onValueChange={(v) => updateField('condicion_laboral', v)}>
+                                                <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Obligatorio">Obligatorio</SelectItem>
+                                                    <SelectItem value="Voluntario">Voluntario</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {localOp.condicion_laboral !== 'Voluntario' && (
+                                            <EditableField label="CUIT Empleador" value={localOp.cuit_empleador} onBlur={(v: string) => updateField('cuit_empleador', v)} />
+                                        )}
+                                        
                                         <div className="col-span-2 grid grid-cols-2 gap-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
-                                            <EditableField label="Método Pago" value={op.metodoPago} onChange={(v: string) => onUpdateOp({...op, metodoPago: v})} color="text-emerald-700 font-bold" />
-                                            <EditableField label="CBU/Tarjeta" value={op.cbu_tarjeta} onChange={(v: string) => onUpdateOp({...op, cbu_tarjeta: v})} />
+                                            <EditableField label="Método Pago" value={localOp.metodo_pago} onBlur={(v: string) => updateField('metodo_pago', v)} color="text-emerald-700 font-bold" />
+                                            <EditableField label="CBU/Tarjeta" value={localOp.cbu_tarjeta} onBlur={(v: string) => updateField('cbu_tarjeta', v)} />
                                         </div>
                                     </div>
                                 </section>
 
-                                {/* SECCIÓN 4: VALORES ECONOMICOS */}
                                 <section className="space-y-5 pb-10">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><DollarSign size={14}/> 4. Valores Económicos</h4>
                                     <div className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="grid grid-cols-3 gap-6">
-                                            <EditableField label="Full Price" value={op.fullPrice || op.price} onChange={(v: string) => onUpdateOp({...op, fullPrice: v})} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-800" />
-                                            <EditableField label="Aportes" value={op.aportes} onChange={(v: string) => onUpdateOp({...op, aportes: v})} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
-                                            <EditableField label="Descuento" value={op.descuento} onChange={(v: string) => onUpdateOp({...op, descuento: v})} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
+                                            <EditableField label="Full Price" value={localOp.full_price} onBlur={(v: string) => updateField('full_price', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-800" />
+                                            <EditableField label="Aportes" value={localOp.aportes} onBlur={(v: string) => updateField('aportes', v)} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
+                                            <EditableField label="Descuento" value={localOp.descuento} onBlur={(v: string) => updateField('descuento', v)} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
                                         </div>
                                     </div>
                                 </section>
                             </div>
                         </ScrollArea>
 
-                        {/* COLUMNA DERECHA (Chat, Notas, etc.) */}
+                        {/* COLUMNA DERECHA */}
                         <div className="flex-1 flex flex-col bg-slate-50/50 overflow-hidden">
-                            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+                            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full">
                                 <div className="px-8 pt-4 border-b border-slate-100 bg-white">
                                     <TabsList className="bg-transparent h-10 justify-start gap-8 p-0 border-none w-full">
                                         <TabTrigger value="chat" label="Historial & Chat" icon={<MessageSquare size={16}/>} />
@@ -387,64 +634,73 @@ export function OpsModal({
                                     </TabsList>
                                 </div>
                                 
-                                <div className="flex-1 overflow-hidden">
-                                    {/* TAB CHAT */}
-                                    <TabsContent value="chat" className="flex-1 flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900">
-                                        <ScrollArea className="flex-1 p-8 text-slate-900 bg-slate-50/50">
-                                            {/* Historial */}
+                                <div className="flex-1 overflow-hidden relative">
+                                    <TabsContent value="chat" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 absolute inset-0">
+                                        <ScrollArea className="flex-1 p-8 text-slate-900 bg-slate-50/50 min-h-0">
                                             <div className="space-y-4 mb-6">
-                                                {(op.history || []).map((h: AuditLog, i: number) => (
-                                                    <div key={i} className="flex gap-3 text-xs text-slate-500 items-center justify-center opacity-60"><span>{h.date}</span> • <span>{h.user} {h.action}</span></div>
+                                                {realHistory.map((h: any, i: number) => (
+                                                    <div key={i} className="flex gap-3 text-xs text-slate-500 items-center justify-center opacity-60">
+                                                        <span>{new Date(h.changed_at).toLocaleDateString()}</span> • <span>{h.from_status} ➝ {h.to_status}</span>
+                                                    </div>
                                                 ))}
                                             </div>
-                                            {/* Mensajes */}
-                                            {(op.chat || []).map((msg: ChatMsg, i: number) => <ChatBubble key={i} {...msg} onFileClick={() => {}} />)}
+                                            {realChat.length === 0 ? <p className="text-center text-xs text-slate-400 mt-10">Inicio del chat.</p> : 
+                                                realChat.map((msg: any, i: number) => (
+                                                    <ChatBubble key={i} text={msg.text} user={msg.sender} time={new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} isMe={msg.sender === (currentUser || "Administración")} />
+                                                ))
+                                            }
                                         </ScrollArea>
-                                        <div className="p-4 bg-white border-t flex gap-3 shadow-lg z-10">
-                                            <Input className="h-11 text-sm shadow-sm" placeholder="Escribir mensaje..." value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter' && onSendChat(chatInput) && setChatInput("")}/>
-                                            <Button size="icon" className="h-11 w-11 bg-blue-600 hover:bg-blue-700 shadow-md" onClick={() => {onSendChat(chatInput); setChatInput("")}}><ArrowRight size={20}/></Button>
+                                        <div className="p-4 bg-white border-t flex gap-3 shadow-lg z-20 shrink-0">
+                                            <Input className="h-11 text-sm shadow-sm" placeholder="Escribir mensaje..." value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter' && sendChatMessage()}/>
+                                            <Button size="icon" className="h-11 w-11 bg-blue-600 hover:bg-blue-700 shadow-md" onClick={sendChatMessage}><ArrowRight size={20}/></Button>
                                         </div>
                                     </TabsContent>
 
-                                    {/* TAB NOTAS */}
-                                    <TabsContent value="notes" className="flex-1 flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 bg-yellow-50/30">
+                                    <TabsContent value="notes" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 bg-yellow-50/30 absolute inset-0">
                                         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                                            {op.adminNotes && op.adminNotes.length > 0 ? op.adminNotes.map((note: AdminNote, i: number) => (
-                                                <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 relative group">
-                                                    {/* FIX: Use only 'text' instead of trying 'action' which does not exist on type AdminNote */}
-                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.text}</p>
-                                                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50"><span className="text-[10px] text-slate-400 font-bold uppercase">{note.user || "Sistema"} • {note.date || "Hoy"}</span></div>
-                                                </div>
-                                            )) : <div className="text-center p-8 text-slate-400 text-xs italic">No hay notas guardadas aún.</div>}
+                                            {localOp.notes && localOp.notes.split('|||').map((noteStr: string, i: number) => {
+                                                const parts = noteStr.split('|')
+                                                const text = parts.length > 2 ? parts.slice(3).join('|') : noteStr
+                                                const user = parts[2] || "Sistema"
+                                                const date = parts[1] || ""
+                                                if(!text) return null
+                                                return (
+                                                    <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 relative group">
+                                                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{text}</p>
+                                                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50"><span className="text-[10px] text-slate-400 font-bold uppercase">{user} • {date}</span></div>
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
-                                        <div className="p-4 bg-white border-t border-yellow-100">
+                                        <div className="p-4 bg-white border-t border-yellow-100 shrink-0">
                                             <Textarea className="min-h-[80px] text-sm bg-slate-50 border-slate-200 resize-none mb-2 focus-visible:ring-yellow-400" placeholder="Escribí una nueva nota..." value={newNoteInput} onChange={(e) => setNewNoteInput(e.target.value)} />
                                             <Button size="sm" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold" onClick={handleSaveNote}>Guardar Nota</Button>
                                         </div>
                                     </TabsContent>
 
-                                    {/* TAB ARCHIVOS */}
-                                    <TabsContent value="files" className="p-8 flex flex-col gap-4 m-0 overflow-y-auto h-full content-start text-slate-900">
+                                    <TabsContent value="files" className="flex flex-col h-full m-0 p-8 gap-4 overflow-y-auto text-slate-900 absolute inset-0">
                                         <div className="flex justify-between items-center mb-2">
-                                            <h4 className="text-xs font-bold text-slate-400 uppercase">Documentación Cargada</h4>
-                                            <Button size="sm" variant="outline" className="h-8 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50"><FileUp size={12} className="mr-1"/> Subir Admin</Button>
+                                            <h4 className="text-xs font-bold text-slate-400 uppercase">Documentación ({realDocs.length})</h4>
+                                            <Button size="sm" variant="outline" className="h-8 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => fileInputRef.current?.click()}>
+                                                <FileUp size={12} className="mr-1"/> Subir Admin
+                                            </Button>
                                         </div>
-                                        <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-blue-50 hover:border-blue-300 transition-all cursor-pointer group">
+                                        <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-blue-50 hover:border-blue-300 transition-all cursor-pointer group relative" onClick={() => fileInputRef.current?.click()}>
+                                            <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileUpload} />
                                             <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center mb-3 group-hover:bg-blue-100">
                                                 <UploadCloud className="text-slate-400 group-hover:text-blue-500" size={24}/>
                                             </div>
-                                            <p className="text-sm font-bold text-slate-600">Arrastrá y soltá archivos aquí</p>
+                                            <p className="text-sm font-bold text-slate-600">{isUploading ? "Subiendo..." : "Arrastrá y soltá archivos aquí"}</p>
                                             <p className="text-xs text-slate-400 mt-1">o hacé click para explorar (PDF, JPG, PNG)</p>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4 mt-2">
-                                            {demoFiles.map((file) => (
-                                                <FileCard key={file.id} file={file} onPreview={() => setPreviewFile(file)} onDownload={() => handleDownload(file)}/>
+                                        <div className="grid grid-cols-2 gap-4 mt-2 pb-10">
+                                            {realDocs.map((file) => (
+                                                <FileCard key={file.id} file={file} onPreview={handlePreview} onDownload={() => forceDownload(file)}/>
                                             ))}
                                         </div>
                                     </TabsContent>
 
-                                    {/* TAB AGENDA */}
-                                    <TabsContent value="agenda" className="flex-1 flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900">
+                                    <TabsContent value="agenda" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 absolute inset-0">
                                         <div className="flex h-full">
                                             <div className="w-[40%] p-6 border-r border-slate-100 overflow-y-auto bg-white">
                                                 <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2"><Plus size={14}/> Agendar Evento</h4>
@@ -504,22 +760,27 @@ export function OpsModal({
                     <DialogFooter className="px-8 py-5 border-t bg-white sm:justify-between gap-3 shrink-0 shadow-[0_-5px_20px_-5px_rgba(0,0,0,0.05)] z-20">
                         <div className="flex gap-3">
                             <Button variant="ghost" className="text-xs font-bold text-slate-400 hover:text-red-500 hover:bg-red-50" onClick={onRelease}>Liberar Caso</Button>
-                            
-                            {(op.operator === currentUser || role === 'admin_god') && op.status !== 'rechazado' && (
+                            {(localOp.operator === currentUser || role === 'admin_god') && localOp.status !== 'rechazado' && (
                                 <Button variant="outline" className="text-xs font-bold text-red-600 border-red-200 bg-red-50 hover:bg-red-100 hover:border-red-300 gap-2" onClick={() => setIsCorrectionOpen(true)}>
                                     <AlertTriangle size={14}/> Solicitar Corrección
                                 </Button>
                             )}
                         </div>
                         <div className="flex gap-3">
-                            {(op.operator === currentUser || role === 'admin_god') ? (
+                            {(localOp.operator === currentUser || role === 'admin_god') ? (
                                 <>
-                                    <Button variant="outline" className="h-10 px-6 text-xs font-bold text-slate-600 border-slate-300 hover:bg-slate-50" onClick={requestBack}><ArrowLeft className="mr-2 h-3 w-3"/> Volver Estado</Button>
-                                    {op.status !== 'demoras' && op.status !== 'rechazado' && op.status !== 'cumplidas' && (
-                                        <Button className="h-10 px-8 bg-slate-900 hover:bg-blue-600 text-white font-black text-xs tracking-widest shadow-xl transition-all" onClick={requestAdvance}>AVANZAR ETAPA <ArrowRight className="ml-2 h-3 w-3"/></Button>
+                                    {getPrevState() && (
+                                        <Button variant="outline" className="h-10 px-6 text-xs font-bold text-slate-600 border-slate-300 hover:bg-slate-50" onClick={handleBackStage}>
+                                            <ArrowLeft className="mr-2 h-3 w-3"/> Volver a {prevStateLabel}
+                                        </Button>
+                                    )}
+                                    {localOp.status !== 'demoras' && localOp.status !== 'rechazado' && localOp.status !== 'cumplidas' && getNextState() && (
+                                        <Button className="h-10 px-8 bg-slate-900 hover:bg-blue-600 text-white font-black text-xs tracking-widest shadow-xl transition-all" onClick={handleAdvanceStage}>
+                                            AVANZAR A {nextStateLabel} <ArrowRight className="ml-2 h-3 w-3"/>
+                                        </Button>
                                     )}
                                 </>
-                            ) : !op.operator && (
+                            ) : !localOp.operator && (
                                 <Button className="h-10 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs tracking-widest shadow-xl transition-all" onClick={onPick}>✋ Tomar Caso</Button>
                             )}
                         </div>
@@ -565,22 +826,22 @@ export function OpsModal({
                             </Button>
                         </div>
                         <div className="w-full h-[80vh] flex items-center justify-center bg-black/90 p-4">
-                            {previewFile.type === 'IMG' ? (
+                            {previewFile.type === 'IMG' || (previewFile.name && previewFile.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) ? (
                                 <img src={previewFile.url} alt="Preview" className="max-h-full max-w-full object-contain rounded-md shadow-2xl" />
                             ) : (
                                 <div className="text-center text-white">
                                     <FileText size={64} className="mx-auto mb-4 text-slate-500"/>
                                     <p className="text-lg font-bold">Vista previa de PDF no disponible en demo.</p>
-                                    <Button variant="outline" className="mt-4 border-white text-white hover:bg-white hover:text-black" onClick={() => handleDownload(previewFile)}>Descargar para ver</Button>
+                                    <Button variant="outline" className="mt-4 border-white text-white hover:bg-white hover:text-black" onClick={() => forceDownload(previewFile)}>Descargar para ver</Button>
                                 </div>
                             )}
                         </div>
                         <div className="w-full bg-slate-900 p-4 flex justify-between items-center text-white">
                             <div>
                                 <p className="font-bold text-sm">{previewFile.name}</p>
-                                <p className="text-xs text-slate-400">{previewFile.size}</p>
+                                <p className="text-xs text-slate-400">{(previewFile.size / 1024 / 1024).toFixed(2)} MB</p>
                             </div>
-                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleDownload(previewFile)}>
+                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => forceDownload(previewFile)}>
                                 <Download size={16} className="mr-2"/> Descargar
                             </Button>
                         </div>

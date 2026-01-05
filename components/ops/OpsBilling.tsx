@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2 } from "lucide-react"
+import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 // --- TIPOS ---
@@ -147,17 +147,17 @@ export function OpsBilling() {
                 id: d.id,
                 entryDate: d.created_at,
                 clientName: d.name,
-                dni: d.dni || "", // Asegúrate que tu BD tenga campo DNI o úsalo de metadata
+                dni: d.dni || "",
                 origen: d.source,
                 seller: d.agent_name,
                 prepaga: d.company_name || d.health_insurance || d.prepaga,
                 plan: d.plan_type || d.plan,
-                fullPrice: d.price || "0",
-                aportes: d.aportes || "0", // Asegurarse que existan en DB si se usan
+                fullPrice: d.price || d.full_price || "0", // Usamos el que esté disponible
+                aportes: d.aportes || "0",
                 descuento: d.descuento || "0",
                 status: d.status,
                 condicionLaboral: d.employment_status,
-                hijos: d.hijos || [],
+                hijos: d.family_members || d.hijos || [], // Compatible con ambos nombres de columna
                 // Billing fields
                 billing_approved: d.billing_approved,
                 billing_period: d.billing_period,
@@ -201,7 +201,7 @@ export function OpsBilling() {
         
         // Prioridad: 1. Override DB, 2. Cálculo
         if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
-            val = parseFloat(op.billing_price_override)
+            val = parseFloat(op.billing_price_override.toString())
             formula = "Manual (Editado)"
         } else {
             const full = parseFloat(op.fullPrice || "0")
@@ -231,7 +231,7 @@ export function OpsBilling() {
 
         let portfolioVal = 0
         if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
-             portfolioVal = parseFloat(op.billing_portfolio_override)
+             portfolioVal = parseFloat(op.billing_portfolio_override.toString())
         } else {
              portfolioVal = Math.round(val * rules.portfolioRate)
         }
@@ -257,10 +257,10 @@ export function OpsBilling() {
     }, [operations, selectedMonth, filters])
 
     // --- FILTRADO DE PESTAÑAS (CORREGIDO) ---
-    // Mesa de Entrada: Todo lo que NO está aprobado explícitamente (false o null)
+    // Pending: Todo lo que NO sea explícitamente true (false o null)
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
     
-    // Oficial / Cartera: Solo lo que está aprobado explícitamente (true)
+    // Approved: Solo lo que explícitamente sea true
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
 
     // --- TOTALES ---
@@ -372,7 +372,6 @@ export function OpsBilling() {
     
     const approveOp = (id: string) => {
         // Al aprobar, se marca billing_approved = TRUE. 
-        // Esto la mueve de "Mesa de Entrada" a "Oficial" y "Cartera"
         updateOpBilling(id, { billing_approved: true })
     }
 

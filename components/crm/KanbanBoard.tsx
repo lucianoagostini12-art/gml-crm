@@ -131,12 +131,13 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas
     }))
 
+    // === AQUÍ ESTÁ EL CAMBIO SOLICITADO ===
     const fetchLeads = async () => {
         const { data } = await supabase.from('leads')
             .select('*')
             .eq('agent_name', CURRENT_USER)
-            // === FILTRO CORREGIDO: Excluye 'ingresado' para que desaparezca al vender ===
-            .not('status', 'in', '("perdido","vendido","rechazado","baja","cumplidas","ingresado")') 
+            // CAMBIO: Usamos Array para el filtro, es más seguro y estándar
+            .not('status', 'in', ['perdido','vendido','rechazado','baja','cumplidas','ingresado']) 
         if (data) setLeads(mapLeads(data))
     }
 

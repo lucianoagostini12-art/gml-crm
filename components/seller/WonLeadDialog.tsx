@@ -70,66 +70,67 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
         onOpenChange={handleOpenChange} 
         onConfirm={(wizardData: any) => {
           
-          // --- 1. FUNCIONES DE LIMPIEZA (ESTO EVITA EL ERROR 400) ---
-          // Convierte "" en 0 para campos numéricos
+          // --- FUNCIONES DE LIMPIEZA (EL SECRETO DEL ÉXITO) ---
+          
+          // 1. Números: "" -> 0
           const cleanNum = (val: any) => {
              if (!val || val === "") return 0;
              const parsed = parseFloat(val);
              return isNaN(parsed) ? 0 : parsed;
           };
           
-          // Convierte "" en null para campos de fecha
+          // 2. Fechas: "" -> null
           const cleanDate = (val: any) => (val && val !== "") ? val : null;
 
-          // --- 2. EL GRAN TRADUCTOR (MAPEO EXACTO A TU BASE DE DATOS) ---
+          // 3. Textos: "" -> null (CRÍTICO PARA EVITAR ERROR 400 EN CUIT/DNI)
+          const cleanStr = (val: any) => (val && val.trim() !== "") ? val.trim() : null;
+
+          // --- EL GRAN TRADUCTOR ---
           const dbData = {
-            // Campos de sistema
             type: 'alta',
-            status: 'ingresado', // Clave para que aparezca en Ops
+            status: 'ingresado',
             sub_state: 'ingresado',
             last_update: new Date().toISOString(),
             
-            // Datos Personales
-            name: wizardData.nombre,
-            dni: wizardData.cuit, 
-            cuit: wizardData.cuit,
-            dob: cleanDate(wizardData.nacimiento), // FECHA LIMPIA
-            email: wizardData.email,
-            phone: wizardData.celular,
+            // Datos Personales (Sanitizados)
+            name: cleanStr(wizardData.nombre),
+            dni: cleanStr(wizardData.cuit), 
+            cuit: cleanStr(wizardData.cuit),
+            dob: cleanDate(wizardData.nacimiento),
+            email: cleanStr(wizardData.email),
+            phone: cleanStr(wizardData.celular),
             
             // Dirección
-            address_street: wizardData.domicilio,
-            address_city: wizardData.localidad,
-            address_zip: wizardData.cp,
-            province: wizardData.provincia,
+            address_street: cleanStr(wizardData.domicilio),
+            address_city: cleanStr(wizardData.localidad),
+            address_zip: cleanStr(wizardData.cp),
+            province: cleanStr(wizardData.provincia),
             
-            // Datos Familiares (Usando tus nombres de columna reales)
-            affiliation_type: wizardData.tipoGrupo, 
+            // Datos Familiares
+            affiliation_type: cleanStr(wizardData.tipoGrupo), 
             family_members: wizardData.tipoGrupo === 'matrimonio' ? { c: wizardData.matrimonioNombre, d: wizardData.matrimonioDni } : null,
             hijos: wizardData.hijosData, 
             capitas: 1 + (wizardData.tipoGrupo === 'matrimonio' ? 1 : 0) + (parseInt(wizardData.cantHijos) || 0),
 
-            // Datos Laborales
-            source: wizardData.origen, 
-            labor_condition: wizardData.condicion, 
-            employer_cuit: wizardData.cuitEmpleador,
+            // Datos Laborales (Sanitizados para evitar conflictos de comillas vacías)
+            source: cleanStr(wizardData.origen), 
+            labor_condition: cleanStr(wizardData.condicion), 
+            employer_cuit: cleanStr(wizardData.cuitEmpleador),
             
-            // Notas concatenadas
             notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}`,
 
             // Datos de Pago
-            payment_method: wizardData.tipoPago, 
+            payment_method: cleanStr(wizardData.tipoPago), 
             cbu_card: wizardData.tipoPago === 'tarjeta' 
                 ? `${wizardData.bancoEmisor || ''} - ${wizardData.numeroTarjeta} (Vto: ${wizardData.vencimientoTarjeta})`
                 : `${wizardData.bancoEmisor || ''} - ${wizardData.cbuNumero}`,
             
-            // Valores Económicos (NÚMEROS LIMPIOS)
+            // Valores Económicos
             full_price: cleanNum(wizardData.fullPrice),
             aportes: cleanNum(wizardData.aportes),
             descuento: cleanNum(wizardData.descuento),
             price: cleanNum(wizardData.aPagar), 
             
-            // Archivos (Se pasan aparte)
             files: wizardData.archivos
           }
 
@@ -150,38 +151,19 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
               <ArrowRightLeft className="h-6 w-6"/> Registrar Traspaso (PASS)
             </DialogTitle>
             <DialogDescription>
-              Ingresá los datos del titular para la auditoría de traspaso.
+              Ingresá los datos del titular.
             </DialogDescription>
           </DialogHeader>
-
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Nombre Completo</Label>
-                <Input value={passData.fullName} onChange={(e) => setPassData({...passData, fullName: e.target.value})}/>
-              </div>
-              <div className="grid gap-2">
-                <Label>DNI</Label>
-                <Input value={passData.dni} onChange={(e) => setPassData({...passData, dni: e.target.value})}/>
-              </div>
+              <div className="grid gap-2"><Label>Nombre Completo</Label><Input value={passData.fullName} onChange={(e) => setPassData({...passData, fullName: e.target.value})}/></div>
+              <div className="grid gap-2"><Label>DNI</Label><Input value={passData.dni} onChange={(e) => setPassData({...passData, dni: e.target.value})}/></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Teléfono</Label>
-                <Input value={passData.phone} onChange={(e) => setPassData({...passData, phone: e.target.value})}/>
-              </div>
-              <div className="grid gap-2">
-                <Label>Prepaga Destino</Label>
-                <Select onValueChange={(v) => setPassData({...passData, prepaga: v})}>
-                  <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Prevención Salud">Prevención Salud</SelectItem>
-                    <SelectItem value="Sancor Salud">Sancor Salud</SelectItem>
-                    <SelectItem value="Avalian">Avalian</SelectItem>
-                    <SelectItem value="Swiss Medical">Swiss Medical</SelectItem>
-                    <SelectItem value="Galeno">Galeno</SelectItem>
-                    <SelectItem value="Omint">Omint</SelectItem>
-                  </SelectContent>
+              <div className="grid gap-2"><Label>Teléfono</Label><Input value={passData.phone} onChange={(e) => setPassData({...passData, phone: e.target.value})}/></div>
+              <div className="grid gap-2"><Label>Prepaga Destino</Label>
+                <Select onValueChange={(v) => setPassData({...passData, prepaga: v})}><SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent><SelectItem value="Prevención Salud">Prevención Salud</SelectItem><SelectItem value="Sancor Salud">Sancor Salud</SelectItem><SelectItem value="Avalian">Avalian</SelectItem><SelectItem value="Swiss Medical">Swiss Medical</SelectItem><SelectItem value="Galeno">Galeno</SelectItem><SelectItem value="Omint">Omint</SelectItem></SelectContent>
                 </Select>
               </div>
             </div>
@@ -200,14 +182,8 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       <DialogContent className="sm:max-w-[450px]">
         <DialogHeader><DialogTitle className="text-center">¡Venta Cerrada! 🚀</DialogTitle><DialogDescription className="text-center">Seleccioná el tipo de gestión.</DialogDescription></DialogHeader>
         <div className="grid grid-cols-2 gap-4 py-6">
-          <button onClick={() => setSaleType('alta')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group bg-white">
-            <div className="bg-green-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform"><UserPlus className="h-8 w-8 text-green-600"/></div>
-            <span className="font-bold text-slate-700">ALTA NUEVA</span>
-          </button>
-          <button onClick={() => setSaleType('pass')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group bg-white">
-            <div className="bg-blue-100 p-4 rounded-full mb-3 group-hover:scale-110 transition-transform"><ArrowRightLeft className="h-8 w-8 text-blue-600"/></div>
-            <span className="font-bold text-slate-700">TRASPASO</span>
-          </button>
+          <button onClick={() => setSaleType('alta')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all"><UserPlus className="h-8 w-8 text-green-600 mb-2"/><span className="font-bold text-slate-700">ALTA NUEVA</span></button>
+          <button onClick={() => setSaleType('pass')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all"><ArrowRightLeft className="h-8 w-8 text-blue-600 mb-2"/><span className="font-bold text-slate-700">TRASPASO</span></button>
         </div>
       </DialogContent>
     </Dialog>

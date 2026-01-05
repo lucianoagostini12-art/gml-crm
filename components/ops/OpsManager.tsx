@@ -489,7 +489,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     name: userName, 
                     avatar: profiles.find(p => p.full_name === userName)?.avatar_url || "" 
                 }} 
-                onLogout={handleLogout} // ✅ Botón Salir Conectado
+                onLogout={handleLogout} 
             />
 
             <main className="flex-1 flex flex-col min-w-0 bg-slate-100 relative text-slate-900 h-full">
@@ -559,8 +559,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 
                                 {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} />}
                                 
-                                {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics operations={filteredOps} />}
-                                {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling operations={operations} />}
+                                {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
+                                {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
                                 {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale />}
                                 {viewMode === 'settings' && (role === 'admin_god' || permissions.editSettings) && <OpsSettings />}
                                 

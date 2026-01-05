@@ -46,7 +46,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       return alert("Por favor, completá Nombre, DNI y Prepaga como mínimo.")
     }
     
-    // TRADUCTOR PASS: Mapeamos los datos manuales a las columnas de Supabase
+    // TRADUCTOR PASS
     onConfirm({
       type: 'pass',
       name: passData.fullName,
@@ -54,10 +54,10 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       phone: passData.phone,
       prepaga: passData.prepaga,
       plan: passData.plan,
-      notes: passData.observations, // Se guarda en 'notes' para historial
-      status: 'ingresado',          // IMPORTANTE: Para que aparezca en Ops
+      notes: passData.observations,
+      status: 'ingresado',          
       sub_state: 'auditoria_pass',
-      files: passData.files         // Archivos crudos para el uploader
+      files: passData.files         
     })
     handleOpenChange(false)
   }
@@ -70,19 +70,16 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
         onOpenChange={handleOpenChange} 
         onConfirm={(wizardData: any) => {
           
-          // --- EL GRAN TRADUCTOR ---
-          // Aquí convertimos el formato del Wizard (JS) al formato de Supabase (SQL)
-          // Esto soluciona que Ops reciba los datos vacíos.
-          
+          // --- CORRECCIÓN DE NOMBRES DE COLUMNA (MAPEO A DB) ---
           const dbData = {
             // Campos obligatorios de sistema
             type: 'alta',
-            status: 'ingresado', // Entra en la primera columna de Ops
+            status: 'ingresado', // ESTO HACE QUE APAREZCA EN OPS
             sub_state: 'ingresado',
             
             // Datos Personales
             name: wizardData.nombre,
-            dni: wizardData.cuit, // Usamos el CUIT/CUIL como DNI principal
+            dni: wizardData.cuit, 
             cuit: wizardData.cuit,
             dob: wizardData.nacimiento,
             email: wizardData.email,
@@ -95,28 +92,32 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             province: wizardData.provincia,
             
             // Datos Familiares
-            tipo_afiliacion: wizardData.tipoGrupo, // Mapeo clave: tipoGrupo -> tipo_afiliacion
+            affiliation_type: wizardData.tipoGrupo, // CORREGIDO
             family_members: wizardData.tipoGrupo === 'matrimonio' ? { c: wizardData.matrimonioNombre, d: wizardData.matrimonioDni } : null,
-            hijos: wizardData.hijosData, // Array de hijos
+            hijos: wizardData.hijosData, // jsonb
             capitas: 1 + (wizardData.tipoGrupo === 'matrimonio' ? 1 : 0) + (parseInt(wizardData.cantHijos) || 0),
 
             // Datos Laborales
-            source: wizardData.origen, // Mapeo clave: origen -> source
-            condicion_laboral: wizardData.condicion,
-            cuit_empleador: wizardData.cuitEmpleador,
-            // Nota: catMonotributo y claveFiscal podrían ir a 'notes' o columnas nuevas si las creamos.
-            // Por ahora las concatenamos en notas para no perderlas:
-            notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo}`,
+            source: wizardData.origen, 
+            labor_condition: wizardData.condicion, // CORREGIDO
+            employer_cuit: wizardData.cuitEmpleador, // CORREGIDO
+            
+            // Guardamos datos extra en notas para no perderlos
+            notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}`,
 
             // Datos de Pago
-            metodo_pago: wizardData.tipoPago, // tarjeta o cbu
-            banco: wizardData.bancoEmisor,
-            cbu_tarjeta: wizardData.tipoPago === 'tarjeta' ? wizardData.numeroTarjeta : wizardData.cbuNumero,
+            payment_method: wizardData.tipoPago, // CORREGIDO
             
-            // Valores Económicos (CRÍTICO PARA OPS)
+            // Concatenamos Banco y Numeros en cbu_card
+            cbu_card: wizardData.tipoPago === 'tarjeta' 
+                ? `${wizardData.bancoEmisor || ''} - ${wizardData.numeroTarjeta} (Vto: ${wizardData.vencimientoTarjeta})`
+                : `${wizardData.bancoEmisor || ''} - ${wizardData.cbuNumero}`,
+            
+            // Valores Económicos
             full_price: parseFloat(wizardData.fullPrice || 0),
             aportes: parseFloat(wizardData.aportes || 0),
             descuento: parseFloat(wizardData.descuento || 0),
+            price: parseFloat(wizardData.aPagar || 0), // "A Pagar" va a la columna 'price'
             
             // Archivos (Se pasan aparte para que KanbanBoard los suba)
             files: wizardData.archivos
@@ -129,7 +130,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
     )
   }
 
-  // SI ELIGIÓ PASS -> Formulario
+  // SI ELIGIÓ PASS -> Formulario (Sin cambios)
   if (saleType === 'pass') {
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>

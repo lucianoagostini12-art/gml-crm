@@ -131,13 +131,17 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas
     }))
 
-    // === AQUÍ ESTÁ EL CAMBIO SOLICITADO ===
+    // === AQUÍ ESTÁ EL CAMBIO CRÍTICO (SOLUCIÓN ERROR 400) ===
     const fetchLeads = async () => {
+        // Filtro positivo: Traemos solo lo que el vendedor PUEDE ver
+        // Esto elimina el error de sintaxis .not()
+        const visibleStatuses = ['nuevo', 'contactado', 'cotizacion', 'documentacion'];
+
         const { data } = await supabase.from('leads')
             .select('*')
             .eq('agent_name', CURRENT_USER)
-            // CAMBIO: Usamos Array para el filtro, es más seguro y estándar
-            .not('status', 'in', ['perdido','vendido','rechazado','baja','cumplidas','ingresado']) 
+            .in('status', visibleStatuses) // Filtro seguro
+        
         if (data) setLeads(mapLeads(data))
     }
 
@@ -159,19 +163,22 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         fetchLeads()
         const channel = supabase.channel('kanban_realtime_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
+                // CORRECCIÓN REALTIME: Casting a 'any' para evitar error de Build
+                const newData = payload.new as any;
+
                 if (payload.eventType === 'INSERT') {
-                    // === REALTIME: Si entra un lead nuevo y NO es 'ingresado', mostrarlo ===
-                    if (!['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(payload.new.status)) {
-                        const newLead = mapLeads([payload.new])[0]
+                    if (newData && !['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(newData.status)) {
+                        const newLead = mapLeads([newData])[0]
                         setLeads(prev => [newLead, ...prev])
                     }
                 } else if (payload.eventType === 'UPDATE') {
-                    const updated = mapLeads([payload.new])[0]
-                    // === REALTIME: Si pasa a 'ingresado' (Vendido), sacarlo del tablero ===
-                    if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
-                        setLeads(prev => prev.filter(l => l.id !== updated.id))
-                    } else {
-                        setLeads(prev => prev.map(l => l.id === updated.id ? updated : l))
+                    if (newData) {
+                        const updated = mapLeads([newData])[0]
+                        if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
+                            setLeads(prev => prev.filter(l => l.id !== updated.id))
+                        } else {
+                            setLeads(prev => prev.map(l => l.id === updated.id ? updated : l))
+                        }
                     }
                 }
             })

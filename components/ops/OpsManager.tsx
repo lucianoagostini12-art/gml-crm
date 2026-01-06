@@ -127,11 +127,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- CARGA DE NOTIFICACIONES (REAL) ---
     const fetchNotifications = async () => {
-        // Traemos las notificaciones para este usuario o globales si es admin
         const { data } = await supabase
             .from('notifications')
             .select('*')
-            .eq('user_name', userName) // Opcional: Si quieres que Ops vea todo, quita este filtro
+            .eq('user_name', userName) 
             .eq('read', false)
             .order('created_at', { ascending: false })
             .limit(20)
@@ -141,27 +140,20 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const markAllRead = async () => {
         const ids = notifications.map(n => n.id)
-        setNotifications([]) // UI update rapido
+        setNotifications([]) 
         if (ids.length > 0) {
             await supabase.from('notifications').update({ read: true }).in('id', ids)
         }
     }
 
-    // === AQUÍ ESTÁ LA CORRECCIÓN CRÍTICA (SOLUCIÓN ERROR 400) ===
+    // === SOLUCIÓN CRÍTICA: ERROR 400 + CRASH DE MAPEO ===
     const fetchOperations = async () => {
         setIsLoading(true)
         
-        // CORRECCIÓN: Usamos un filtro positivo (.in) en lugar de negativo (.not)
-        // Esto evita el error de sintaxis en la URL y trae explícitamente lo que Ops necesita ver.
+        // 1. SOLUCIÓN ERROR 400: Filtro con Array explícito
         const opsStatuses = [
-            'ingresado', 
-            'precarga', 
-            'medicas', 
-            'legajo', 
-            'demoras', 
-            'cumplidas', 
-            'rechazado',
-            'vendido' // Mantenemos 'vendido' por seguridad, el mapeo abajo lo corrige
+            'ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 
+            'cumplidas', 'rechazado', 'vendido'
         ];
 
         const { data, error } = await supabase
@@ -171,58 +163,79 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             .order('last_update', { ascending: false })
 
         if (error) {
-            console.error("Error fetching ops:", error)
+            console.error("❌ Error cargando operaciones:", error)
             showToast("Error de conexión con la base de datos", "error")
         }
 
         if (data) {
-            const mappedOps: any = data.map((op: any) => ({
-                id: op.id,
-                clientName: op.name || "Sin Nombre",
-                dni: op.dni || "S/D",
-                plan: op.plan || op.quoted_plan || "-",
-                prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
-                // Aseguramos que si viene como 'vendido' se vea como 'ingresado' en Ops
-                status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
-                subState: op.sub_state || "Pendiente",
-                seller: op.agent_name || "Desconocido",
-                operator: op.operator, 
-                entryDate: new Date(op.created_at).toISOString().split('T')[0],
-                lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
-                type: op.type || "alta",
-                phone: op.phone || "",
-                chat: (op.comments || []).map((c: any) => ({
-                    message: c.text,
-                    user: c.author,
-                    time: new Date(c.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
-                    isMe: c.author === userName
-                })),
-                adminNotes: op.admin_notes || [], 
-                reminders: (op.reminders || []).map((r: any) => ({
-                    id: r.id, text: r.text, date: r.date, completed: r.completed
-                })),
-                history: op.notes ? [{ date: "Info", user: "Sistema", action: op.notes }] : [],
-                daysInStatus: 0,
-                origen: op.source || "Dato",
-                cuit: op.cuit,
-                dob: op.dob,
-                email: op.email,
-                address_street: op.address_street,
-                address_city: op.address_city,
-                address_zip: op.address_zip,
-                hijos: op.family_members || [],
-                condicionLaboral: op.labor_condition,
-                cuitEmpleador: op.employer_cuit,
-                metodoPago: op.payment_method,
-                cbu_tarjeta: op.cbu_card,
-                fullPrice: op.full_price,
-                aportes: op.aportes,
-                descuento: op.descuento,
-                billing_approved: op.billing_approved,
-                billing_period: op.billing_period,
-                billing_price_override: op.billing_price_override,
-                billing_portfolio_override: op.billing_portfolio_override
-            }))
+            const mappedOps: any = data.map((op: any) => {
+                
+                // 2. SOLUCIÓN CRASH DE PANTALLA (TypeError: .map is not a function)
+                // Analizamos 'comments' de forma segura porque en DB hay basura (objetos en vez de arrays)
+                let safeChat = [];
+                try {
+                    let rawComments = op.comments;
+                    if (typeof rawComments === 'string') {
+                        // Intentamos parsear si es string
+                        try { rawComments = JSON.parse(rawComments); } catch (e) { rawComments = [] }
+                    }
+                    // Si después de parsear es un array, lo usamos. Si no, array vacío.
+                    if (Array.isArray(rawComments)) {
+                        safeChat = rawComments.map((c: any) => ({
+                            message: c.text || "",
+                            user: c.author || "Sistema",
+                            time: c.date ? new Date(c.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "-",
+                            isMe: c.author === userName
+                        }));
+                    }
+                } catch (err) {
+                    console.warn("Error parseando chat para ID:", op.id);
+                    safeChat = [];
+                }
+
+                // 3. SOLUCIÓN DATOS FANTASMA (Normalización)
+                return {
+                    id: op.id,
+                    clientName: op.name || "Sin Nombre",
+                    dni: op.dni || "S/D",
+                    plan: op.plan || op.quoted_plan || "-",
+                    prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
+                    status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
+                    subState: op.sub_state || "Pendiente",
+                    seller: op.agent_name || "Desconocido",
+                    operator: op.operator, 
+                    entryDate: new Date(op.created_at).toISOString().split('T')[0],
+                    lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
+                    type: op.type || "alta",
+                    phone: op.phone || "",
+                    chat: safeChat, // USAMOS EL CHAT SEGURO
+                    adminNotes: op.admin_notes || [], 
+                    reminders: (op.reminders || []).map((r: any) => ({
+                        id: r.id, text: r.text, date: r.date, completed: r.completed
+                    })),
+                    history: op.notes ? [{ date: "Info", user: "Sistema", action: op.notes }] : [],
+                    daysInStatus: 0,
+                    origen: op.source || "Dato",
+                    cuit: op.cuit,
+                    dob: op.dob,
+                    email: op.email,
+                    address_street: op.address_street,
+                    address_city: op.address_city,
+                    address_zip: op.address_zip,
+                    hijos: op.family_members || [],
+                    condicionLaboral: op.labor_condition,
+                    cuitEmpleador: op.employer_cuit,
+                    metodoPago: op.payment_method,
+                    cbu_tarjeta: op.cbu_card,
+                    fullPrice: op.full_price,
+                    aportes: op.aportes,
+                    descuento: op.descuento,
+                    billing_approved: op.billing_approved,
+                    billing_period: op.billing_period,
+                    billing_price_override: op.billing_price_override,
+                    billing_portfolio_override: op.billing_portfolio_override
+                }
+            })
             setOperations(mappedOps)
         }
         setIsLoading(false)
@@ -233,18 +246,17 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchPermissions()
         fetchSystemConfig() 
         fetchOperations()
-        fetchNotifications() // Cargar al inicio
+        fetchNotifications() 
         
         // --- REALTIME ---
         const channel = supabase.channel('ops-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 if(payload.eventType === 'INSERT' && (payload.new.status === 'vendido' || payload.new.status === 'ingresado')) {
-                    // Notificación Visual Popup
                     setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
                 }
+                // Recargamos siempre ante cambios para asegurar consistencia
                 fetchOperations() 
             })
-            // Escuchar Notificaciones
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
                 if (payload.new.user_name === userName || role === 'admin_god') {
                     setNotifications(prev => [payload.new, ...prev])
@@ -276,7 +288,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'mine' && op.operator !== userName) return false
-        // FILTRO DE PILETA: Oculta si ya tiene operador o si está cumplido/rechazado
+        
+        // FILTRO DE PILETA (Mesa de Entrada):
+        // Muestra lo que NO tiene operador asignado Y no está terminado
         if (viewMode === 'pool' && (op.operator || ['cumplidas','rechazado'].includes(op.status))) return false
         
         if (filterStatus !== 'all' && op.status !== filterStatus) return false
@@ -291,16 +305,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- UPDATE SUPABASE (Centralizado y REPARADO) ---
     const updateOpInDb = async (id: string, updates: any) => {
-        // 1. NORMALIZACIÓN PARA LA UI (CamelCase)
         const uiUpdates = { ...updates }
         if (updates.sub_state !== undefined) uiUpdates.subState = updates.sub_state
         if (updates.agent_name !== undefined) uiUpdates.seller = updates.agent_name
         if (updates.name !== undefined) uiUpdates.clientName = updates.name
         
-        // 2. ACTUALIZACIÓN VISUAL (Optimista)
         setOperations(prev => prev.map(o => o.id === id ? { ...o, ...uiUpdates } : o))
         
-        // 3. PREPARACIÓN PARA DB (SnakeCase)
         const dbUpdates: any = {}
         if (uiUpdates.status) dbUpdates.status = uiUpdates.status
         if (uiUpdates.subState !== undefined) dbUpdates.sub_state = uiUpdates.subState
@@ -312,7 +323,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (uiUpdates.clientName !== undefined) dbUpdates.name = uiUpdates.clientName
         else if (uiUpdates.name !== undefined) dbUpdates.name = uiUpdates.name
 
-        // Campos directos
         if (uiUpdates.operator !== undefined) dbUpdates.operator = uiUpdates.operator 
         if (uiUpdates.reminders) dbUpdates.reminders = uiUpdates.reminders
         if (uiUpdates.dni) dbUpdates.dni = uiUpdates.dni
@@ -348,10 +358,20 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const handleSendChat = async (text: string) => {
         if (!selectedOp) return
         const newMsg = { text, author: userName, date: new Date().toISOString(), role: 'ops' }
+        
+        // Fetch comments actuales con seguridad
         const { data: currentData } = await supabase.from('leads').select('comments').eq('id', selectedOp.id).single()
-        const existingComments = currentData?.comments || []
+        
+        // Aseguramos que sea array
+        let existingComments = currentData?.comments;
+        if (typeof existingComments === 'string') {
+             try { existingComments = JSON.parse(existingComments) } catch(e) { existingComments = [] }
+        }
+        if (!Array.isArray(existingComments)) existingComments = [];
+
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
+        
         if (!error) {
             const uiMsg: any = { 
                 message: text,
@@ -386,17 +406,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     // --- LÓGICA DE ASIGNACIÓN + AUTO APERTURA ---
     const confirmAssignment = async (operator: string) => { 
         if (!assigningOp) return; 
-        
-        // 1. Actualizar en DB
         await updateOpInDb(assigningOp.id, { operator })
-        
-        // 2. Preparar el objeto actualizado para abrirlo
         const updatedOp = { ...assigningOp, operator: operator }
-        
-        // 3. Limpiar estado de asignación y ABRIR MODAL AUTOMÁTICAMENTE
         setAssigningOp(null); 
         setSelectedOp(updatedOp); 
-        
         showToast(`👍 Asignado a ${operator} y abierto.`, 'success'); 
     }
 
@@ -438,10 +451,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         showToast("🔓 Caso liberado", 'success'); 
     }
 
-    // --- CARGA MANUAL (Ahora usa Prepagas Reales de DB) ---
     const handleCreateManualSale = async () => {
         if (!manualLoadData.clientName || !manualLoadData.dni) return;
-
         const { error } = await supabase.from('leads').insert({
             name: manualLoadData.clientName, 
             dni: manualLoadData.dni, 
@@ -455,7 +466,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             type: "alta", 
             source: "Manual Admin"
         })
-
         if (!error) {
             setIsManualLoadOpen(false)
             setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "Oficina", specificSeller: "" }) 

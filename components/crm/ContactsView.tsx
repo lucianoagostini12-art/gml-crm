@@ -15,7 +15,6 @@ export function ContactsView({ userName }: { userName?: string }) {
     const [search, setSearch] = useState("")
     const [statusFilter, setStatusFilter] = useState("all")
 
-    // Si no viene usuario, usamos "Maca" por defecto para evitar pantallas blancas
     const CURRENT_USER = userName || "Maca"
 
     // --- CARGA DE DATOS ---
@@ -25,7 +24,7 @@ export function ContactsView({ userName }: { userName?: string }) {
             .from('leads')
             .select('*')
             .eq('agent_name', CURRENT_USER)
-            .order('last_update', { ascending: false }) // Ordenar por movimiento más reciente
+            .order('last_update', { ascending: false }) 
         
         if (data) setContacts(data)
         setLoading(false)
@@ -34,7 +33,6 @@ export function ContactsView({ userName }: { userName?: string }) {
     useEffect(() => {
         fetchContacts()
 
-        // Suscripción Realtime: Si un Admin te devuelve un caso o cambia algo, lo ves al instante
         const channel = supabase.channel('contacts_view_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
                 fetchContacts()
@@ -46,7 +44,7 @@ export function ContactsView({ userName }: { userName?: string }) {
 
     // --- LOGICA DE CAMBIO DE ESTADO ---
     const changeStatus = async (id: string, newStatus: string) => {
-        // Actualizamos optimísticamente la UI para que se sienta rápido
+        // Optimistic UI update
         setContacts(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c))
 
         const { error } = await supabase.from('leads').update({ 
@@ -62,16 +60,53 @@ export function ContactsView({ userName }: { userName?: string }) {
 
     // --- FILTROS ---
     const filtered = contacts.filter(c => {
-        const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone && c.phone.includes(search))
-        const matchesStatus = statusFilter === "all" ? true : c.status === statusFilter
+        const matchesSearch = c.name?.toLowerCase().includes(search.toLowerCase()) || (c.phone && c.phone.includes(search))
+        
+        let matchesStatus = true
+        if (statusFilter !== "all") {
+            if (statusFilter === 'vendido') {
+                // Filtro especial: Vendido puede ser 'ingresado' (el estado real de venta) o 'vendido' (legacy)
+                matchesStatus = ['ingresado', 'vendido', 'cumplidas'].includes(c.status)
+            } else {
+                matchesStatus = c.status === statusFilter
+            }
+        }
+        
         return matchesSearch && matchesStatus
     })
 
-    // Helper para mostrar la prepaga correcta (Final o Cotizada)
     const getDisplayPrepaga = (c: any) => {
         if (c.prepaga && c.prepaga !== "Generica") return c.prepaga
         if (c.quoted_prepaga) return c.quoted_prepaga + " (Cotiz)"
         return "-"
+    }
+
+    // Helper de colores para badges
+    const getStatusBadge = (status: string) => {
+        switch(status) {
+            case 'nuevo': return 'bg-slate-100 text-slate-600 border-slate-200'
+            case 'contactado': return 'bg-blue-50 text-blue-600 border-blue-200'
+            case 'cotizacion': return 'bg-yellow-50 text-yellow-700 border-yellow-200'
+            case 'documentacion': return 'bg-purple-50 text-purple-700 border-purple-200'
+            case 'ingresado': 
+            case 'vendido': 
+            case 'cumplidas': return 'bg-green-100 text-green-700 border-green-200'
+            case 'perdido': return 'bg-red-50 text-red-600 border-red-200'
+            default: return 'bg-gray-50 text-gray-500'
+        }
+    }
+
+    const getStatusLabel = (status: string) => {
+        const labels: any = {
+            'nuevo': 'Sin Trabajar',
+            'contactado': 'En Contacto',
+            'cotizacion': 'Cotización',
+            'documentacion': 'Documentación',
+            'ingresado': 'VENTA CERRADA',
+            'vendido': 'VENTA CERRADA',
+            'perdido': 'PERDIDO'
+        }
+        return labels[status] || status.toUpperCase()
     }
 
     return (
@@ -99,14 +134,19 @@ export function ContactsView({ userName }: { userName?: string }) {
                             />
                         </div>
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-[160px] bg-white shadow-sm">
+                            <SelectTrigger className="w-[180px] bg-white shadow-sm">
                                 <div className="flex items-center gap-2 text-slate-600"><Filter size={14}/> <SelectValue /></div>
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Todos</SelectItem>
-                                <SelectItem value="vendido">✅ Vendidos</SelectItem>
+                                <div className="border-t my-1"></div>
+                                <SelectItem value="nuevo">📥 Sin Trabajar</SelectItem>
+                                <SelectItem value="contactado">📞 En Contacto</SelectItem>
+                                <SelectItem value="cotizacion">💲 Cotización</SelectItem>
+                                <SelectItem value="documentacion">📂 Documentación</SelectItem>
+                                <div className="border-t my-1"></div>
+                                <SelectItem value="vendido">✅ Ventas Cerradas</SelectItem>
                                 <SelectItem value="perdido">❌ Perdidos</SelectItem>
-                                <SelectItem value="contactado">📞 En Seguimiento</SelectItem>
                             </SelectContent>
                         </Select>
                         <Button variant="outline" size="icon" onClick={fetchContacts} disabled={loading}>
@@ -145,14 +185,8 @@ export function ContactsView({ userName }: { userName?: string }) {
                                             </div>
                                         </td>
                                         <td className="p-4">
-                                            <Badge variant="outline" className={`
-                                                uppercase font-bold text-[10px] tracking-wide
-                                                ${contact.status === 'vendido' ? 'bg-green-100 text-green-700 border-green-200' : ''}
-                                                ${contact.status === 'perdido' ? 'bg-red-50 text-red-600 border-red-200' : ''}
-                                                ${contact.status === 'contactado' ? 'bg-blue-50 text-blue-600 border-blue-200' : ''}
-                                                ${['nuevo', 'dato'].includes(contact.status) ? 'bg-slate-100 text-slate-600' : ''}
-                                            `}>
-                                                {contact.status}
+                                            <Badge variant="outline" className={`uppercase font-bold text-[10px] tracking-wide ${getStatusBadge(contact.status)}`}>
+                                                {getStatusLabel(contact.status)}
                                             </Badge>
                                         </td>
                                         <td className="p-4">
@@ -168,20 +202,24 @@ export function ContactsView({ userName }: { userName?: string }) {
                                             </p>
                                         </td>
                                         <td className="p-4 text-right">
-                                            <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <Select onValueChange={(val) => changeStatus(contact.id, val)}>
-                                                    <SelectTrigger className="w-[150px] h-8 text-xs bg-white border-slate-300 focus:ring-blue-500">
-                                                        <div className="flex items-center gap-2"><ArrowUpRight size={12}/> <SelectValue placeholder="Cambiar Estado" /></div>
-                                                    </SelectTrigger>
-                                                    <SelectContent align="end">
-                                                        <SelectItem value="nuevo">📥 Mover a Bandeja</SelectItem>
-                                                        <SelectItem value="contactado">📞 Reactivar (Seguimiento)</SelectItem>
-                                                        <SelectItem value="cotizacion">💲 Enviar a Cotización</SelectItem>
-                                                        <div className="border-t my-1"></div>
-                                                        <SelectItem value="perdido" className="text-red-600">❌ Marcar Perdido</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
+                                            {/* Solo permitimos mover si NO es una venta cerrada (ingresado/cumplidas) para proteger comisiones */}
+                                            {!['ingresado', 'cumplidas', 'vendido'].includes(contact.status) && (
+                                                <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Select onValueChange={(val) => changeStatus(contact.id, val)}>
+                                                        <SelectTrigger className="w-[170px] h-8 text-xs bg-white border-slate-300 focus:ring-blue-500 shadow-sm">
+                                                            <div className="flex items-center gap-2"><ArrowUpRight size={12}/> <SelectValue placeholder="Mover al Tablero" /></div>
+                                                        </SelectTrigger>
+                                                        <SelectContent align="end">
+                                                            <SelectItem value="nuevo">📥 Sin Trabajar</SelectItem>
+                                                            <SelectItem value="contactado">📞 En Contacto</SelectItem>
+                                                            <SelectItem value="cotizacion">💲 Cotización</SelectItem>
+                                                            <SelectItem value="documentacion">📂 Documentación</SelectItem>
+                                                            <div className="border-t my-1"></div>
+                                                            <SelectItem value="perdido" className="text-red-600">❌ Marcar Perdido</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
                                         </td>
                                     </tr>
                                 ))

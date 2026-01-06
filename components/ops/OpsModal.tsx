@@ -16,7 +16,7 @@ import {
   Phone, UploadCloud, MessageSquare, Calendar as CalendarIcon, 
   FileUp, MessageCircle, UserPlus, ArrowRightLeft, Plus, ImageIcon, 
   Users, CheckSquare, Save, Clock, FileText, DollarSign, Wallet, Percent,
-  Eye, Download, X, AlertTriangle, Send, UserCog, CalendarDays, Loader2, Check
+  Eye, Download, X, AlertTriangle, Send, UserCog, CalendarDays, Loader2, Check, Trash2
 } from "lucide-react"
 import { OpStatus, getStatusColor, getSubStateStyle } from "./data"
 
@@ -33,7 +33,6 @@ function TabTrigger({ value, label, icon }: any) {
 function EditableField({ label, value, onBlur, onChange, icon, color, prefix, suffix, type="text" }: any) {
     const [localValue, setLocalValue] = useState(value || "")
     
-    // Sincronización inteligente: Solo actualiza si el valor externo cambia Y no estamos editando
     useEffect(() => { 
         if (value !== undefined && value !== null) {
             setLocalValue(value)
@@ -63,7 +62,8 @@ function EditableField({ label, value, onBlur, onChange, icon, color, prefix, su
     )
 }
 
-function FileCard({ file, onPreview, onDownload }: any) {
+// Modificado: Agregado botón de eliminar
+function FileCard({ file, onPreview, onDownload, onDelete }: any) {
     const isImg = file.type === 'IMG' || (file.name && file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i))
     const size = file.metadata?.size ? `${(file.metadata.size / 1024 / 1024).toFixed(2)} MB` : "Doc"
 
@@ -84,6 +84,10 @@ function FileCard({ file, onPreview, onDownload }: any) {
                 </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-green-600 hover:bg-green-50" onClick={() => onDownload(file)} title="Descargar">
                     <Download size={16}/>
+                </Button>
+                {/* Nuevo Botón Eliminar */}
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(file)} title="Eliminar">
+                    <Trash2 size={16}/>
                 </Button>
             </div>
         </div>
@@ -115,7 +119,6 @@ export function OpsModal({
     const [chatInput, setChatInput] = useState("")
     
     // --- ESTADO LOCAL MAESTRO (BLINDAJE DE DATOS) ---
-    // Usamos esto como "Fuente de la Verdad" mientras el modal está abierto
     const [localOp, setLocalOp] = useState<any>(null)
 
     // Estados de Datos Externos
@@ -125,7 +128,7 @@ export function OpsModal({
     
     // Estados UX
     const [isUploading, setIsUploading] = useState(false)
-    const [isSaving, setIsSaving] = useState(false) // Indicador de guardado
+    const [isSaving, setIsSaving] = useState(false)
 
     // Estados Agenda
     const [reminderDate, setReminderDate] = useState("")
@@ -161,10 +164,8 @@ export function OpsModal({
     // --- CARGA INICIAL ---
     useEffect(() => {
         if(isOpen && op?.id) {
-            // Inicializamos el estado local con lo que viene del padre o de DB
             fetchFullData()
             
-            // Suscripción Chat
             const channel = supabase.channel('ops_chat_room')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages', filter: `lead_id=eq.${op.id}` }, (payload) => {
                 setRealChat(prev => [...prev, payload.new])
@@ -176,15 +177,13 @@ export function OpsModal({
     }, [isOpen, op?.id])
 
     const fetchFullData = async () => {
-        // 1. Datos Principales (Lead) - Aseguramos tener la última versión
         const { data: leadData } = await supabase.from('leads').select('*').eq('id', op.id).single()
         if (leadData) {
-            setLocalOp(leadData) // Aquí inicializamos la verdad local
+            setLocalOp(leadData)
         } else {
-            setLocalOp(op) // Fallback
+            setLocalOp(op)
         }
 
-        // 2. Auxiliares
         fetchRealDocs()
         fetchRealChat()
         fetchRealHistory()
@@ -211,27 +210,20 @@ export function OpsModal({
         }
     }
 
-    // --- MOTOR DE GUARDADO INTELIGENTE (Solución Punto 1 y 2) ---
+    // --- MOTOR DE GUARDADO INTELIGENTE ---
     const updateField = async (field: string, value: any) => {
         if (!localOp) return
 
         setIsSaving(true)
-
-        // 1. Actualizamos Estado Local INMEDIATAMENTE (Sin esperar a DB)
         setLocalOp((prev: any) => ({ ...prev, [field]: value }))
-        
-        // 2. Avisamos al padre (para que el tablero se actualice si es necesario)
         onUpdateOp({ ...localOp, [field]: value }) 
 
-        // 3. Guardamos en DB (Silenciosamente)
         const { error } = await supabase.from('leads').update({ [field]: value }).eq('id', localOp.id)
         
         if (error) {
             console.error(`Error guardando ${field}:`, error)
-            // Aquí podrías revertir el localOp si quisieras ser muy estricto
         }
         
-        // Pequeño delay para que se vea el "Guardando..."
         setTimeout(() => setIsSaving(false), 500)
     }
 
@@ -258,10 +250,9 @@ export function OpsModal({
     const handleAdvanceStage = async () => {
         const next = getNextState()
         if (next) {
-            // Al cambiar de etapa mayor, limpiamos subestado para evitar incoherencias
             await updateField('sub_state', null)
             await updateField('status', next)
-            requestAdvance() // Trigger evento padre
+            requestAdvance()
         }
     }
 
@@ -291,6 +282,28 @@ export function OpsModal({
         a.click()
         window.URL.revokeObjectURL(url)
         document.body.removeChild(a)
+    }
+
+    // Solución Punto 2: Eliminar archivo
+    const handleDeleteFile = async (file: any) => {
+        if(!confirm("¿Estás seguro de eliminar este archivo? No se puede deshacer.")) return
+
+        // 1. Borrar de Storage
+        const { error: storageErr } = await supabase.storage.from('lead-documents').remove([file.file_path])
+        if (storageErr) {
+            alert("Error al borrar del almacenamiento")
+            return
+        }
+
+        // 2. Borrar de la tabla
+        const { error: dbErr } = await supabase.from('lead_documents').delete().eq('id', file.id)
+        if (dbErr) {
+            alert("Error al borrar registro de base de datos")
+            return
+        }
+
+        // 3. Actualizar UI
+        fetchRealDocs()
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -341,7 +354,7 @@ export function OpsModal({
     const handleSubmitCorrection = async () => {
         if (!correctionReason) return
         await updateField('status', 'rechazado')
-        onStatusChange(op.id, 'rechazado') // Sync visual inmediato padre
+        onStatusChange(op.id, 'rechazado') 
         
         const reasonText = `⚠️ Se solicita corrección: ${correctionReason}. ${correctionComment ? `(${correctionComment})` : ''}`
         const msg = {
@@ -376,7 +389,7 @@ export function OpsModal({
     }
 
     // --- RENDERS ---
-    if (!localOp) return null // Esperamos a que cargue la "Verdad Local"
+    if (!localOp) return null
 
     const prepagasList = globalConfig?.prepagas || []
     const availablePlans = prepagasList.find((p: any) => p.name === (localOp.prepaga || "Otra"))?.plans || []
@@ -416,7 +429,6 @@ export function OpsModal({
                     onPointerDownOutside={(e) => e.preventDefault()}
                     onEscapeKeyDown={(e) => e.preventDefault()}
                 >
-                    
                     {/* CABECERA */}
                     <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between shrink-0">
                         <div className="flex items-center gap-6">
@@ -466,12 +478,11 @@ export function OpsModal({
                             </div>
                         </div>
 
-                        {/* ESTADO Y SUB-ESTADO (Sync con LocalOp) */}
+                        {/* ESTADO Y SUB-ESTADO */}
                         <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-bold text-slate-400 uppercase">Etapa:</span>
                                 <Select value={localOp.status} onValueChange={(val) => { 
-                                    // Limpiamos subestado al cambiar etapa principal para evitar conflictos
                                     updateField('sub_state', null); 
                                     updateField('status', val); 
                                 }}>
@@ -609,13 +620,17 @@ export function OpsModal({
                                     </div>
                                 </section>
 
+                                {/* SECCION 4 VALORES ECONOMICOS (Modificado Punto 3) */}
                                 <section className="space-y-5 pb-10">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><DollarSign size={14}/> 4. Valores Económicos</h4>
                                     <div className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
-                                        <div className="grid grid-cols-3 gap-6">
-                                            <EditableField label="Full Price" value={localOp.full_price} onBlur={(v: string) => updateField('full_price', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-800" />
+                                        {/* Modificación: Grid de 4 columnas para incluir "Total a Pagar" */}
+                                        <div className="grid grid-cols-4 gap-4">
+                                            <EditableField label="Full Price" value={localOp.full_price} onBlur={(v: string) => updateField('full_price', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
                                             <EditableField label="Aportes" value={localOp.aportes} onBlur={(v: string) => updateField('aportes', v)} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
                                             <EditableField label="Descuento" value={localOp.descuento} onBlur={(v: string) => updateField('descuento', v)} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
+                                            {/* Nuevo Campo */}
+                                            <EditableField label="Total a Pagar" value={localOp.total_a_pagar} onBlur={(v: string) => updateField('total_a_pagar', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-900" />
                                         </div>
                                     </div>
                                 </section>
@@ -638,9 +653,12 @@ export function OpsModal({
                                     <TabsContent value="chat" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 absolute inset-0">
                                         <ScrollArea className="flex-1 p-8 text-slate-900 bg-slate-50/50 min-h-0">
                                             <div className="space-y-4 mb-6">
+                                                {/* Solución Punto 1: Mostrar Agente en Historial */}
                                                 {realHistory.map((h: any, i: number) => (
                                                     <div key={i} className="flex gap-3 text-xs text-slate-500 items-center justify-center opacity-60">
-                                                        <span>{new Date(h.changed_at).toLocaleDateString()}</span> • <span>{h.from_status} ➝ {h.to_status}</span>
+                                                        <span>{new Date(h.changed_at).toLocaleDateString()}</span> • 
+                                                        <span className="font-bold text-slate-700">{h.agent_name || 'Sistema'}:</span> 
+                                                        <span>{h.from_status} ➝ {h.to_status}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -695,59 +713,94 @@ export function OpsModal({
                                         </div>
                                         <div className="grid grid-cols-2 gap-4 mt-2 pb-10">
                                             {realDocs.map((file) => (
-                                                <FileCard key={file.id} file={file} onPreview={handlePreview} onDownload={() => forceDownload(file)}/>
+                                                <FileCard 
+                                                    key={file.id} 
+                                                    file={file} 
+                                                    onPreview={handlePreview} 
+                                                    onDownload={() => forceDownload(file)}
+                                                    onDelete={handleDeleteFile} // Pasar función de borrado
+                                                />
                                             ))}
                                         </div>
                                     </TabsContent>
 
+                                    {/* SECCION AGENDA (Modificado Punto 4) - Diseño Espacioso */}
                                     <TabsContent value="agenda" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 absolute inset-0">
-                                        <div className="flex h-full">
-                                            <div className="w-[40%] p-6 border-r border-slate-100 overflow-y-auto bg-white">
-                                                <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2"><Plus size={14}/> Agendar Evento</h4>
-                                                <div className="space-y-4">
-                                                    <div className="space-y-1">
-                                                        <label className="text-[10px] font-bold text-slate-500">Tipo</label>
-                                                        <Select value={reminderType} onValueChange={setReminderType}>
-                                                            <SelectTrigger className="h-9 text-xs"><SelectValue/></SelectTrigger>
-                                                            <SelectContent><SelectItem value="call">📞 Llamada</SelectItem><SelectItem value="meeting">👥 Reunión</SelectItem><SelectItem value="task">✅ Tarea</SelectItem></SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="grid grid-cols-1 gap-3">
-                                                        <div className="space-y-1">
-                                                            <label className="text-[10px] font-bold text-slate-500">Fecha y Hora</label>
-                                                            <div className="flex gap-2">
-                                                                <Input type="date" className="h-9 text-xs flex-1" value={reminderDate} onChange={e => setReminderDate(e.target.value)}/>
-                                                                <Input type="time" className="h-9 text-xs w-24" value={reminderTime} onChange={e => setReminderTime(e.target.value)}/>
+                                        <div className="flex flex-col h-full p-8 bg-slate-50/50">
+                                            
+                                            {/* Parte Superior: Formulario Aireado */}
+                                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 shrink-0">
+                                                <h4 className="text-sm font-bold text-slate-600 uppercase mb-5 flex items-center gap-2 border-b pb-3">
+                                                    <Plus size={16} className="text-blue-600"/> Nuevo Evento
+                                                </h4>
+                                                
+                                                <div className="flex flex-col gap-5">
+                                                    {/* Primera Fila: Tipo y Fecha */}
+                                                    <div className="grid grid-cols-2 gap-6">
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-xs font-bold text-slate-500 uppercase">Tipo de Evento</label>
+                                                            <Select value={reminderType} onValueChange={setReminderType}>
+                                                                <SelectTrigger className="h-10 text-sm"><SelectValue/></SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="call">📞 Llamada</SelectItem>
+                                                                    <SelectItem value="meeting">👥 Reunión</SelectItem>
+                                                                    <SelectItem value="task">✅ Tarea</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-xs font-bold text-slate-500 uppercase">Fecha y Hora</label>
+                                                            <div className="flex gap-3">
+                                                                <Input type="date" className="h-10 text-sm flex-1" value={reminderDate} onChange={e => setReminderDate(e.target.value)}/>
+                                                                <Input type="time" className="h-10 text-sm w-32" value={reminderTime} onChange={e => setReminderTime(e.target.value)}/>
                                                             </div>
                                                         </div>
-                                                        <div className="space-y-1">
-                                                            <label className="text-[10px] font-bold text-slate-500">Detalle</label>
-                                                            <Input placeholder="Ej: Llamar por recibo" value={reminderNote} onChange={e => setReminderNote(e.target.value)}/>
-                                                        </div>
                                                     </div>
-                                                    <Button size="sm" className="w-full h-10 bg-slate-900 text-white hover:bg-blue-600 transition-colors shadow-lg font-bold mt-4 flex items-center justify-center gap-2" onClick={() => {onAddReminder(op.id, reminderDate, reminderTime, reminderNote, reminderType); setReminderNote("")}}>
-                                                        <Save size={16}/> CONFIRMAR AGENDA
-                                                    </Button>
-                                                </div>
-                                                <div className="mt-8 pt-6 border-t border-slate-100">
-                                                     <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3 text-center">Calendario {new Date().toLocaleString('default', { month: 'long' })}</h4>
-                                                     <div className="grid grid-cols-7 gap-1 text-center mb-1">{['D','L','M','M','J','V','S'].map((d, i) => <div key={i} className="text-[10px] text-slate-300 font-bold">{d}</div>)}</div>
-                                                     <div className="grid grid-cols-7 gap-1">{[...Array(30)].map((_, i) => (<div key={i} className={`h-6 w-6 flex items-center justify-center rounded-full text-[10px] ${i+1 === new Date().getDate() ? 'bg-blue-600 text-white font-bold' : 'text-slate-500 hover:bg-slate-100'} ${hasEvent(i+1) && !(i+1 === new Date().getDate()) ? 'border border-blue-400 text-blue-600 font-bold' : ''}`}>{i+1}</div>))}</div>
+
+                                                    {/* Segunda Fila: Detalle y Botón */}
+                                                    <div className="grid grid-cols-[1fr_200px] gap-6 items-end">
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-xs font-bold text-slate-500 uppercase">Nota / Detalle</label>
+                                                            <Input className="h-10 text-sm" placeholder="Ej: Confirmar pago del recibo..." value={reminderNote} onChange={e => setReminderNote(e.target.value)}/>
+                                                        </div>
+                                                        <Button className="h-10 bg-slate-900 text-white hover:bg-blue-600 font-bold shadow-md w-full" onClick={() => {onAddReminder(op.id, reminderDate, reminderTime, reminderNote, reminderType); setReminderNote("")}}>
+                                                            <Save size={16} className="mr-2"/> GUARDAR
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="w-[60%] p-6 overflow-y-auto bg-slate-50/50">
-                                                <h4 className="text-xs font-bold text-slate-400 uppercase mb-4">Línea de Tiempo</h4>
-                                                <div className="space-y-8">
-                                                    <div className="relative pl-10 border-l-2 border-blue-500">
-                                                        <div className="absolute -left-[9px] top-0 h-5 w-5 rounded-full bg-blue-600 border-4 border-white shadow-sm flex items-center justify-center z-10"><div className="h-1.5 w-1.5 bg-white rounded-full"/></div>
-                                                        <h5 className="text-xs font-black text-blue-700 mb-3 uppercase tracking-wider leading-none pt-1">Hoy</h5>
-                                                        {todayReminders.length > 0 ? todayReminders.map((r: any) => (
-                                                            <div key={r.id} className={`bg-white p-3 rounded-lg border-l-4 border shadow-sm mb-2 flex justify-between items-center group hover:shadow-md transition-all ${getReminderColor(r.type)} border-slate-100`}>
-                                                                <div><div className="flex items-center gap-2 mb-1">{getReminderIcon(r.type)}<span className="font-black text-slate-700 text-xs">{r.time} hs</span></div><span className="text-xs text-slate-600 font-medium">{r.note}</span></div>
-                                                                <Button size="icon" variant="ghost" className="h-6 w-6 text-slate-300 hover:text-green-500"><CheckSquare size={14}/></Button>
+
+                                            {/* Parte Inferior: Línea de Tiempo */}
+                                            <div className="flex-1 overflow-y-auto pr-2">
+                                                <div className="flex items-center justify-between mb-4">
+                                                    <h4 className="text-xs font-bold text-slate-400 uppercase">Próximos Eventos</h4>
+                                                    <Badge variant="outline" className="bg-white">Hoy: {todayReminders.length}</Badge>
+                                                </div>
+                                                
+                                                <div className="space-y-3 pl-4 border-l-2 border-slate-200 ml-3">
+                                                    {todayReminders.length > 0 ? todayReminders.map((r: any) => (
+                                                        <div key={r.id} className={`bg-white p-4 rounded-xl border border-slate-100 shadow-sm relative group hover:shadow-md transition-all ${getReminderColor(r.type).replace('border-l-', 'border-l-4 ')}`}>
+                                                            <div className="absolute -left-[21px] top-4 h-3 w-3 rounded-full bg-slate-400 border-2 border-white group-hover:bg-blue-500 transition-colors"></div>
+                                                            <div className="flex justify-between items-start">
+                                                                <div>
+                                                                    <div className="flex items-center gap-2 mb-1">
+                                                                        {getReminderIcon(r.type)}
+                                                                        <span className="font-black text-slate-700 text-sm">{r.time} hs</span>
+                                                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">{r.type === 'call' ? 'Llamada' : r.type === 'meeting' ? 'Reunión' : 'Tarea'}</span>
+                                                                    </div>
+                                                                    <p className="text-sm text-slate-600 font-medium">{r.note}</p>
+                                                                </div>
+                                                                <Button size="sm" variant="ghost" className="h-8 w-8 text-slate-300 hover:text-green-500 hover:bg-green-50 rounded-full">
+                                                                    <CheckSquare size={18}/>
+                                                                </Button>
                                                             </div>
-                                                        )) : <p className="text-[10px] text-slate-400 italic">No hay tareas para hoy.</p>}
-                                                    </div>
+                                                        </div>
+                                                    )) : (
+                                                        <div className="text-center py-10 text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
+                                                            <CalendarIcon className="mx-auto mb-2 opacity-20" size={32}/>
+                                                            <p className="text-xs">No hay eventos programados para hoy.</p>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

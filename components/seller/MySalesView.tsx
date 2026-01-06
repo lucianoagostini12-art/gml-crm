@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -13,14 +13,14 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DollarSign, XCircle, AlertTriangle,
   Clock, MessageSquare, Send, User, MapPin, Paperclip,
-  CheckCheck, StickyNote, UploadCloud, Calendar as CalendarIcon,
-  FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock
+  CheckCheck, UploadCloud, Calendar as CalendarIcon,
+  FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock, Trash2, FileText, ChevronLeft, ChevronRight
 } from "lucide-react"
 
 // ✅ Storage config
 const STORAGE_BUCKET = "lead-documents"
 
-// --- COMPONENTES UI INTERNOS ---
+// --- HELPERS UI ---
 
 function TabTrigger({ value, label, icon }: any) {
   return (
@@ -59,6 +59,20 @@ function ChatBubble({ user, text, time, isMe }: any) {
   )
 }
 
+// --- COLORES DE PREPAGAS ---
+const getPrepagaBadge = (prepaga: string) => {
+    const p = prepaga || "Generica"
+    switch (p) {
+        case "Prevención Salud": return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+        case "DoctoRed": return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+        case "Avalian": return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+        case "Swiss Medical": return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+        case "Galeno": return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+        case "AMPF": return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+        default: return "bg-slate-50 border-slate-100 text-slate-800"
+    }
+}
+
 // --- HELPERS DE ESTADO ---
 const getAdminStatus = (status: string) => {
   switch (status?.toLowerCase()) {
@@ -85,10 +99,12 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
   const [selectedSale, setSelectedSale] = useState<any>(null)
   const [activeTab, setActiveTab] = useState("chat")
   
-  // Estados para Chat Real
+  // FILTRO INTELIGENTE DE FECHAS
+  const [currentDate, setCurrentDate] = useState(new Date())
+  
+  // Estados para Chat
   const [chatMessages, setChatMessages] = useState<any[]>([])
   const [chatMsg, setChatMsg] = useState("")
-  // ✅ Nuevo: Mapa de últimos mensajes para notificaciones visuales
   const [latestMsgMap, setLatestMsgMap] = useState<Record<string, any>>({})
 
   // Estados Documentos
@@ -99,78 +115,74 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Scroll automático al abrir chat o enviar mensaje
-  useEffect(() => {
-    if (selectedSale && scrollRef.current) {
-      setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
-    }
-  }, [chatMessages, activeTab, selectedSale])
+  // Handlers de Fecha
+  const handlePrevMonth = () => {
+      const newDate = new Date(currentDate)
+      newDate.setMonth(newDate.getMonth() - 1)
+      setCurrentDate(newDate)
+  }
+  const handleNextMonth = () => {
+      const newDate = new Date(currentDate)
+      newDate.setMonth(newDate.getMonth() + 1)
+      setCurrentDate(newDate)
+  }
 
-  // --- 1. CARGA DE LISTA DE VENTAS ---
+  // --- 1. CARGA DE LISTA DE VENTAS (Con Filtro de Mes) ---
   const fetchSales = async () => {
     setLoading(true)
+    
+    // Calculamos rango del mes seleccionado
+    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString()
+    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString()
+
     const { data } = await supabase
       .from("leads")
       .select("*")
-      .eq("agent_name", userName) // Solo mis ventas
-      .not("status", "in", '("nuevo","contactado","cotizacion")') // Solo las ingresadas como venta
+      .eq("agent_name", userName)
+      .not("status", "in", '("nuevo","contactado","cotizacion","perdido")') 
+      .gte("created_at", startOfMonth) // Desde principio de mes
+      .lte("created_at", endOfMonth)   // Hasta fin de mes
       .order("last_update", { ascending: false })
 
     if (data) {
       setSales(data)
-      fetchLatestMessages(data) // Buscamos alertas de mensajes
-      
-      // Si hay una seleccionada, refrescar sus datos básicos (estado, etc)
+      fetchLatestMessages(data)
       if (selectedSale) {
         const updatedSelected = data.find((s) => s.id === selectedSale.id)
-        // Corrección del error de TypeScript aquí: especificamos el tipo 'any' para 'prev'
         if (updatedSelected) setSelectedSale((prev: any) => ({...prev, ...updatedSelected}))
       }
     }
     setLoading(false)
   }
 
-  // ✅ Función para detectar si hay mensajes nuevos de Ops
   const fetchLatestMessages = async (salesData: any[]) => {
       if (!salesData.length) return
       const ids = salesData.map(s => s.id)
-      
-      // Traemos los mensajes de estos leads ordenados por fecha
-      const { data } = await supabase
-          .from('lead_messages')
-          .select('lead_id, sender, created_at')
-          .in('lead_id', ids)
-          .order('created_at', { ascending: false }) // Los más nuevos primero
+      const { data } = await supabase.from('lead_messages').select('lead_id, sender, created_at').in('lead_id', ids).order('created_at', { ascending: false })
 
       if (data) {
           const map: any = {}
-          data.forEach((msg: any) => {
-              // Como viene ordenado, el primero que encontramos es el último
-              if (!map[msg.lead_id]) {
-                  map[msg.lead_id] = msg
-              }
-          })
+          data.forEach((msg: any) => { if (!map[msg.lead_id]) map[msg.lead_id] = msg })
           setLatestMsgMap(map)
       }
   }
 
   useEffect(() => {
     fetchSales()
-
-    // Suscripción a cambios en la lista (ej: Ops cambia estado)
-    const channel = supabase
-      .channel("my_sales_list_realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `agent_name=eq.${userName}` }, () => {
-        fetchSales()
-      })
+    const channel = supabase.channel("my_sales_list_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `agent_name=eq.${userName}` }, () => fetchSales())
       .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [userName, currentDate]) 
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [userName])
+  // --- 2. CARGA DE DETALLES ---
+  const fetchDocs = async (leadId: string) => {
+    setDocsLoading(true)
+    const { data } = await supabase.from("lead_documents").select("*").eq("lead_id", leadId).order("uploaded_at", { ascending: false })
+    if (data) setDocs(data)
+    setDocsLoading(false)
+  }
 
-  // --- 2. CARGA DE DETALLES (CHAT Y DOCS) CUANDO SE ABRE UNA VENTA ---
   useEffect(() => {
     if (!selectedSale?.id) {
         setChatMessages([])
@@ -178,14 +190,8 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         return
     }
 
-    // A. Cargar Chat Real
     const fetchMessages = async () => {
-        const { data } = await supabase
-            .from('lead_messages')
-            .select('*')
-            .eq('lead_id', selectedSale.id)
-            .order('created_at', { ascending: true })
-        
+        const { data } = await supabase.from('lead_messages').select('*').eq('lead_id', selectedSale.id).order('created_at', { ascending: true })
         if (data) {
             const mapped = data.map(m => ({
                 id: m.id,
@@ -199,30 +205,11 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         }
     }
 
-    // B. Cargar Docs Reales
-    const fetchDocs = async () => {
-        setDocsLoading(true)
-        const { data } = await supabase
-          .from("lead_documents")
-          .select("*")
-          .eq("lead_id", selectedSale.id)
-          .order("uploaded_at", { ascending: false })
-    
-        if (data) setDocs(data)
-        setDocsLoading(false)
-    }
-
     fetchMessages()
-    fetchDocs()
+    fetchDocs(selectedSale.id)
 
-    // C. Suscripción al Chat de ESTA venta
     const chatChannel = supabase.channel(`sales_chat:${selectedSale.id}`)
-        .on('postgres_changes', { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'lead_messages', 
-            filter: `lead_id=eq.${selectedSale.id}`
-        }, (payload) => {
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages', filter: `lead_id=eq.${selectedSale.id}`}, (payload) => {
             const m = payload.new
             setChatMessages(prev => [...prev, {
                 id: m.id,
@@ -237,25 +224,26 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
 
     return () => { supabase.removeChannel(chatChannel) }
 
-  }, [selectedSale?.id]) // Se ejecuta solo cuando cambia el ID seleccionado
+  }, [selectedSale?.id])
 
   // --- ACCIONES ---
-  
   const sendMessage = async () => {
     if (!chatMsg.trim() || !selectedSale) return
-
-    // Insertar en la tabla real
     const { error } = await supabase.from('lead_messages').insert({
         lead_id: selectedSale.id,
         sender: userName,
         text: chatMsg,
-        target_role: 'admin' // Para que Ops sepa que es para ellos
+        target_role: 'admin'
     })
+    if (!error) setChatMsg("")
+  }
 
-    if (!error) {
-        setChatMsg("")
-        // El realtime actualiza la UI
-    }
+  // ✅ HANDLER UNIFICADO DE SUBIDA (Trigger)
+  const handleUploadClick = () => {
+      // Importante: Esto fuerza el click en el input oculto
+      if (fileInputRef.current) {
+          fileInputRef.current.click();
+      }
   }
 
   const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -265,7 +253,6 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
       if (!files || files.length === 0) return
 
       setUploading(true)
-
       const leadId = selectedSale.id
 
       for (const file of Array.from(files)) {
@@ -278,7 +265,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         })
 
         if (upErr) {
-          console.error("upload error:", upErr)
+          alert(`Error subiendo ${file.name}: ${upErr.message}`)
           continue
         }
 
@@ -293,14 +280,10 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         })
       }
 
-      // Refresco manual de docs
-      const { data } = await supabase
-          .from("lead_documents")
-          .select("*")
-          .eq("lead_id", leadId)
-          .order("uploaded_at", { ascending: false })
-      if(data) setDocs(data)
+      await fetchDocs(leadId)
 
+    } catch (error: any) {
+      alert("Error inesperado: " + error.message)
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
@@ -312,42 +295,57 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
     return data.publicUrl
   }
 
+  const handleDeleteFile = async (file: any) => {
+      if(!confirm("¿Borrar este archivo?")) return
+      
+      const { error: dbErr } = await supabase.from('lead_documents').delete().eq('id', file.id)
+      if(dbErr) return alert("No se pudo borrar de la base de datos")
+      
+      const { error: storageErr } = await supabase.storage.from(STORAGE_BUCKET).remove([file.file_path])
+      fetchDocs(selectedSale.id)
+  }
+
   const priceFormatter = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })
 
   return (
     <div className="p-6 h-full overflow-y-auto w-full bg-white dark:bg-slate-950 text-slate-900">
-      {/* HEADER */}
-      <div className="flex justify-between items-center mb-8">
+      
+      {/* HEADER + FILTRO FECHAS */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
           <h2 className="text-2xl font-black flex items-center gap-2 text-slate-800">
             <DollarSign className="h-6 w-6 text-green-600" /> Mis Ventas Ingresadas
           </h2>
           <p className="text-slate-500 text-sm flex items-center gap-2">
-            {loading ? (
-              <span className="flex items-center gap-1">
-                <RefreshCw className="animate-spin h-3 w-3" /> Sincronizando...
-              </span>
-            ) : (
-              "Panel en tiempo real"
-            )}
+            {loading ? <span className="flex items-center gap-1"><RefreshCw className="animate-spin h-3 w-3" /> Sincronizando...</span> : "Panel en tiempo real"}
           </p>
+        </div>
+
+        {/* CONTROLES DE FECHA */}
+        <div className="flex items-center bg-slate-100 rounded-lg p-1 shadow-sm border border-slate-200">
+            <Button variant="ghost" size="icon" onClick={handlePrevMonth} className="h-8 w-8 hover:bg-white rounded-md text-slate-500">
+                <ChevronLeft size={16}/>
+            </Button>
+            <div className="px-4 text-sm font-bold text-slate-700 w-32 text-center capitalize">
+                {currentDate.toLocaleString('es-AR', { month: 'long', year: 'numeric' })}
+            </div>
+            <Button variant="ghost" size="icon" onClick={handleNextMonth} className="h-8 w-8 hover:bg-white rounded-md text-slate-500">
+                <ChevronRight size={16}/>
+            </Button>
         </div>
       </div>
 
-      {/* LISTADO DE TARJETAS */}
-      <div className="grid gap-4 pb-20">
+      {/* LISTADO DE TARJETAS (MÁS ANGOSTO: max-w-4xl) */}
+      <div className="grid gap-4 pb-20 max-w-4xl mx-auto md:mx-0">
         {sales.length === 0 && !loading && (
           <div className="text-center py-20 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-            <p className="text-slate-400 font-medium">No tenés ventas ingresadas aún.</p>
-            <p className="text-xs text-slate-400 mt-1">Usá el botón "Cargar Venta" del menú lateral.</p>
+            <p className="text-slate-400 font-medium">No hay ventas registradas en este período.</p>
           </div>
         )}
 
         {sales.map((sale) => {
           const adminStatus = getAdminStatus(sale.status)
           const isRejected = sale.status === "rechazado" || sale.status === "demoras"
-          
-          // ✅ LÓGICA DE AVISO VISUAL (Si el último mensaje NO es mío, es una respuesta)
           const lastMsg = latestMsgMap[sale.id]
           const hasNewMessage = lastMsg && lastMsg.sender !== userName
 
@@ -355,33 +353,38 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
             <Card
               key={sale.id}
               onClick={() => setSelectedSale(sale)}
-              className={`cursor-pointer hover:shadow-lg transition-all border-l-4 relative group ${isRejected ? "border-l-red-500 bg-red-50/10" : "border-l-blue-500"}`}
+              className={`cursor-pointer hover:shadow-xl hover:translate-x-1 transition-all border-l-[6px] relative group ${isRejected ? "border-l-red-500 bg-red-50/10" : "border-l-blue-500"} shadow-sm`}
             >
-              <CardContent className="p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                <div>
-                  <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                    {sale.name || "Sin Nombre"} 
-                    <Badge variant="secondary" className="text-[10px]">{sale.prepaga}</Badge>
-                    
-                    {/* ✅ BADGE DE MENSAJE NUEVO */}
-                    {hasNewMessage && (
-                        <Badge className="bg-orange-100 text-orange-700 border border-orange-200 animate-pulse text-[10px] gap-1 px-2">
-                            <MessageSquare size={10} fill="currentColor"/> Nueva Respuesta
-                        </Badge>
-                    )}
-                  </h4>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="text-xs text-slate-500 flex items-center gap-1">
+              <CardContent className="p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-1">
+                      <h4 className="font-bold text-lg text-slate-800 truncate">{sale.name || "Sin Nombre"}</h4>
+                      <Badge variant="outline" className={`text-[9px] font-bold h-5 px-2 ${getPrepagaBadge(sale.prepaga)}`}>
+                          {sale.prepaga}
+                      </Badge>
+                      {hasNewMessage && (
+                          <Badge className="bg-orange-500 text-white border-0 animate-pulse text-[9px] h-5 px-2">
+                              <MessageSquare size={10} className="mr-1" fill="currentColor"/> 1
+                          </Badge>
+                      )}
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1">
                       <CalendarIcon size={12} /> {new Date(sale.created_at).toLocaleDateString()}
                     </span>
+                    <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
+                        Plan: <span className="font-bold text-slate-700">{sale.plan}</span>
+                    </span>
                     {sale.sub_state && (
-                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                      <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase ml-auto sm:ml-0">
                         {sale.sub_state}
                       </span>
                     )}
                   </div>
                 </div>
-                <div className={`px-4 py-2 rounded-lg border flex items-center gap-2 text-xs font-black uppercase tracking-wider ${adminStatus.color}`}>
+                
+                <div className={`px-4 py-2 rounded-lg border flex items-center gap-2 text-[10px] font-black uppercase tracking-wider shadow-sm whitespace-nowrap shrink-0 ${adminStatus.color}`}>
                   {adminStatus.icon} {adminStatus.label}
                 </div>
               </CardContent>
@@ -398,6 +401,16 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         >
           <DialogTitle className="sr-only">Detalle de Venta</DialogTitle>
 
+          {/* ----- IMPORTANTE: INPUT OCULTO FUERA DE TABS ----- */}
+          {/* Al sacarlo de las tabs, aseguramos que siempre esté renderizado y disponible */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            multiple 
+            onChange={onFilesSelected} 
+          />
+
           {/* CABECERA MODAL */}
           <div className="px-8 py-6 border-b bg-slate-50/50 flex flex-row justify-between items-center shrink-0">
             <div className="flex items-center gap-6">
@@ -409,7 +422,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
               <div>
                 <h2 className="text-3xl font-black text-slate-800">{selectedSale?.name}</h2>
                 <div className="flex gap-2 mt-2">
-                  <Badge className="bg-slate-900 text-white border-0">{selectedSale?.prepaga}</Badge>
+                  <Badge className={`border-0 ${getPrepagaBadge(selectedSale?.prepaga)}`}>{selectedSale?.prepaga}</Badge>
                   <Badge variant="outline" className="bg-white text-slate-700">{selectedSale?.plan}</Badge>
                 </div>
               </div>
@@ -418,11 +431,6 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
               <Badge className={`h-8 px-4 text-xs font-bold uppercase tracking-widest ${getAdminStatus(selectedSale?.status).color}`}>
                 {getAdminStatus(selectedSale?.status).label}
               </Badge>
-              {selectedSale?.sub_state && (
-                <div className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded border border-blue-100 mt-2 text-center">
-                  {selectedSale?.sub_state}
-                </div>
-              )}
             </div>
           </div>
 
@@ -430,11 +438,8 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
             {/* COLUMNA IZQ: DATOS (SOLO LECTURA) */}
             <ScrollArea className="w-[55%] border-r border-slate-100 bg-white shrink-0">
               <div className="p-8 space-y-8">
-                {/* SECCION DATOS */}
                 <section className="space-y-4">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2 flex gap-2">
-                    <User size={14} /> Datos Personales
-                  </h4>
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2 flex gap-2"><User size={14} /> Datos Personales</h4>
                   <div className="grid grid-cols-2 gap-6">
                     <ReadOnlyField label="DNI / CUIL" value={selectedSale?.dni} />
                     <ReadOnlyField label="Teléfono" value={selectedSale?.phone} />
@@ -443,39 +448,25 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                   </div>
                 </section>
 
-                {/* SECCION ECONOMICOS */}
                 <section className="space-y-4">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2 flex gap-2">
-                    <DollarSign size={14} /> Económicos
-                  </h4>
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2 flex gap-2"><DollarSign size={14} /> Económicos</h4>
                   <div className="grid grid-cols-2 gap-6">
-                    <ReadOnlyField
-                      label="Precio Lista"
-                      value={priceFormatter.format(selectedSale?.full_price || selectedSale?.price || 0)}
-                      color="text-lg font-bold text-slate-800"
-                    />
+                    <ReadOnlyField label="Precio Lista" value={priceFormatter.format(selectedSale?.full_price || selectedSale?.price || 0)} color="text-lg font-bold text-slate-800"/>
                     <ReadOnlyField label="Aportes" value={priceFormatter.format(selectedSale?.aportes || 0)} />
                   </div>
                 </section>
 
-                {/* SECCION NOTAS ADMIN */}
                 {selectedSale?.admin_notes && (
                   <section className="space-y-4 pt-4 border-t border-red-100">
-                    <h4 className="text-xs font-black text-red-500 uppercase tracking-widest flex gap-2">
-                      <AlertTriangle size={14} /> Notas de Administración
-                    </h4>
-                    <div className="space-y-2">
-                        {/* Renderizado de notas JSON o Texto */}
-                        <div className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm text-red-800">
-                          {typeof selectedSale.admin_notes === 'string' ? selectedSale.admin_notes : 'Ver historial'}
-                        </div>
+                    <h4 className="text-xs font-black text-red-500 uppercase tracking-widest flex gap-2"><AlertTriangle size={14} /> Notas de Administración</h4>
+                    <div className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm text-red-800">
+                      {typeof selectedSale.admin_notes === 'string' ? selectedSale.admin_notes : 'Ver historial'}
                     </div>
                   </section>
                 )}
               </div>
             </ScrollArea>
 
-            {/* COLUMNA DER: CHAT INTERACTIVO REAL */}
             <div className="flex-1 flex flex-col bg-slate-50/50">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
                 <div className="px-8 pt-4 border-b bg-white">
@@ -486,119 +477,43 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                 </div>
 
                 <TabsContent value="chat" className="flex-1 flex flex-col m-0 p-0 overflow-hidden">
-                  <ScrollArea
-                    className="flex-1 p-8 bg-[#e5ddd5]"
-                    style={{
-                      backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')",
-                      backgroundBlendMode: "overlay",
-                    }}
-                  >
+                  <ScrollArea className="flex-1 p-8 bg-[#e5ddd5]" style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundBlendMode: "overlay" }}>
                     <div className="space-y-4">
-                      {chatMessages.length === 0 && (
-                        <div className="text-center p-4 bg-white/80 rounded-lg text-xs text-slate-500 shadow-sm mx-auto w-fit">
-                          Inicio del chat con Administración
-                        </div>
-                      )}
                       {chatMessages.map((msg: any, i: number) => <ChatBubble key={i} {...msg} />)}
                       <div ref={scrollRef} />
                     </div>
                   </ScrollArea>
-
                   <div className="p-4 bg-white border-t flex gap-3 shadow-lg z-10">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="text-slate-400 hover:text-slate-600"
-                      title="Adjuntar archivos"
-                      disabled={uploading}
-                    >
-                      <Paperclip size={20} />
-                    </Button>
-
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      multiple
-                      onChange={onFilesSelected}
-                    />
-
-                    <Input
-                      className="h-11 border-slate-200 focus-visible:ring-blue-500"
-                      placeholder="Escribí un mensaje..."
-                      value={chatMsg}
-                      onChange={(e) => setChatMsg(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                    />
-
-                    <Button
-                      size="icon"
-                      className="h-11 w-11 bg-blue-600 hover:bg-blue-700 shadow-md shrink-0"
-                      onClick={sendMessage}
-                    >
-                      <Send size={20} />
-                    </Button>
+                    <Button variant="ghost" size="icon" onClick={handleUploadClick} className="text-slate-400 hover:text-slate-600"><Paperclip size={20} /></Button>
+                    <Input className="h-11 border-slate-200" placeholder="Escribí un mensaje..." value={chatMsg} onChange={(e) => setChatMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendMessage()} />
+                    <Button size="icon" className="h-11 w-11 bg-blue-600 hover:bg-blue-700 shadow-md shrink-0" onClick={sendMessage}><Send size={20} /></Button>
                   </div>
                 </TabsContent>
 
                 <TabsContent value="files" className="p-8 flex flex-col gap-4 m-0 h-full">
-                  {/* CAJA DE SUBIDA */}
-                  <div
-                    className="border-2 border-dashed border-slate-300 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:bg-blue-50 cursor-pointer transition-colors"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
+                  <div className="border-2 border-dashed border-slate-300 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:bg-blue-50 cursor-pointer transition-colors" onClick={handleUploadClick}>
                     <UploadCloud className="text-slate-400 mb-2" size={32} />
-                    <p className="text-sm font-bold text-slate-600">
-                      {uploading ? "Subiendo..." : "Subir Archivos"}
-                    </p>
+                    <p className="text-sm font-bold text-slate-600">{uploading ? "Subiendo..." : "Subir Archivos"}</p>
                     <p className="text-xs text-slate-400 mt-1">Fotos DNI, Recibos, Formularios</p>
                   </div>
-
-                  {/* LISTA DE ARCHIVOS REAL */}
                   <div className="flex-1 overflow-hidden">
-                    <div className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">
-                      Archivos cargados
-                    </div>
-
+                    <div className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Archivos cargados ({docs.length})</div>
                     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                       <ScrollArea className="h-[360px]">
                         <div className="p-4 space-y-3">
-                          {docsLoading ? (
-                            <div className="text-center text-xs text-slate-400 py-6">Cargando archivos...</div>
-                          ) : docs.length === 0 ? (
-                            <div className="text-center text-xs text-slate-400 py-6">Todavía no hay archivos.</div>
-                          ) : (
-                            docs.map((d: any) => {
+                           {docs.map((d: any) => {
                               const filename = d.name || (d.file_path || "").split("/").pop()
-                              const created = d.uploaded_at ? new Date(d.uploaded_at).toLocaleString("es-AR") : ""
                               const url = d.file_path ? getPublicUrl(d.file_path) : "#"
-
                               return (
-                                <a
-                                  key={d.id}
-                                  href={url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="block p-3 rounded-lg border border-slate-200 hover:bg-blue-50 transition-colors"
-                                >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <div className="text-sm font-bold text-slate-800 truncate">
-                                        {filename}
-                                      </div>
-                                      <div className="text-[10px] text-slate-400 font-bold mt-1">
-                                        {created}
-                                      </div>
-                                    </div>
-                                    <div className="shrink-0 text-[10px] font-black px-2 py-1 rounded bg-slate-100 text-slate-600">
-                                      VER
-                                    </div>
-                                  </div>
-                                </a>
+                                <div key={d.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-200 hover:bg-blue-50 transition-colors">
+                                  <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-3 flex-1 min-w-0">
+                                    <FileText className="text-blue-500 shrink-0" size={18}/>
+                                    <span className="text-sm font-bold text-slate-800 truncate">{filename}</span>
+                                  </a>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-500" onClick={() => handleDeleteFile(d)}><Trash2 size={16}/></Button>
+                                </div>
                               )
-                            })
-                          )}
+                            })}
                         </div>
                       </ScrollArea>
                     </div>

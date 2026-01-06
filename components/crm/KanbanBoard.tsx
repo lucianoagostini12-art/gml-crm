@@ -28,7 +28,7 @@ const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-previ
 const ACTIVE_COLUMNS = [
     { id: "nuevo", title: "Sin Trabajar 📥", color: "bg-slate-100 dark:bg-[#18191A] border dark:border-[#3E4042]" },
     { id: "contactado", title: "En Contacto 📞", color: "bg-blue-50 dark:bg-[#18191A] border dark:border-[#3E4042]" },
-    { id: "cotizacion", title: "Cotizando 💲", color: "bg-yellow-50 dark:bg-[#18191A] border dark:border-[#3E4042]" },
+    { id: "cotizacion", title: "Cotización 💲", color: "bg-yellow-50 dark:bg-[#18191A] border dark:border-[#3E4042]" },
     { id: "documentacion", title: "Documentación 📂", color: "bg-purple-50 dark:bg-[#18191A] border dark:border-[#3E4042]" },
 ]
 

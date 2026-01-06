@@ -147,21 +147,14 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
-    // === CORRECCIÓN FILTRO Y TIPADO ===
+    // === AQUÍ ESTÁ LA CORRECCIÓN CRÍTICA EN FETCHOPERATIONS ===
     const fetchOperations = async () => {
         setIsLoading(true)
         
-        // 1. SOLUCIÓN ERROR 400: Usamos un filtro positivo .in() con Array real.
-        // Esto le dice a Supabase explícitamente qué estados queremos.
+        // 1. SOLUCIÓN ERROR 400: Filtro con Array explícito
         const opsStatuses = [
-            'ingresado', 
-            'precarga', 
-            'medicas', 
-            'legajo', 
-            'demoras', 
-            'cumplidas', 
-            'rechazado',
-            'vendido' // Incluimos vendido por seguridad
+            'ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 
+            'cumplidas', 'rechazado', 'vendido'
         ];
 
         const { data, error } = await supabase
@@ -178,7 +171,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (data) {
             const mappedOps: any = data.map((op: any) => {
                 
-                // 2. SOLUCIÓN BUILD ERROR: Tipado explícito de safeChat como any[]
+                // 2. SOLUCIÓN CRASH DE PANTALLA (TypeError: .map is not a function)
                 let safeChat: any[] = [];
                 try {
                     let rawComments = op.comments;
@@ -200,13 +193,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     safeChat = [];
                 }
 
+                // 3. SOLUCIÓN DATOS FANTASMA (Normalización)
                 return {
                     id: op.id,
                     clientName: op.name || "Sin Nombre",
                     dni: op.dni || "S/D",
                     plan: op.plan || op.quoted_plan || "-",
                     prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
-                    // Normalización de estados
                     status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
                     subState: op.sub_state || "Pendiente",
                     seller: op.agent_name || "Desconocido",
@@ -215,7 +208,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
                     type: op.type || "alta",
                     phone: op.phone || "",
-                    chat: safeChat, // Chat seguro tipado
+                    chat: safeChat, // USAMOS EL CHAT SEGURO
                     adminNotes: op.admin_notes || [], 
                     reminders: (op.reminders || []).map((r: any) => ({
                         id: r.id, text: r.text, date: r.date, completed: r.completed
@@ -253,15 +246,19 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchPermissions()
         fetchSystemConfig() 
         fetchOperations()
-        fetchNotifications() // Cargar al inicio
+        fetchNotifications() 
         
         // --- REALTIME ---
         const channel = supabase.channel('ops-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
+                
+                // CORRECCIÓN REALTIME: Casting a 'any' para evitar error de Build en Vercel
+                const newData = payload.new as any
+
                 // Solo refrescamos si es un cambio relevante para Ops
-                if (['ingresado','vendido','precarga','medicas','legajo','demoras','cumplidas','rechazado'].includes(payload.new.status)) {
-                    if(payload.eventType === 'INSERT' && (payload.new.status === 'vendido' || payload.new.status === 'ingresado')) {
-                        setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
+                if (newData && ['ingresado','vendido','precarga','medicas','legajo','demoras','cumplidas','rechazado'].includes(newData.status)) {
+                    if(payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) {
+                        setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
                     }
                     fetchOperations() 
                 }
@@ -371,8 +368,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (!selectedOp) return
         const newMsg = { text, author: userName, date: new Date().toISOString(), role: 'ops' }
         
+        // Fetch comments actuales con seguridad
         const { data: currentData } = await supabase.from('leads').select('comments').eq('id', selectedOp.id).single()
         
+        // Aseguramos que sea array
         let existingComments = currentData?.comments;
         if (typeof existingComments === 'string') {
              try { existingComments = JSON.parse(existingComments) } catch(e) { existingComments = [] }
@@ -381,6 +380,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
+        
         if (!error) {
             const uiMsg: any = { 
                 message: text,

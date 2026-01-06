@@ -127,10 +127,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- CARGA DE NOTIFICACIONES (REAL) ---
     const fetchNotifications = async () => {
+        // Traemos las notificaciones para este usuario o globales si es admin
         const { data } = await supabase
             .from('notifications')
             .select('*')
-            .eq('user_name', userName) 
+            .eq('user_name', userName) // Opcional: Si quieres que Ops vea todo, quita este filtro
             .eq('read', false)
             .order('created_at', { ascending: false })
             .limit(20)
@@ -140,20 +141,27 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const markAllRead = async () => {
         const ids = notifications.map(n => n.id)
-        setNotifications([]) 
+        setNotifications([]) // UI update rapido
         if (ids.length > 0) {
             await supabase.from('notifications').update({ read: true }).in('id', ids)
         }
     }
 
-    // === SOLUCIÓN CRÍTICA: ERROR 400 + CRASH DE MAPEO ===
+    // === CORRECCIÓN FILTRO Y TIPADO ===
     const fetchOperations = async () => {
         setIsLoading(true)
         
-        // 1. SOLUCIÓN ERROR 400: Filtro con Array explícito
+        // 1. SOLUCIÓN ERROR 400: Usamos un filtro positivo .in() con Array real.
+        // Esto le dice a Supabase explícitamente qué estados queremos.
         const opsStatuses = [
-            'ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 
-            'cumplidas', 'rechazado', 'vendido'
+            'ingresado', 
+            'precarga', 
+            'medicas', 
+            'legajo', 
+            'demoras', 
+            'cumplidas', 
+            'rechazado',
+            'vendido' // Incluimos vendido por seguridad
         ];
 
         const { data, error } = await supabase
@@ -163,16 +171,15 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             .order('last_update', { ascending: false })
 
         if (error) {
-            console.error("❌ Error cargando operaciones:", error)
+            console.error("Error fetching ops:", error)
             showToast("Error de conexión con la base de datos", "error")
         }
 
         if (data) {
             const mappedOps: any = data.map((op: any) => {
                 
-                // 2. SOLUCIÓN CRASH DE PANTALLA (TypeError: .map is not a function)
-                // Analizamos 'comments' de forma segura porque en DB hay basura (objetos en vez de arrays)
-                let safeChat = [];
+                // 2. SOLUCIÓN BUILD ERROR: Tipado explícito de safeChat como any[]
+                let safeChat: any[] = [];
                 try {
                     let rawComments = op.comments;
                     if (typeof rawComments === 'string') {
@@ -193,13 +200,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     safeChat = [];
                 }
 
-                // 3. SOLUCIÓN DATOS FANTASMA (Normalización)
                 return {
                     id: op.id,
                     clientName: op.name || "Sin Nombre",
                     dni: op.dni || "S/D",
                     plan: op.plan || op.quoted_plan || "-",
                     prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
+                    // Normalización de estados
                     status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
                     subState: op.sub_state || "Pendiente",
                     seller: op.agent_name || "Desconocido",
@@ -208,7 +215,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
                     type: op.type || "alta",
                     phone: op.phone || "",
-                    chat: safeChat, // USAMOS EL CHAT SEGURO
+                    chat: safeChat, // Chat seguro tipado
                     adminNotes: op.admin_notes || [], 
                     reminders: (op.reminders || []).map((r: any) => ({
                         id: r.id, text: r.text, date: r.date, completed: r.completed
@@ -246,17 +253,20 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchPermissions()
         fetchSystemConfig() 
         fetchOperations()
-        fetchNotifications() 
+        fetchNotifications() // Cargar al inicio
         
         // --- REALTIME ---
         const channel = supabase.channel('ops-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
-                if(payload.eventType === 'INSERT' && (payload.new.status === 'vendido' || payload.new.status === 'ingresado')) {
-                    setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
+                // Solo refrescamos si es un cambio relevante para Ops
+                if (['ingresado','vendido','precarga','medicas','legajo','demoras','cumplidas','rechazado'].includes(payload.new.status)) {
+                    if(payload.eventType === 'INSERT' && (payload.new.status === 'vendido' || payload.new.status === 'ingresado')) {
+                        setNewSaleNotif({ client: payload.new.name, plan: payload.new.plan, seller: payload.new.agent_name })
+                    }
+                    fetchOperations() 
                 }
-                // Recargamos siempre ante cambios para asegurar consistencia
-                fetchOperations() 
             })
+            // Escuchar Notificaciones
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
                 if (payload.new.user_name === userName || role === 'admin_god') {
                     setNotifications(prev => [payload.new, ...prev])
@@ -288,9 +298,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'mine' && op.operator !== userName) return false
-        
-        // FILTRO DE PILETA (Mesa de Entrada):
-        // Muestra lo que NO tiene operador asignado Y no está terminado
+        // FILTRO DE PILETA: Oculta si ya tiene operador o si está cumplido/rechazado
         if (viewMode === 'pool' && (op.operator || ['cumplidas','rechazado'].includes(op.status))) return false
         
         if (filterStatus !== 'all' && op.status !== filterStatus) return false
@@ -305,13 +313,16 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- UPDATE SUPABASE (Centralizado y REPARADO) ---
     const updateOpInDb = async (id: string, updates: any) => {
+        // 1. NORMALIZACIÓN PARA LA UI (CamelCase)
         const uiUpdates = { ...updates }
         if (updates.sub_state !== undefined) uiUpdates.subState = updates.sub_state
         if (updates.agent_name !== undefined) uiUpdates.seller = updates.agent_name
         if (updates.name !== undefined) uiUpdates.clientName = updates.name
         
+        // 2. ACTUALIZACIÓN VISUAL (Optimista)
         setOperations(prev => prev.map(o => o.id === id ? { ...o, ...uiUpdates } : o))
         
+        // 3. PREPARACIÓN PARA DB (SnakeCase)
         const dbUpdates: any = {}
         if (uiUpdates.status) dbUpdates.status = uiUpdates.status
         if (uiUpdates.subState !== undefined) dbUpdates.sub_state = uiUpdates.subState
@@ -323,6 +334,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (uiUpdates.clientName !== undefined) dbUpdates.name = uiUpdates.clientName
         else if (uiUpdates.name !== undefined) dbUpdates.name = uiUpdates.name
 
+        // Campos directos
         if (uiUpdates.operator !== undefined) dbUpdates.operator = uiUpdates.operator 
         if (uiUpdates.reminders) dbUpdates.reminders = uiUpdates.reminders
         if (uiUpdates.dni) dbUpdates.dni = uiUpdates.dni
@@ -359,10 +371,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (!selectedOp) return
         const newMsg = { text, author: userName, date: new Date().toISOString(), role: 'ops' }
         
-        // Fetch comments actuales con seguridad
         const { data: currentData } = await supabase.from('leads').select('comments').eq('id', selectedOp.id).single()
         
-        // Aseguramos que sea array
         let existingComments = currentData?.comments;
         if (typeof existingComments === 'string') {
              try { existingComments = JSON.parse(existingComments) } catch(e) { existingComments = [] }
@@ -371,7 +381,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
-        
         if (!error) {
             const uiMsg: any = { 
                 message: text,
@@ -451,8 +460,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         showToast("🔓 Caso liberado", 'success'); 
     }
 
+    // --- CARGA MANUAL (Ahora usa Prepagas Reales de DB) ---
     const handleCreateManualSale = async () => {
         if (!manualLoadData.clientName || !manualLoadData.dni) return;
+
         const { error } = await supabase.from('leads').insert({
             name: manualLoadData.clientName, 
             dni: manualLoadData.dni, 
@@ -466,6 +477,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             type: "alta", 
             source: "Manual Admin"
         })
+
         if (!error) {
             setIsManualLoadOpen(false)
             setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "Oficina", specificSeller: "" }) 

@@ -83,8 +83,6 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       plan: passData.plan,
       
       notes: passData.observations ? `[PASS - OBS]: ${passData.observations}` : null,
-      
-      // files: passData.files // COMENTADO: Evita error 400 por enviar objetos binarios
     })
     handleOpenChange(false)
   }
@@ -105,7 +103,8 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
           const cleanStr = (val: any) => (val && val.trim() !== "") ? val.trim() : null;
           const cleanDate = (val: any) => (val && val !== "") ? val : null;
 
-          // Mapeo ALTA -> DB (CORREGIDO PARA EVITAR ERROR 400)
+          // Mapeo ALTA -> DB
+          // ✅ CORREGIDO: Usamos los nombres en INGLÉS para que Supabase los acepte
           const dbData = {
             type: 'alta',
             status: 'ingresado', 
@@ -124,20 +123,23 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             address_zip: cleanStr(wizardData.cp),
             province: cleanStr(wizardData.provincia),
             
-            // 🔥 CORRECCIÓN CRÍTICA: Mapeo exacto a columnas de DB
-            tipo_afiliacion: cleanStr(wizardData.tipoGrupo), // Antes 'affiliation_type' (Error 400)
+            // CORRECCIÓN 1: Usamos 'affiliation_type' (nombre real en DB)
+            affiliation_type: cleanStr(wizardData.tipoGrupo), 
             
-            // Unificamos cónyuge e hijos en 'family_members' (JSON)
+            // CORRECCIÓN 2: Usamos 'family_members' (nombre real en DB)
             family_members: wizardData.tipoGrupo === 'matrimonio' 
                 ? [{ nombre: wizardData.matrimonioNombre, dni: wizardData.matrimonioDni, rol: 'conyuge' }, ...(wizardData.hijosData || [])] 
                 : (wizardData.hijosData || []),
-
+                
             capitas: 1 + (wizardData.tipoGrupo === 'matrimonio' ? 1 : 0) + (parseInt(wizardData.cantHijos) || 0),
 
             source: cleanStr(wizardData.origen), 
             
-            condicion_laboral: cleanStr(wizardData.condicion),
-            cuit_empleador: cleanStr(wizardData.cuitEmpleador),
+            // CORRECCIÓN 3: Usamos 'labor_condition' (nombre real en DB)
+            labor_condition: cleanStr(wizardData.condicion), 
+            
+            // CORRECCIÓN 4: Usamos 'employer_cuit' (nombre real en DB)
+            employer_cuit: cleanStr(wizardData.cuitEmpleador), 
             
             notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}` + (wizardData.notes ? `\n\n[OBS]: ${wizardData.notes}` : ''),
 
@@ -150,8 +152,6 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             aportes: cleanNum(wizardData.aportes),
             descuento: cleanNum(wizardData.descuento),
             total_a_pagar: cleanNum(wizardData.total_a_pagar),
-            
-            // files: wizardData.archivos // COMENTADO
           }
 
           onConfirm(dbData)

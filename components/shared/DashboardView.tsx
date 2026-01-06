@@ -9,20 +9,47 @@ import { Button } from "@/components/ui/button"
 
 export function DashboardView({ userName }: { userName?: string }) {
   const supabase = createClient()
+  const [currentUser, setCurrentUser] = useState<string | null>(userName || null)
+  
   const [stats, setStats] = useState({ totalLeads: 0, contactados: 0, cotizados: 0, vendidos: 0, callsToday: 0 })
   const [sourceStats, setSourceStats] = useState<any[]>([])
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   const [isAuditExpanded, setIsAuditExpanded] = useState(false)
 
-  const CURRENT_USER = userName || "Maca"
-
+  // 1. IDENTIFICAR AL USUARIO REAL (Si no viene por props, lo buscamos en la sesión)
   useEffect(() => {
+    if (userName) {
+        setCurrentUser(userName)
+    } else {
+        const getUser = async () => {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.user) {
+                // Buscamos el nombre real en la tabla profiles
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('full_name')
+                    .eq('id', session.user.id)
+                    .single()
+                
+                if (profile?.full_name) {
+                    setCurrentUser(profile.full_name)
+                }
+            }
+        }
+        getUser()
+    }
+  }, [userName])
+
+  // 2. TRAER DATOS (Se ejecuta cuando ya tenemos el usuario identificado)
+  useEffect(() => {
+    if (!currentUser) return
+
     const fetchData = async () => {
-      // 1. TRAER LEADS DEL VENDEDOR
+      // A. TRAER LEADS DEL VENDEDOR
       const { data: leads, error: leadsError } = await supabase
         .from("leads")
         .select("*")
-        .eq("agent_name", CURRENT_USER)
+        .eq("agent_name", currentUser)
 
       if (leadsError) {
         console.error("Error cargando leads:", leadsError)
@@ -38,10 +65,10 @@ export function DashboardView({ userName }: { userName?: string }) {
         // Cotizados: Estado 'cotizacion' o que tenga precio cargado
         const cotizados = leads.filter((l: any) => l.status === "cotizacion" || l.quoted_price).length
         
-        // ✅ CORRECCIÓN DE VENTAS: Sumamos todos los estados de éxito
+        // ✅ VENTAS: Sumamos estados de éxito (asegurando minúsculas para evitar errores)
         const estadosVenta = ['ingresado', 'vendido', 'cumplidas', 'legajo', 'medicas', 'precarga']
         const vendidos = leads
-            .filter((l: any) => estadosVenta.includes(l.status))
+            .filter((l: any) => estadosVenta.includes(l.status?.toLowerCase()))
             .reduce((sum: number, l: any) => sum + (Number(l.capitas) || 1), 0) // Sumamos cápitas reales
 
         // Llamadas Hoy
@@ -50,7 +77,7 @@ export function DashboardView({ userName }: { userName?: string }) {
           if (!l.last_update) return false
           const updateDate = new Date(l.last_update).toDateString()
           // Si se tocó hoy y tiene llamadas, cuenta como gestión (excluyendo ventas cerradas)
-          return updateDate === todayStr && (l.calls > 0) && !estadosVenta.includes(l.status)
+          return updateDate === todayStr && (l.calls > 0) && !estadosVenta.includes(l.status?.toLowerCase())
         }).length
 
         setStats({ totalLeads: total, contactados, cotizados, vendidos, callsToday })
@@ -66,7 +93,7 @@ export function DashboardView({ userName }: { userName?: string }) {
           if (!sourcesMap[sourceName]) sourcesMap[sourceName] = { total: 0, won: 0 }
           
           sourcesMap[sourceName].total += 1
-          if (estadosVenta.includes(l.status)) {
+          if (estadosVenta.includes(l.status?.toLowerCase())) {
               sourcesMap[sourceName].won += 1
           }
         })
@@ -83,8 +110,7 @@ export function DashboardView({ userName }: { userName?: string }) {
         setSourceStats(sourceArray)
       }
 
-      // 2. TRAER HISTORIAL REAL (lead_status_history)
-      // Usamos un join simple para traer el nombre del cliente
+      // B. TRAER HISTORIAL REAL (lead_status_history)
       const { data: history, error: historyError } = await supabase
         .from("lead_status_history")
         .select(`
@@ -94,13 +120,11 @@ export function DashboardView({ userName }: { userName?: string }) {
             changed_at,
             leads ( name )
         `)
-        .eq("agent_name", CURRENT_USER)
+        .eq("agent_name", currentUser)
         .order("changed_at", { ascending: false })
         .limit(15)
 
-      if (historyError) {
-        console.error("Error historial:", historyError)
-      } else if (history) {
+      if (!historyError && history) {
         const formattedLogs = history.map((h: any) => ({
             id: h.id,
             action: `Cambio: ${h.to_status?.toUpperCase()}`,
@@ -112,7 +136,17 @@ export function DashboardView({ userName }: { userName?: string }) {
     }
 
     fetchData()
-  }, [CURRENT_USER])
+
+    // 3. ACTIVAR REALTIME (Para que se actualice al instante si vendes)
+    const channel = supabase.channel('dashboard_metrics_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${currentUser}` }, () => {
+            fetchData()
+        })
+        .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+
+  }, [currentUser])
 
   // --- NIVELES (Gamificación) ---
   const getLevel = (sales: number) => {
@@ -130,9 +164,16 @@ export function DashboardView({ userName }: { userName?: string }) {
   const progress = Math.min((stats.vendidos / currentLevel.target) * 100, 100)
   const visibleLogs = isAuditExpanded ? auditLogs : auditLogs.slice(0, 3)
 
+  if (!currentUser) return <div className="p-10 text-center text-slate-400">Cargando perfil...</div>
+
   return (
     <div className="p-6 h-full overflow-y-auto max-w-6xl mx-auto text-slate-900 dark:text-slate-100">
-      <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">Mi Tablero de Control 📈</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold flex items-center gap-2">Mi Tablero de Control 📈</h2>
+        <div className="text-xs text-slate-400 font-medium bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
+            Usuario: {currentUser}
+        </div>
+      </div>
 
       {/* TARJETA DE NIVEL */}
       <Card className="mb-8 border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">

@@ -131,16 +131,13 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas
     }))
 
-    // === AQUÍ ESTÁ EL CAMBIO CRÍTICO (SOLUCIÓN ERROR 400) ===
     const fetchLeads = async () => {
-        // Filtro positivo: Traemos solo lo que el vendedor PUEDE ver
-        // Esto elimina el error de sintaxis .not()
         const visibleStatuses = ['nuevo', 'contactado', 'cotizacion', 'documentacion'];
 
         const { data } = await supabase.from('leads')
             .select('*')
             .eq('agent_name', CURRENT_USER)
-            .in('status', visibleStatuses) // Filtro seguro
+            .in('status', visibleStatuses) 
         
         if (data) setLeads(mapLeads(data))
     }
@@ -163,7 +160,6 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         fetchLeads()
         const channel = supabase.channel('kanban_realtime_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
-                // CORRECCIÓN REALTIME: Casting a 'any' para evitar error de Build
                 const newData = payload.new as any;
 
                 if (payload.eventType === 'INSERT') {
@@ -192,7 +188,6 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         if (found) setOverdueLead(found);
     }, [leads]);
 
-    // --- FUNCIÓN HELPER: LOGUEAR HISTORIAL ---
     const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
         await supabase.from('lead_status_history').insert({
             lead_id: leadId,
@@ -214,14 +209,12 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         
         if (isBurned) newStatus = 'perdido'
 
-        // Optimistic UI Update
         if (isBurned) {
             setLeads(prev => prev.filter(l => l.id !== leadId))
         } else {
             setLeads(prev => prev.map(l => l.id === leadId ? { ...l, calls: newCallCount, notes: updatedNotes } : l))
         }
 
-        // DB Update
         await supabase.from('leads').update({ 
             calls: newCallCount, 
             notes: updatedNotes, 
@@ -230,10 +223,30 @@ export function KanbanBoard({ userName }: { userName?: string }) {
             loss_reason: isBurned ? 'Dato quemado (7 llamados)' : null 
         }).eq('id', leadId)
 
-        // Log History si cambió el estado
         if (isBurned) {
             logHistory(leadId, lead.status, 'perdido')
         }
+    }
+
+    // --- NUEVA FUNCIÓN: MANEJAR CLICK EN AURICULARES ---
+    const handleOmniClick = (leadId: string) => {
+        const lead = leads.find(l => l.id === leadId)
+        if (!lead) return
+
+        // 1. Obtener URL de LocalStorage
+        const omniUrl = localStorage.getItem("omni_url")
+        
+        if (!omniUrl) {
+            alert("⚠️ No tenés configurado tu link de OmniLeads.\nAndá a 'Configuración' en el menú lateral y pegá tu link.")
+            return
+        }
+
+        // 2. Copiar teléfono al portapapeles
+        const cleanPhone = lead.phone.replace(/[^0-9]/g, '')
+        navigator.clipboard.writeText(cleanPhone)
+
+        // 3. Abrir pestaña
+        window.open(omniUrl, '_blank')
     }
 
     const handleDragEnd = async (event: DragEndEvent) => {
@@ -244,11 +257,9 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         const activeLead = leads.find(l => l.id === active.id); 
         if (!activeLead) return
 
-        // DropZones Especiales
         if (over.id === 'zone-perdido') { setLeadProcessingId(active.id as string); setIsLostDialogOpen(true); return }
         if (over.id === 'zone-vendido') { setLeadProcessingId(active.id as string); setIsWonDialogOpen(true); return }
 
-        // Columnas Normales
         let overCol = over.id as string
         const leadTarget = leads.find(l => l.id === overCol);
         if (leadTarget) overCol = leadTarget.status;
@@ -256,25 +267,19 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         const colIdx = (id: string) => ACTIVE_COLUMNS.findIndex(c => c.id === id)
         const isTryingToGoBack = colIdx(overCol) < colIdx(activeLead.status);
         
-        // Regla de negocio: No volver atrás desde estados avanzados (opcional, si querés bloqueo estricto)
         if (['cotizacion', 'documentacion'].includes(activeLead.status) && isTryingToGoBack) return;
 
         if (overCol && overCol !== activeLead.status && ACTIVE_COLUMNS.some(c => c.id === overCol)) {
-            // Validaciones de modales intermedios
             if (overCol === 'cotizacion') { setLeadProcessingId(active.id as string); setIsQuoteDialogOpen(true); return }
             if (overCol === 'documentacion') { setLeadProcessingId(active.id as string); setIsDocConfirmOpen(true); return }
             
-            // Movimiento directo (ej: Nuevo -> Contactado)
-            // 1. Optimistic Update
             setLeads(prev => prev.map(l => l.id === active.id ? { ...l, status: overCol } : l))
             
-            // 2. DB Update
             await supabase.from('leads').update({ 
                 status: overCol.toLowerCase(), 
                 last_update: new Date().toISOString() 
             }).eq('id', active.id)
 
-            // 3. Log History
             logHistory(active.id as string, activeLead.status, overCol)
         }
     }
@@ -286,7 +291,15 @@ export function KanbanBoard({ userName }: { userName?: string }) {
             <DndContext sensors={sensors} collisionDetection={customCollisionDetection} onDragStart={(e) => setActiveId(e.active.id as string)} onDragEnd={handleDragEnd}>
                 <div className="flex-1 flex gap-6 overflow-x-auto p-8 h-full items-start">
                     {ACTIVE_COLUMNS.map((col) => (
-                        <KanbanColumn key={col.id} col={col} leads={sortLeads(col.id)} onClickLead={(l: any) => setSelectedLead(l)} onCallIncrement={handleCallIncrement} onResolveAgenda={(l: Lead) => setShowConfirmCall(l)} />
+                        <KanbanColumn 
+                            key={col.id} 
+                            col={col} 
+                            leads={sortLeads(col.id)} 
+                            onClickLead={(l: any) => setSelectedLead(l)} 
+                            onCallIncrement={handleCallIncrement} 
+                            onOmniClick={handleOmniClick} // ✅ Pasamos la nueva función aquí
+                            onResolveAgenda={(l: Lead) => setShowConfirmCall(l)} 
+                        />
                     ))}
                 </div>
 
@@ -312,17 +325,13 @@ export function KanbanBoard({ userName }: { userName?: string }) {
             
             <LeadDetail lead={selectedLead} open={!!selectedLead} onOpenChange={(o: any) => !o && setSelectedLead(null)} />
             
-            {/* DIÁLOGOS BLINDADOS */}
             <LostLeadDialog 
                 open={isLostDialogOpen} 
                 onOpenChange={setIsLostDialogOpen} 
                 onConfirm={async (reason, notes) => {
                     const leadId = leadProcessingId;
-                    // 1. Limpieza UI
                     setLeads(prev => prev.filter(l => l.id !== leadId))
                     setIsLostDialogOpen(false)
-                    
-                    // 2. Update DB
                     if(leadId) {
                         const oldLead = leads.find(l => l.id === leadId)
                         await supabase.from('leads').update({ 
@@ -331,39 +340,27 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                             notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`,
                             last_update: new Date().toISOString() 
                         }).eq('id', leadId)
-                        
-                        // 3. Log
                         if(oldLead) logHistory(leadId, oldLead.status, 'perdido')
                     }
                 }} 
             />
             
-            {/* MODAL DE VENTA - INTEGRADO CON SUBIDA DE ARCHIVOS + TRADUCTOR */}
             <WonLeadDialog 
                 open={isWonDialogOpen} 
                 onOpenChange={setIsWonDialogOpen} 
                 onConfirm={async (data: any) => {
                     const leadId = leadProcessingId;
                     if (!leadId) return;
-
                     const { files, ...leadData } = data;
                     const oldLead = leads.find(l => l.id === leadId);
-                    
-                    // 1. Limpieza optimista inmediata
                     setLeads(prev => prev.filter(l => l.id !== leadId))
                     setIsWonDialogOpen(false)
-                    
-                    // 2. Subida de Archivos Real
                     if (files && files.length > 0) {
                         for (const file of Array.from(files as FileList)) {
                             const safeName = file.name.replace(/[^\w.\-() ]+/g, "_")
                             const path = `${leadId}/${Date.now()}-${safeName}`
-                            
-                            // A. Subir al Bucket
                             const { error: upErr } = await supabase.storage.from('lead-documents').upload(path, file)
-                            
                             if (!upErr) {
-                                // B. Crear referencia en tabla
                                 await supabase.from('lead_documents').insert({
                                     lead_id: leadId,
                                     type: file.type.includes('image') ? 'IMG' : 'PDF',
@@ -376,15 +373,8 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                             }
                         }
                     }
-
-                    // 3. Guardado final de la Venta (Con datos traducidos)
-                    await supabase.from('leads').update({ 
-                        ...leadData, // Aquí vienen full_price, aportes, etc ya traducidos por WonLeadDialog
-                        last_update: new Date().toISOString()
-                    }).eq('id', leadId)
-
-                    // 4. Log Historial
-                    if (oldLead) logHistory(leadId, oldLead.status, 'vendido') // o el estado que mande el dialog
+                    await supabase.from('leads').update({ ...leadData, last_update: new Date().toISOString() }).eq('id', leadId)
+                    if (oldLead) logHistory(leadId, oldLead.status, 'vendido')
                 }} 
             />
 
@@ -395,10 +385,8 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                     const leadId = leadProcessingId;
                     if(!leadId) return;
                     const oldLead = leads.find(l => l.id === leadId);
-
                     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l))
                     setIsQuoteDialogOpen(false)
-
                     await supabase.from('leads').update({ 
                         status: 'cotizacion', 
                         quoted_prepaga: data.prepaga, 
@@ -406,7 +394,6 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                         quoted_price: data.price, 
                         last_update: new Date().toISOString() 
                     }).eq('id', leadId)
-
                     if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion')
                 }} 
                 onCancel={() => setIsQuoteDialogOpen(false)} 
@@ -419,17 +406,14 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                     const leadId = leadProcessingId;
                     if(!leadId) return;
                     const oldLead = leads.find(l => l.id === leadId);
-
                     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l))
                     setIsDocConfirmOpen(false)
-
                     await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId)
                     if(oldLead) logHistory(leadId, oldLead.status, 'documentacion')
                 }} 
                 onCancel={() => setIsDocConfirmOpen(false)} 
             />
 
-            {/* ALERTA VENCIMIENTO 72HS */}
             <Dialog open={!!overdueLead} onOpenChange={() => setOverdueLead(null)}>
                 <DialogContent 
                     className="border-4 border-yellow-400 max-w-md shadow-2xl animate-in zoom-in duration-300"
@@ -448,7 +432,6 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                 </DialogContent>
             </Dialog>
 
-            {/* ALERTA AGENDA */}
             <Dialog open={!!alarmLead} onOpenChange={() => setAlarmLead(null)}>
                 <DialogContent 
                     className="max-w-sm bg-[#020617] border-none text-white p-0 overflow-hidden shadow-2xl"

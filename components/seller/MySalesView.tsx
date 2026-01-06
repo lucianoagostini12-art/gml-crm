@@ -14,7 +14,7 @@ import {
   DollarSign, XCircle, AlertTriangle,
   Clock, MessageSquare, Send, User, MapPin, Paperclip,
   CheckCheck, UploadCloud, Calendar as CalendarIcon,
-  FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock, Trash2, FileText, ChevronLeft, ChevronRight
+  FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock, Trash2, FileText, ChevronLeft, ChevronRight, Users
 } from "lucide-react"
 
 // ✅ Storage config
@@ -62,15 +62,15 @@ function ChatBubble({ user, text, time, isMe }: any) {
 // --- COLORES DE PREPAGAS ---
 const getPrepagaBadge = (prepaga: string) => {
     const p = prepaga || "Generica"
-    switch (p) {
-        case "Prevención Salud": return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
-        case "DoctoRed": return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
-        case "Avalian": return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
-        case "Swiss Medical": return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
-        case "Galeno": return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
-        case "AMPF": return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
-        default: return "bg-slate-50 border-slate-100 text-slate-800"
-    }
+    // Coincidencia parcial para cubrir variaciones
+    if (p.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+    if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+    if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+    if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+    if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+    if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+    
+    return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
 // --- HELPERS DE ESTADO ---
@@ -240,7 +240,6 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
 
   // ✅ HANDLER UNIFICADO DE SUBIDA (Trigger)
   const handleUploadClick = () => {
-      // Importante: Esto fuerza el click en el input oculto
       if (fileInputRef.current) {
           fileInputRef.current.click();
       }
@@ -335,11 +334,11 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         </div>
       </div>
 
-      {/* LISTADO DE TARJETAS (MÁS ANGOSTO: max-w-4xl) */}
+      {/* LISTADO DE TARJETAS */}
       <div className="grid gap-4 pb-20 max-w-4xl mx-auto md:mx-0">
         {sales.length === 0 && !loading && (
           <div className="text-center py-20 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-            <p className="text-slate-400 font-medium">No hay ventas registradas en este período.</p>
+            <p className="text-slate-400 font-medium">No hay ventas registradas en {currentDate.toLocaleString('es-AR', { month: 'long' })}.</p>
           </div>
         )}
 
@@ -359,9 +358,12 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-1">
                       <h4 className="font-bold text-lg text-slate-800 truncate">{sale.name || "Sin Nombre"}</h4>
-                      <Badge variant="outline" className={`text-[9px] font-bold h-5 px-2 ${getPrepagaBadge(sale.prepaga)}`}>
+                      
+                      {/* BADGE PREPAGA MEJORADO */}
+                      <Badge variant="outline" className={`text-[9px] font-bold h-5 px-2 border ${getPrepagaBadge(sale.prepaga)}`}>
                           {sale.prepaga}
                       </Badge>
+
                       {hasNewMessage && (
                           <Badge className="bg-orange-500 text-white border-0 animate-pulse text-[9px] h-5 px-2">
                               <MessageSquare size={10} className="mr-1" fill="currentColor"/> 1
@@ -376,6 +378,14 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
                     <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
                         Plan: <span className="font-bold text-slate-700">{sale.plan}</span>
                     </span>
+                    
+                    {/* INFO ADICIONAL: CAPITAS */}
+                    {sale.capitas > 0 && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 ml-2" title="Cantidad de personas en el plan">
+                            <Users size={10}/> {sale.capitas} Cápita{sale.capitas > 1 ? 's' : ''}
+                        </span>
+                    )}
+
                     {sale.sub_state && (
                       <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase ml-auto sm:ml-0">
                         {sale.sub_state}
@@ -393,7 +403,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         })}
       </div>
 
-      {/* MODAL DETALLE */}
+      {/* MODAL DETALLE (Igual que antes) */}
       <Dialog open={!!selectedSale} onOpenChange={() => setSelectedSale(null)}>
         <DialogContent
           style={{ maxWidth: "1200px", width: "95%", height: "90vh" }}
@@ -401,15 +411,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
         >
           <DialogTitle className="sr-only">Detalle de Venta</DialogTitle>
 
-          {/* ----- IMPORTANTE: INPUT OCULTO FUERA DE TABS ----- */}
-          {/* Al sacarlo de las tabs, aseguramos que siempre esté renderizado y disponible */}
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            multiple 
-            onChange={onFilesSelected} 
-          />
+          <input type="file" ref={fileInputRef} className="hidden" multiple onChange={onFilesSelected} />
 
           {/* CABECERA MODAL */}
           <div className="px-8 py-6 border-b bg-slate-50/50 flex flex-row justify-between items-center shrink-0">
@@ -422,7 +424,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
               <div>
                 <h2 className="text-3xl font-black text-slate-800">{selectedSale?.name}</h2>
                 <div className="flex gap-2 mt-2">
-                  <Badge className={`border-0 ${getPrepagaBadge(selectedSale?.prepaga)}`}>{selectedSale?.prepaga}</Badge>
+                  <Badge className={`border ${getPrepagaBadge(selectedSale?.prepaga)}`}>{selectedSale?.prepaga}</Badge>
                   <Badge variant="outline" className="bg-white text-slate-700">{selectedSale?.plan}</Badge>
                 </div>
               </div>

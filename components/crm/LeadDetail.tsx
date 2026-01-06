@@ -1,6 +1,5 @@
 "use client"
 
-import { Lead } from "./LeadCard"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
@@ -11,9 +10,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pencil, Check, X } from "lucide-react"
+import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pencil, Check, X, TrendingUp } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
+
+// Definimos la interfaz aquí para evitar errores de importación
+export interface Lead {
+  id: string
+  name: string
+  phone: string
+  status: string
+  source?: string
+  agent_name?: string
+  agent?: string
+  notes?: string
+  prepaga?: string
+  plan?: string 
+  scheduled_for?: string
+  calls?: number
+  full_price?: number
+  price?: number
+  intent?: 'high' | 'medium' | 'low' // Agregado intent
+  [key: string]: any
+}
 
 interface LeadDetailProps {
   lead: Lead | null
@@ -35,6 +54,10 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const [messages, setMessages] = useState<any[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [auditLogs, setAuditLogs] = useState<any[]>([])
+  
+  // Estado local para Intención (para que se actualice al instante)
+  const [intent, setIntent] = useState<'high' | 'medium' | 'low'>('medium')
+
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // phone edit
@@ -49,6 +72,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
       setObs("")
       setPrepaga(lead.prepaga || "")
       setScheduledFor(lead.scheduled_for ? new Date(lead.scheduled_for).toISOString().slice(0, 16) : "")
+      setIntent(lead.intent || 'medium') // Inicializamos intención
 
       setIsEditingPhone(false)
       setPhoneDraft(lead.phone || "")
@@ -136,6 +160,20 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
       }
     }
     setOmniLink("")
+  }
+
+  // --- NUEVA FUNCIÓN: GUARDAR INTENCIÓN ---
+  const handleIntentChange = async (newIntent: 'high' | 'medium' | 'low') => {
+      if (!lead) return
+      setIntent(newIntent) // Optimista
+      lead.intent = newIntent // Actualizar objeto en memoria para LeadCard
+
+      await supabase.from("leads").update({ intent: newIntent, last_update: new Date().toISOString() }).eq("id", lead.id)
+      
+      // Log Opcional (si quieres trazar cambios de interés)
+      // await supabase.from("audit_logs").insert({
+      //   lead_id: lead.id, user_name: lead.agent, action: "Interés actualizado", details: `Nuevo interés: ${newIntent}`
+      // })
   }
 
   const saveAgenda = async () => {
@@ -339,6 +377,16 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     fetchAuditLogs()
   }
 
+  // --- HELPER PARA ESTILO INTENCIÓN ---
+  const getIntentStyle = (val: string) => {
+      switch(val) {
+          case 'high': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          case 'medium': return 'bg-amber-50 text-amber-700 border-amber-200'
+          case 'low': return 'bg-rose-50 text-rose-700 border-rose-200'
+          default: return 'bg-slate-50 text-slate-600'
+      }
+  }
+
   if (!lead) return null
 
   return (
@@ -347,14 +395,35 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
           <SheetHeader className="mb-6 space-y-4">
             <div className="flex flex-col space-y-2 mt-4">
-              <SheetTitle className="text-3xl font-black text-slate-900 tracking-tight flex justify-between items-center">
-                {lead.name}
-                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none px-3 uppercase text-[10px] font-black tracking-widest">
-                  {lead.status}
-                </Badge>
-              </SheetTitle>
+              
+              <div className="flex justify-between items-start">
+                  <SheetTitle className="text-3xl font-black text-slate-900 tracking-tight">
+                    {lead.name}
+                  </SheetTitle>
+                  
+                  {/* SELECTOR DE INTENCIÓN */}
+                  <Select value={intent} onValueChange={(v: any) => handleIntentChange(v)}>
+                      <SelectTrigger className={`h-8 w-[140px] text-[11px] font-black uppercase tracking-wider border-2 ${getIntentStyle(intent)}`}>
+                          <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="high" className="text-emerald-600 font-bold">🔥 ALTA</SelectItem>
+                          <SelectItem value="medium" className="text-amber-600 font-bold">⚖️ MEDIA</SelectItem>
+                          <SelectItem value="low" className="text-rose-600 font-bold">❄️ BAJA</SelectItem>
+                      </SelectContent>
+                  </Select>
+              </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex gap-2">
+                  <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none px-3 uppercase text-[10px] font-black tracking-widest">
+                    {lead.status}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] font-bold text-slate-500">
+                    Fuente: {lead.source}
+                  </Badge>
+              </div>
+
+              <div className="flex items-center justify-between mt-2">
                 {/* phone + pencil */}
                 <div className="flex items-center gap-2">
                   {!isEditingPhone ? (
@@ -496,7 +565,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
               <div className="space-y-4 pt-2">
                 <Label className="text-slate-400 uppercase text-[10px] font-black tracking-[0.2em] px-1">Historial de Comentarios</Label>
                 <div className="space-y-4">
-                  {lead.notes?.split("|||").reverse().map((notaStr, i) => {
+                  {lead.notes?.split("|||").reverse().map((notaStr: string, i: number) => {
                     const parts = notaStr.split("|")
                     const isFormatted = parts[0] === "SEP_NOTE"
                     const fecha = isFormatted ? parts[1] : ""
@@ -586,10 +655,10 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                     </div>
                   ) : (
                     messages.map((m, i) => (
-                      <div key={i} className={`flex flex-col ${m.sender === lead.agent ? "items-end" : "items-start animate-in slide-in-from-left-3 duration-300"}`}>
+                      <div key={i} className={`flex flex-col ${m.sender === (lead.agent || lead.agent_name) ? "items-end" : "items-start animate-in slide-in-from-left-3 duration-300"}`}>
                         <span className="text-[9px] text-slate-400 font-black mb-1.5 uppercase px-2 tracking-widest">{m.sender}</span>
                         <div className={`px-5 py-3 rounded-2xl max-w-[85%] text-[14px] shadow-sm font-semibold leading-relaxed border transition-all ${
-                          m.sender === lead.agent
+                          m.sender === (lead.agent || lead.agent_name)
                             ? "bg-blue-600 text-white rounded-tr-none border-blue-500"
                             : "bg-white border-slate-200 rounded-tl-none text-slate-700"
                         }`}>

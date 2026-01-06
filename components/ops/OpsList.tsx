@@ -6,6 +6,21 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 // AGREGADO: Importamos getStatusColor para mantener consistencia con el Modal
 import { getPrepagaStyles, getSubStateStyle, getStatusColor } from "./data"
 
+// --- NUEVO HELPER PARA COLORES DE PREPAGA (TU PEDIDO) ---
+const getPrepagaBadgeColor = (prepagaRaw: string) => {
+    const p = prepagaRaw || ""
+    // Usamos includes para ser más robustos con los nombres
+    if (p.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+    if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+    if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+    if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+    if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+    if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+    
+    // Default
+    return "bg-slate-50 border-slate-100 text-slate-800"
+}
+
 export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any) {
     return (
         <div className="space-y-3">
@@ -13,6 +28,7 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
                 <div className="text-center py-10 text-slate-400">No hay operaciones en esta vista.</div>
             ) : operations.map((op: any) => {
                 const styles = getPrepagaStyles(op.prepaga || 'Generica');
+                // Extraemos solo el borde izquierdo para la tarjeta
                 const borderColorClass = styles.split(' ').find((c:string) => c.startsWith('border-l-')) || 'border-l-slate-400';
                 const subStateOptions = globalConfig?.subStates?.[op.status] || [];
                 
@@ -48,7 +64,8 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
 
                         {/* 2. PREPAGA Y PLAN */}
                         <div className="w-[20%] flex flex-col justify-center border-l border-slate-100 pl-4">
-                            <div className={`text-[10px] px-2 py-0.5 font-black uppercase mb-1 border rounded-md w-fit ${styles.replace(/border-l-\S+/g, '')}`}>
+                            {/* APLICAMOS EL COLOR DE PREPAGA AQUÍ */}
+                            <div className={`text-[10px] px-2 py-0.5 font-black uppercase mb-1 border rounded-md w-fit ${getPrepagaBadgeColor(op.prepaga)}`}>
                                 {op.prepaga || 'Sin Dato'}
                             </div>
                             <p className="text-xs text-slate-500 font-bold truncate">Plan: <span className="text-slate-900">{op.plan || '-'}</span></p>

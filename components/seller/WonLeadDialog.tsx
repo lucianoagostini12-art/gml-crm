@@ -104,7 +104,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
           const cleanDate = (val: any) => (val && val !== "") ? val : null;
 
           // Mapeo ALTA -> DB
-          // ✅ CORREGIDO: Usamos los nombres en INGLÉS para que Supabase los acepte
+          // ✅ CORREGIDO: Usamos los nombres en INGLÉS que tu base de datos espera
           const dbData = {
             type: 'alta',
             status: 'ingresado', 
@@ -123,10 +123,11 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             address_zip: cleanStr(wizardData.cp),
             province: cleanStr(wizardData.provincia),
             
-            // CORRECCIÓN 1: Usamos 'affiliation_type' (nombre real en DB)
+            // 1. CORRECCIÓN: 'affiliation_type' (DB) vs 'tipo_afiliacion'
             affiliation_type: cleanStr(wizardData.tipoGrupo), 
             
-            // CORRECCIÓN 2: Usamos 'family_members' (nombre real en DB)
+            // 2. CORRECCIÓN: 'family_members' (DB) vs 'hijos'
+            // Unificamos toda la familia en este campo JSON
             family_members: wizardData.tipoGrupo === 'matrimonio' 
                 ? [{ nombre: wizardData.matrimonioNombre, dni: wizardData.matrimonioDni, rol: 'conyuge' }, ...(wizardData.hijosData || [])] 
                 : (wizardData.hijosData || []),
@@ -135,10 +136,10 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
 
             source: cleanStr(wizardData.origen), 
             
-            // CORRECCIÓN 3: Usamos 'labor_condition' (nombre real en DB)
+            // 3. CORRECCIÓN: 'labor_condition' (DB) vs 'condicion_laboral'
             labor_condition: cleanStr(wizardData.condicion), 
             
-            // CORRECCIÓN 4: Usamos 'employer_cuit' (nombre real en DB)
+            // 4. CORRECCIÓN: 'employer_cuit' (DB) vs 'cuit_empleador'
             employer_cuit: cleanStr(wizardData.cuitEmpleador), 
             
             notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}` + (wizardData.notes ? `\n\n[OBS]: ${wizardData.notes}` : ''),

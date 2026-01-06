@@ -13,8 +13,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, History, LayoutGrid, UserPlus, Eye, Filter, CheckCircle2, Download, Undo2, Calendar, Award, Zap, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2, ChevronLeft, ChevronRight, BarChart3, Info, Wallet } from "lucide-react"
+import { DollarSign, Save, Lock, AlertTriangle, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2, ChevronLeft, ChevronRight, Info, Eye, BarChart3 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Separator } from "@/components/ui/separator"
+
+// IMPORTAMOS EL MODAL Y HELPERS
+import { OpsModal } from "./OpsModal"
+import { getStatusColor, getSubStateStyle } from "./data"
 
 // --- TIPOS ---
 type Operation = {
@@ -30,12 +35,28 @@ type Operation = {
     aportes: string
     descuento: string
     status: string
+    subState?: string
     condicionLaboral?: string
     hijos?: any[]
     billing_approved?: boolean
     billing_period?: string
     billing_price_override?: number
     billing_portfolio_override?: number
+    // Campos extra para OpsModal
+    chat?: any[]
+    reminders?: any[]
+    history?: any[]
+    adminNotes?: any[]
+    phone?: string
+    email?: string
+    cuit?: string
+    dob?: string
+    address_street?: string
+    address_city?: string
+    address_zip?: string
+    cbu_tarjeta?: string
+    metodoPago?: string
+    cuitEmpleador?: string
 }
 
 // --- CONFIGURACIÓN ESTÁTICA ---
@@ -71,13 +92,17 @@ const INITIAL_CALC_RULES = {
     portfolioRate: 0.05 
 }
 
-// Helpers Visuales
-const getPrepagaColor = (p: string) => {
-    const s = p?.toLowerCase() || ""
-    if (s.includes('preven')) return "border-l-4 border-l-pink-500" 
-    if (s.includes('ampf')) return "border-l-4 border-l-sky-400" 
-    if (['galeno', 'avalian', 'swiss', 'docto'].some(k => s.includes(k))) return "border-l-4 border-l-purple-600"
-    return "border-l-4 border-l-slate-300"
+// --- HELPERS VISUALES (COLORES) ---
+const getPrepagaBadgeColor = (prepaga: string) => {
+    const p = prepaga || ""
+    if (p.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+    if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+    if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+    if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+    if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+    if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+    
+    return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
 const getSourceIcon = (source: string) => {
@@ -103,17 +128,21 @@ export function OpsBilling() {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
     const [isLocked, setIsLocked] = useState(false)
     
+    // Config
     const [calcRules, setCalcRules] = useState(INITIAL_CALC_RULES)
     const [commissionRules, setCommissionRules] = useState(INITIAL_COMMISSION_RULES)
     const [showConfig, setShowConfig] = useState(false)
     const [showHistory, setShowHistory] = useState(false)
+    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any}>({prepagas: [], subStates: {}})
     
+    // Modals
+    const [selectedOp, setSelectedOp] = useState<any>(null) // Para OpsModal
     const [deferOpId, setDeferOpId] = useState<string | null>(null)
     const [manualPortfolio, setManualPortfolio] = useState<any[]>([]) 
     
     const [isAddingClient, setIsAddingClient] = useState(false)
     const [newClient, setNewClient] = useState({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] as {name: string, dni: string}[] })
-    const [newFamilyMember, setNewFamilyMember] = useState({ name: "", dni: "" })
+    
     const [filters, setFilters] = useState({ seller: 'all', prepaga: 'all' })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
@@ -122,19 +151,58 @@ export function OpsBilling() {
     const fetchData = async () => {
         setLoading(true)
         const { data: opsData } = await supabase.from('leads').select('*').eq('status', 'cumplidas').order('last_update', { ascending: false })
+        
         if (opsData) {
             const mapped: Operation[] = opsData.map((d: any) => ({
-                id: d.id, entryDate: d.created_at, clientName: d.name, dni: d.dni || "", origen: d.source, seller: d.agent_name,
-                prepaga: d.company_name || d.health_insurance || d.prepaga, plan: d.plan_type || d.plan,
-                fullPrice: d.price || d.full_price || "0", aportes: d.aportes || "0", descuento: d.descuento || "0",
-                status: d.status, condicionLaboral: d.employment_status, hijos: d.family_members || d.hijos || [],
-                billing_approved: d.billing_approved, billing_period: d.billing_period,
-                billing_price_override: d.billing_price_override, billing_portfolio_override: d.billing_portfolio_override
+                id: d.id, 
+                entryDate: d.created_at, 
+                clientName: d.name || "Sin Nombre", 
+                dni: d.dni || "", 
+                origen: d.source || "Dato", 
+                seller: d.agent_name || "Desconocido",
+                prepaga: d.prepaga || d.quoted_prepaga, 
+                plan: d.plan || d.quoted_plan,
+                fullPrice: d.full_price || d.price || "0", 
+                aportes: d.aportes || "0", 
+                descuento: d.descuento || "0",
+                status: d.status, 
+                subState: d.sub_state,
+                condicionLaboral: d.labor_condition, 
+                hijos: d.family_members || d.hijos || [],
+                billing_approved: d.billing_approved, 
+                billing_period: d.billing_period,
+                billing_price_override: d.billing_price_override, 
+                billing_portfolio_override: d.billing_portfolio_override,
+                
+                // Mapeo completo para OpsModal
+                phone: d.phone,
+                email: d.email,
+                cuit: d.cuit,
+                dob: d.dob,
+                address_street: d.address_street,
+                address_city: d.address_city,
+                address_zip: d.address_zip,
+                cuitEmpleador: d.employer_cuit,
+                metodoPago: d.payment_method,
+                cbu_tarjeta: d.cbu_card,
+                chat: [],
+                reminders: [],
+                history: [],
+                adminNotes: d.admin_notes || []
             }))
             setOperations(mapped)
         }
+        
         const { data: manualData } = await supabase.from('billing_manual_clients').select('*').order('created_at', { ascending: false })
         if (manualData) setManualPortfolio(manualData)
+        
+        const { data: config } = await supabase.from('system_config').select('*')
+        if (config) {
+            const p = config.find(c => c.key === 'prepagas_plans')?.value || []
+            const s = config.find(c => c.key === 'workflow_substates')?.value || {}
+            setGlobalConfig({ prepagas: p, subStates: s })
+        }
+
         setLoading(false)
     }
 
@@ -215,10 +283,8 @@ export function OpsBilling() {
         })
     }, [operations, selectedMonth, filters])
 
-    // --- LOGICA MES ANTERIOR (Para Cartera Desfasada) ---
     const opsPreviousMonth = useMemo(() => {
         const [y, m] = selectedMonth.split('-').map(Number)
-        // Mes anterior (JS month es 0-index, así que m-2 nos da el mes previo real)
         const prevDate = new Date(y, m - 2, 1)
         const prevIso = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
 
@@ -227,7 +293,6 @@ export function OpsBilling() {
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
             const targetMonth = op.billing_period || defaultMonth
             
-            // Solo operaciones aprobadas del MES ANTERIOR
             if (op.billing_approved !== true) return false
             if (targetMonth !== prevIso) return false
             return true
@@ -237,7 +302,7 @@ export function OpsBilling() {
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
 
-    // --- HISTORIAL ---
+    // --- HISTORIAL (AGREGADO NUEVAMENTE) ---
     const historyData = useMemo(() => {
         const aggregated: Record<string, number> = {}
         operations.forEach(op => {
@@ -251,37 +316,22 @@ export function OpsBilling() {
         return Object.entries(aggregated).sort((a, b) => a[0].localeCompare(b[0])).map(([month, total]) => ({ month, total })).slice(-12)
     }, [operations, calcRules]) 
 
-    // --- TOTALES Y DESGLOSE POR PREPAGA (Punto 3) ---
-    const { totalNeto, totalPreve, totalMutual, totalXP, totalIVA, breakdown } = useMemo(() => {
-        let neto = 0, preve = 0, mutual = 0, xp = 0
-        let sumPreve = 0, sumXP = 0, sumAMPF = 0
-
+    // --- TOTALES ---
+    const { totalNeto, totalIVA, breakdown } = useMemo(() => {
+        let neto = 0, preve = 0, sumPreve = 0, sumXP = 0, sumAMPF = 0
         approvedOps.forEach(op => {
             const val = calculate(op).val
             neto += val
             const p = op.prepaga?.toLowerCase() || ""
-            
-            if (p.includes("preven")) {
-                preve += val
-                sumPreve += val
-            } else if (p.includes("ampf")) {
-                mutual += val
-                sumAMPF += val
-            } else {
-                xp += val
-                sumXP += val // Galeno, Swiss, Avalian, Docto
-            }
+            if (p.includes("preven")) { preve += val; sumPreve += val }
+            else if (p.includes("ampf")) { sumAMPF += val }
+            else { sumXP += val }
         })
         const iva = preve * calcRules.prevencionVat
-        return { 
-            totalNeto: neto, totalPreve: preve, totalMutual: mutual, totalXP: xp, totalIVA: iva,
-            breakdown: { sumPreve, sumXP, sumAMPF }
-        }
+        return { totalNeto: neto, totalIVA: iva, breakdown: { sumPreve, sumXP, sumAMPF } }
     }, [approvedOps, calcRules])
 
     const totalBilling = totalNeto + totalIVA
-    
-    // --- CARTERA TOTAL (Usando opsPreviousMonth) ---
     const portfolioOps = opsPreviousMonth.reduce((acc, op) => acc + calculate(op).portfolio, 0)
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => acc + (parseFloat(item.calculated_liquidation || "0") * calcRules.portfolioRate), 0)
     const totalPortfolio = portfolioOps + portfolioManualTotal
@@ -314,7 +364,6 @@ export function OpsBilling() {
             const totalStandardCount = standardOps.length
             const absorbableLimit = shiftRules.absorbable
             const isThresholdMet = totalStandardCount > absorbableLimit
-            
             let scalePercentage = 0
             let payableCount = 0
             
@@ -322,12 +371,9 @@ export function OpsBilling() {
                 const tier = shiftRules.tiers.find(t => totalStandardCount >= t.min && totalStandardCount <= t.max)
                 const finalTier = tier || shiftRules.tiers[shiftRules.tiers.length - 1]
                 scalePercentage = finalTier.pct
-                
-                const payableStandardOps = standardOps.slice(absorbableLimit)
-                payableCount = payableStandardOps.length
-                const totalLiquidatedStandard = payableStandardOps.reduce((acc, op) => acc + calculate(op).val, 0)
+                payableCount = standardOps.slice(absorbableLimit).length
+                const totalLiquidatedStandard = standardOps.slice(absorbableLimit).reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedStandard * scalePercentage
-                
                 const totalLiquidatedSpecial = specialOps.reduce((acc, op) => acc + calculate(op).val, 0)
                 specialCommission = totalLiquidatedSpecial * commissionRules.special.percentage
             } 
@@ -370,15 +416,12 @@ export function OpsBilling() {
         const ops = approvedOps.filter((op: any) => op.seller === sellerName)
         const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
         const threshold = commissionRules.scales[sellerInfo.shift].absorbable
-        
         const standardOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""
             return !commissionRules.special.plans.some(k => plan.includes(k) || prepaga.includes(k))
         }).sort((a,b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
-        
         const isThresholdMet = standardOps.length > threshold
         const statusMap: Record<string, string> = {}
-
         ops.forEach(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""
             const isSpecial = commissionRules.special.plans.some(k => plan.includes(k) || prepaga.includes(k))
@@ -438,7 +481,7 @@ export function OpsBilling() {
                     <CardContent className="p-5">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Cartera Nueva</p>
                         <div className="text-3xl font-black text-slate-800">${Math.round(totalPortfolio).toLocaleString()}</div>
-                        <p className="text-xs text-blue-600 mt-2 font-bold">Cobro Estimado (Mes +1)</p>
+                        <p className="text-xs text-blue-600 mt-2 font-bold">Cobro Estimado</p>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-l-4 border-l-pink-500 shadow-md">
@@ -489,14 +532,17 @@ export function OpsBilling() {
                                     const calc = calculate(op)
                                     const isDeferred = op.entryDate.substring(0, 7) !== selectedMonth
                                     return (
-                                        <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors ${getPrepagaColor(op.prepaga || "")}`}>
+                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
                                             <TableCell><div className="font-bold text-slate-800">{op.clientName}</div><div className="text-[11px] font-mono text-slate-400">{op.dni}</div><div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div></TableCell>
                                             <TableCell><span className="text-xs font-medium text-slate-600">{op.seller}</span></TableCell>
-                                            <TableCell><Badge variant="secondary" className="mb-1 bg-white border border-slate-200 text-slate-700">{op.prepaga}</Badge><div className="text-xs font-bold text-slate-500">{op.plan}</div></TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline" className={`mb-1 border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
+                                                <div className="text-xs font-bold text-slate-500">{op.plan}</div>
+                                            </TableCell>
                                             <TableCell className="text-right text-xs font-mono text-slate-500"><div>FP: ${parseInt(op.fullPrice || "0").toLocaleString()}</div></TableCell>
                                             <TableCell><div className="text-[10px] bg-slate-100 p-1 rounded font-mono text-slate-500 truncate" title={calc.formula}>{calc.formula}</div></TableCell>
                                             <TableCell className="text-right font-bold text-slate-800 text-sm">${calc.val.toLocaleString()}</TableCell>
-                                            <TableCell className="text-right"><div className="flex justify-end gap-2">{isDeferred ? (<Button size="sm" variant="ghost" className="h-8 text-blue-600 hover:bg-blue-50" onClick={() => revertDefer(op.id)}><Undo2 size={14} className="mr-1"/> Traer</Button>) : (<Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700" onClick={() => setDeferOpId(op.id)}><Calendar size={14} className="mr-1"/> Diferir</Button>)}<Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>Aprobar <ArrowRight size={14} className="ml-1"/></Button></div></TableCell>
+                                            <TableCell className="text-right" onClick={e => e.stopPropagation()}><div className="flex justify-end gap-2">{isDeferred ? (<Button size="sm" variant="ghost" className="h-8 text-blue-600 hover:bg-blue-50" onClick={() => revertDefer(op.id)}><Undo2 size={14} className="mr-1"/> Traer</Button>) : (<Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700" onClick={() => setDeferOpId(op.id)}><Calendar size={14} className="mr-1"/> Diferir</Button>)}<Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>Aprobar <ArrowRight size={14} className="ml-1"/></Button></div></TableCell>
                                         </TableRow>
                                     )
                                 })}</TableBody>
@@ -513,21 +559,10 @@ export function OpsBilling() {
                                 <div className="text-xs text-green-800 font-medium flex items-center gap-2"><CheckCircle2 size={14}/> Estas ventas ya están computadas para la factura final.</div>
                                 <Button size="sm" variant="outline" className="h-7 text-xs gap-2" disabled={approvedOps.length === 0}><Download size={12}/> Exportar Excel</Button>
                             </div>
-                            
-                            {/* 3. RESUMEN DE TOTALES (Punto 3) */}
                             <div className="grid grid-cols-3 gap-4">
-                                <div className="bg-pink-50 border border-pink-100 p-3 rounded-lg flex justify-between items-center">
-                                    <span className="text-[10px] font-black text-pink-500 uppercase tracking-wider">Suma Prevención</span>
-                                    <span className="text-sm font-black text-pink-700">${Math.round(breakdown.sumPreve).toLocaleString()}</span>
-                                </div>
-                                <div className="bg-violet-50 border border-violet-100 p-3 rounded-lg flex justify-between items-center">
-                                    <span className="text-[10px] font-black text-violet-500 uppercase tracking-wider">Suma XP (Gal/Sw/Ava)</span>
-                                    <span className="text-sm font-black text-violet-700">${Math.round(breakdown.sumXP).toLocaleString()}</span>
-                                </div>
-                                <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg flex justify-between items-center">
-                                    <span className="text-[10px] font-black text-sky-500 uppercase tracking-wider">Suma AMPF</span>
-                                    <span className="text-sm font-black text-sky-700">${Math.round(breakdown.sumAMPF).toLocaleString()}</span>
-                                </div>
+                                <div className="bg-pink-50 border border-pink-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-pink-500 uppercase tracking-wider">Suma Prevención Salud</span><span className="text-sm font-black text-pink-700">${Math.round(breakdown.sumPreve).toLocaleString()}</span></div>
+                                <div className="bg-violet-50 border border-violet-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-violet-500 uppercase tracking-wider">Suma XP (Docto/Gal/Sw/Ava)</span><span className="text-sm font-black text-violet-700">${Math.round(breakdown.sumXP).toLocaleString()}</span></div>
+                                <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-sky-500 uppercase tracking-wider">Suma AMPF Salud</span><span className="text-sm font-black text-sky-700">${Math.round(breakdown.sumAMPF).toLocaleString()}</span></div>
                             </div>
                         </div>
 
@@ -537,13 +572,19 @@ export function OpsBilling() {
                                 <TableBody>{approvedOps.length === 0 ? (<TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">Aprobá ventas desde la pestaña "Mesa de Entrada".</TableCell></TableRow>) : approvedOps.map((op: any) => {
                                     const calc = calculate(op)
                                     return (
-                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors">
-                                            <TableCell><div className="font-bold text-slate-800">{op.clientName}</div><div className="flex items-center gap-2 text-xs text-slate-500"><Badge variant="outline" className="h-4 px-1 text-[9px]">{op.prepaga}</Badge><span>{op.plan}</span></div></TableCell>
+                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
+                                            <TableCell>
+                                                <div className="font-bold text-slate-800">{op.clientName}</div>
+                                                <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                    <Badge variant="outline" className={`h-4 px-1 text-[9px] border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
+                                                    <span>{op.plan}</span>
+                                                </div>
+                                            </TableCell>
                                             <TableCell className="text-xs text-slate-600 font-medium">{op.seller}</TableCell>
                                             <TableCell className="text-right font-mono text-xs text-slate-500">${parseInt(op.fullPrice || "0").toLocaleString()}</TableCell>
                                             <TableCell className="text-center"><div className="bg-slate-100 text-[9px] px-2 py-0.5 rounded text-slate-500 truncate inline-block max-w-[150px]" title={calc.formula}>{calc.formula}</div></TableCell>
-                                            <TableCell className="text-right bg-green-50/30 p-2"><div className="relative"><span className="absolute left-3 top-2.5 text-green-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-green-700 border-green-200 bg-white focus:ring-green-500 text-right text-sm" value={calc.val} onChange={(e) => handlePriceChange(op.id, e.target.value)} disabled={isLocked}/></div></TableCell>
-                                            <TableCell className="text-right"><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => unapproveOp(op.id)}><Undo2 size={16}/></Button></TableCell>
+                                            <TableCell className="text-right bg-green-50/30 p-2" onClick={e => e.stopPropagation()}><div className="relative"><span className="absolute left-3 top-2.5 text-green-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-green-700 border-green-200 bg-white focus:ring-green-500 text-right text-sm" value={calc.val} onChange={(e) => handlePriceChange(op.id, e.target.value)} disabled={isLocked}/></div></TableCell>
+                                            <TableCell className="text-right" onClick={e => e.stopPropagation()}><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => unapproveOp(op.id)}><Undo2 size={16}/></Button></TableCell>
                                         </TableRow>
                                     )
                                 })}</TableBody>
@@ -560,16 +601,15 @@ export function OpsBilling() {
                             <Table>
                                 <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente</TableHead><TableHead>Origen</TableHead><TableHead>Prepaga</TableHead><TableHead>Valor Liquidado</TableHead><TableHead className="text-right font-black text-blue-700 bg-blue-50 w-[180px]">CARTERA (Editable)</TableHead></TableRow></TableHeader>
                                 <TableBody>
-                                    {/* 1. CARTERA DESFASADA (Punto 1) */}
                                     {opsPreviousMonth.map((op: any) => {
                                         const liq = calculate(op)
                                         return (
-                                            <TableRow key={op.id}>
+                                            <TableRow key={op.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedOp(op)}>
                                                 <TableCell className="font-bold text-slate-700">{op.clientName}</TableCell>
                                                 <TableCell><Badge variant="secondary" className="text-[9px]">Automático</Badge></TableCell>
-                                                <TableCell><Badge variant="outline">{op.prepaga}</Badge></TableCell>
+                                                <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge></TableCell>
                                                 <TableCell>${liq.val.toLocaleString()}</TableCell>
-                                                <TableCell className="text-right bg-blue-50/50 p-2"><div className="relative"><span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked}/></div></TableCell>
+                                                <TableCell className="text-right bg-blue-50/50 p-2" onClick={e => e.stopPropagation()}><div className="relative"><span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked}/></div></TableCell>
                                             </TableRow>
                                         )
                                     })}
@@ -579,7 +619,7 @@ export function OpsBilling() {
                                             <TableRow key={item.id} className="bg-yellow-50/30">
                                                 <TableCell className="font-bold text-slate-700">{item.name}</TableCell>
                                                 <TableCell><Badge variant="secondary" className="bg-yellow-100 text-yellow-700 text-[9px]">Manual DB</Badge></TableCell>
-                                                <TableCell><Badge variant="outline">{item.prepaga}</Badge></TableCell>
+                                                <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(item.prepaga)}`}>{item.prepaga}</Badge></TableCell>
                                                 <TableCell>${parseFloat(item.calculated_liquidation || "0").toLocaleString()}</TableCell>
                                                 <TableCell className="text-right bg-blue-50/50 p-2"><div className="relative"><span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" value={currentVal} disabled /></div></TableCell>
                                             </TableRow>
@@ -599,7 +639,6 @@ export function OpsBilling() {
                                 {sellersCommissions.map((seller, index) => (
                                     <Card key={index} className={`border-0 shadow-md transition-all relative overflow-hidden bg-white h-fit ${!seller.isThresholdMet ? 'opacity-80 grayscale-[0.3]' : ''}`}>
                                         <div className={`absolute top-0 left-0 w-full h-1.5 ${seller.isThresholdMet ? 'bg-gradient-to-r from-pink-500 to-purple-600' : 'bg-slate-300'}`}></div>
-                                        {/* 2. BADGE MOVIDO A LA IZQUIERDA (Punto 2) */}
                                         {!seller.isThresholdMet && <div className="absolute top-3 left-3 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 z-20"><Lock size={10}/> Objetivo No Cumplido</div>}
                                         <div className="absolute top-2 right-2 z-10"><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setViewingSeller(seller.name)}><Eye size={16}/></Button></div>
                                         <CardContent className="p-6">
@@ -629,6 +668,26 @@ export function OpsBilling() {
                     </Card>
                 </TabsContent>
             </Tabs>
+
+            {/* --- MODAL OPS DETALLE --- */}
+            <OpsModal 
+                op={selectedOp} 
+                isOpen={!!selectedOp} 
+                onClose={() => setSelectedOp(null)} 
+                onUpdateOp={() => fetchData()} 
+                currentUser={"Administración"} 
+                role={"admin_god"} 
+                onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} onSubStateChange={()=>{}} 
+                onAddNote={async (note: string) => {
+                    const newNote = `FACTURACION|${new Date().toLocaleString()}|Admin|${note}`
+                    const currentNotes = selectedOp.notes ? selectedOp.notes + "|||" + newNote : newNote
+                    await supabase.from('leads').update({ notes: currentNotes }).eq('id', selectedOp.id)
+                }}
+                onSendChat={()=>{}} onAddReminder={()=>{}} 
+                getStatusColor={getStatusColor} 
+                getSubStateStyle={getSubStateStyle}
+                globalConfig={globalConfig}
+            />
 
             {/* CONFIGURACIÓN */}
             <Dialog open={showConfig} onOpenChange={setShowConfig}>

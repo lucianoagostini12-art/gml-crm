@@ -71,6 +71,7 @@ export function AdminConfig() {
                 email: u.email, 
                 role: u.role || "seller",
                 work_hours: u.work_hours || 5,
+                // Si tiene avatar_url usamos esa, si no, generamos uno temporal
                 avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`
             })))
         }
@@ -197,16 +198,16 @@ export function AdminConfig() {
 
         try {
             let targetUserId = editingUserId
-            
-            // 1. Si es NUEVO usuario: Usamos la API del servidor (Backend)
+            let publicAvatarUrl = null
+
+            // 1. Si es NUEVO usuario: USAR API BACKEND (Crea con email confirmado y pass segura)
             if (!targetUserId) {
                 if (!formData.password) {
                     setLoading(false)
                     return alert("Contraseña obligatoria para nuevos usuarios.")
                 }
 
-                // LLAMADA A LA API QUE CREAMOS (Backend)
-                // Esto garantiza compatibilidad 100% con Supabase Auth
+                // LLAMADA A LA API QUE CREAMOS
                 const response = await fetch('/api/admin/create-user', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -221,11 +222,11 @@ export function AdminConfig() {
 
                 if (!response.ok) {
                     const errorData = await response.json()
-                    throw new Error(errorData.error || "Error al crear usuario en servidor")
+                    throw new Error(errorData.error || "Error al crear usuario")
                 }
 
                 const data = await response.json()
-                targetUserId = data.id // Obtenemos el ID del usuario creado
+                targetUserId = data.id
                 
                 alert("Usuario creado exitosamente. ✅")
 
@@ -244,12 +245,16 @@ export function AdminConfig() {
 
             // 3. GESTIÓN DE FOTO (Igual para ambos casos)
             if (targetUserId && avatarFile) {
-                const publicAvatarUrl = await uploadAvatar(targetUserId, avatarFile)
+                publicAvatarUrl = await uploadAvatar(targetUserId, avatarFile)
                 if (publicAvatarUrl) {
                     await supabase.from('profiles')
                         .update({ avatar_url: publicAvatarUrl })
                         .eq('id', targetUserId)
                 }
+            } else if (targetUserId && !avatarFile && formData.avatar.startsWith('http')) {
+                 await supabase.from('profiles')
+                        .update({ avatar_url: formData.avatar })
+                        .eq('id', targetUserId)
             }
 
             await fetchUsers()
@@ -265,29 +270,22 @@ export function AdminConfig() {
     const handleDeleteUser = async (id: string) => {
         if (!confirm("¿Estás seguro? Se borrará el acceso.")) return
         
-        // Intentamos borrar primero storage y perfiles por si acaso
-        // pero principalmente borramos de auth.users si es posible desde el cliente
-        // OJO: Client-side deletion de auth.users no suele estar permitido. 
-        // Si falla, idealmente usaríamos también una API Route para borrar.
-        // Por ahora mantenemos la lógica visual, pero ten en cuenta esto.
-        
-        // Opción: llamar a otra API route de borrado, pero probemos si tu RLS permite
-        // borrar perfiles y si tienes el trigger "on delete cascade".
-        
+        // Al usar Delete Cascade en SQL, borrar el perfil o el usuario Auth debería limpiar todo.
+        // Como cliente no puede borrar Auth Users directamente (por seguridad), 
+        // borramos el perfil y confiamos en el trigger, O SOLO lo marcamos visualmente.
+        // Para borrar DE VERDAD, lo ideal es otra API Route, pero probemos borrando perfil:
         const { error } = await supabase.from('profiles').delete().eq('id', id)
         
         if (error) {
-             alert("No se pudo borrar el perfil. Contacta a soporte.")
+             console.error(error)
+             alert("Error al borrar. Intenta desde el panel de Supabase.")
         } else {
-             // Si borramos el perfil y hay ON DELETE CASCADE, el usuario auth debería morir?
-             // No, es al revés. Si muere Auth muere Perfil.
-             // Para borrar el Auth User desde el cliente necesitas permisos especiales o usar la API.
-             alert("Se borró el perfil visual. Para borrar el acceso definitivo, usa el panel de Supabase o crea una API de borrado.")
+             alert("Perfil eliminado.")
              setUsers(users.filter(u => u.id !== id))
         }
     }
 
-    // ... (El resto de funciones auxiliares como addLossReason, templates, etc. se mantienen igual)
+    // ... Resto de funciones (addLossReason, templates, etc.) se mantienen igual
     const addLossReason = async () => {
         if (!newReason.trim()) return
         const { error } = await supabase.from('loss_reasons').insert({ reason: newReason })

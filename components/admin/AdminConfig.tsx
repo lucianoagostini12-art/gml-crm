@@ -30,13 +30,13 @@ export function AdminConfig() {
     // Estados de UI
     const [showPassword, setShowPassword] = useState(false)
 
-    // Estados de Comisiones
+    // Estados de Comisiones (Se guardan en DB)
     const [ranges5hs, setRanges5hs] = useState<any[]>([])
     const [ranges8hs, setRanges8hs] = useState<any[]>([])
     const [absorb5, setAbsorb5] = useState("8")
     const [absorb8, setAbsorb8] = useState("12")
 
-    // Estado Configuración Cementerio
+    // Estado Configuración Cementerio (Freeze Times)
     const [freezeConfig, setFreezeConfig] = useState({
         fantasmas: 30, precio: 60, interes: 45, quemados: 45, basural: 365
     })
@@ -122,8 +122,7 @@ export function AdminConfig() {
             alert("❌ Error al guardar: " + (errConfig?.message || errWpp?.message))
         } else {
             alert("✅ Configuración guardada correctamente.")
-            // Recargar para limpiar IDs temporales si hubo nuevos
-            fetchWppTemplates()
+            fetchWppTemplates() // Refrescar para tener los IDs limpios si hubo nuevos
         }
     }
 
@@ -243,13 +242,14 @@ export function AdminConfig() {
 
     const addTemplate = () => {
         const newId = `tpl_${Date.now()}`
+        // Crea una plantilla vacía localmente
         setWppTemplates(prev => [...prev, { id: newId, label: "Nueva Plantilla", message: "" }])
     }
 
     const deleteTemplate = async (id: string) => {
         if(!confirm("¿Borrar plantilla?")) return
         setWppTemplates(prev => prev.filter(t => t.id !== id))
-        // Borrar de DB
+        // Borrar de DB si ya existía
         await supabase.from('whatsapp_templates').delete().eq('id', id)
     }
 
@@ -360,7 +360,7 @@ export function AdminConfig() {
                                     <div className="space-y-1">
                                         <Label className="text-xs text-red-500 font-bold flex items-center gap-1"><Flame size={10}/> Quemados (+7)</Label>
                                         <div className="relative">
-                                            <Input type="number" className="pl-2 pr-8 border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
+                                            <Input type="number" className="pl-2 pr-8" border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
                                             <span className="absolute right-3 top-2.5 text-xs text-red-400 font-bold">días</span>
                                         </div>
                                     </div>
@@ -408,7 +408,7 @@ export function AdminConfig() {
                                 <CardTitle className="flex items-center gap-2 text-green-700">
                                     <MessageCircle className="h-5 w-5" /> Plantillas de Mensajes
                                 </CardTitle>
-                                <CardDescription>Personaliza los botones de WhatsApp de las vendedoras.</CardDescription>
+                                <CardDescription>Personaliza los mensajes y los nombres de los botones para las vendedoras.</CardDescription>
                             </div>
                             <Button size="sm" variant="outline" className="border-green-200 text-green-700 hover:bg-green-50 gap-2" onClick={addTemplate}>
                                 <Plus size={14}/> Nueva Plantilla
@@ -631,4 +631,3 @@ export function AdminConfig() {
             </Dialog>
         </div>
     )
-}

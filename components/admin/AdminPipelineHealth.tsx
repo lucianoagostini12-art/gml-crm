@@ -1,18 +1,22 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { createClient } from "@/lib/supabase"
+import { createClient } from "@supabase/supabase-js" // Ajustado para consistencia
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-// ✅ AGREGADO "Users" AQUÍ:
 import { AlertTriangle, Sprout, Target, ThermometerSun, AlertOctagon, Send, Trash, Filter, RefreshCw, Clock, Users } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
+// Inicialización consistente con SellerManager
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
 export function AdminPipelineHealth() {
-    const supabase = createClient()
     const [loading, setLoading] = useState(true)
     
     // Filtros
@@ -34,21 +38,24 @@ export function AdminPipelineHealth() {
     const fetchData = async () => {
         setLoading(true)
         
-        // 1. CARTERA ACTIVA (Excluimos ya a los Zombies y bajas)
+        // 1. CARTERA ACTIVA 
+        // Lógica ajustada: 'rechazado' AHORA se considera activo (porque el vendedor debe corregirlo),
+        // por eso lo quitamos de la lista de exclusión.
         const { data: activeLeads } = await supabase
             .from('leads')
             .select('*')
-            .not('status', 'in', '("perdido","rechazado","baja","vendido","cumplidas","finalizada")') 
-            .neq('agent_name', 'Zombie 🧟') // Ignoramos los que ya están en el cementerio
+            .not('status', 'in', '("perdido","baja","vendido","cumplidas","finalizada")') 
+            .neq('agent_name', 'Zombie 🧟')
 
         // 2. VENTAS DEL MES
         const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
         const endDate = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
         
+        // Lógica ajustada: Cuenta como venta si está 'vendido' (en GV), 'cumplidas' o 'finalizada'
         const { data: salesInMonth } = await supabase
             .from('leads')
             .select('agent_name')
-            .eq('status', 'cumplidas')
+            .in('status', ['vendido', 'cumplidas', 'finalizada'])
             .gte('last_update', startDate)
             .lte('last_update', endDate)
 
@@ -83,7 +90,6 @@ export function AdminPipelineHealth() {
                         killable++ // Pasaron 24hs, listos para cementerio
                     }
                 } else {
-                    // Si tiene warning_sent true pero no date (caso borde), lo mandamos a killable
                     killable++
                 }
             })
@@ -142,13 +148,13 @@ export function AdminPipelineHealth() {
         const { error } = await supabase.from('leads')
             .update({ 
                 warning_sent: true, 
-                warning_date: nowIso, // Guardamos la hora exacta del aviso para contar 24hs
-                last_update: nowIso   // Movemos el lead arriba en el kanban
+                warning_date: nowIso, 
+                last_update: nowIso   
             })
             .lt('last_update', limitDate)
-            .not('status', 'in', '("cumplidas","vendido","perdido","rechazado","baja","finalizada")')
+            .not('status', 'in', '("cumplidas","vendido","perdido","baja","finalizada")') // "rechazado" entra aquí para recibir aviso si se duerme
             .neq('agent_name', 'Zombie 🧟')
-            .is('warning_sent', false) // Solo a los que no tienen aviso
+            .is('warning_sent', false) 
         
         if (error) alert("Error al enviar avisos: " + error.message)
         else fetchData()
@@ -158,20 +164,19 @@ export function AdminPipelineHealth() {
     const handleExecuteKill = async () => {
         if (!confirm(`¿Mover ${stats.killableZombies} leads al Cementerio Zombie 🧟?\nSolo se moverán los que recibieron aviso hace más de 24hs.`)) return
         
-        // Calculamos la fecha límite: Ahora menos 24 horas
         const deadline24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
         const { error } = await supabase.from('leads')
             .update({ 
-                agent_name: 'Zombie 🧟', // DESTINO: CEMENTERIO
-                status: 'nuevo',         // Estado Nuevo para reasignar fácil
-                warning_sent: false,     // Limpiamos alertas
+                agent_name: 'Zombie 🧟',
+                status: 'nuevo',
+                warning_sent: false,
                 warning_date: null,
                 notes: `[ZOMBIE]: Recuperado por inactividad post-aviso.`,
                 last_update: new Date().toISOString()
             })
             .eq('warning_sent', true)
-            .lt('warning_date', deadline24h) // FILTRO CLAVE: Solo si el aviso fue ANTES de hace 24hs
+            .lt('warning_date', deadline24h) 
         
         if (error) alert("Error al mover al cementerio: " + error.message)
         else fetchData()

@@ -11,7 +11,7 @@ import {
 } from "@dnd-kit/core"
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { ArchiveX, Trophy, BellRing, AlertOctagon, Phone, MessageCircle, CalendarClock } from "lucide-react"
+import { ArchiveX, Trophy, BellRing, AlertOctagon, Phone, MessageCircle, CalendarClock, Skull } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 
@@ -55,20 +55,29 @@ function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAg
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.3 : 1, scale: isDragging ? 1.05 : 1 }
     const isUrgent = lead.scheduled_for && new Date(lead.scheduled_for) <= new Date()
     const isOverdue = isLeadOverdue(lead.lastUpdate, lead.status)
+    // Alerta visual en la tarjeta si tiene aviso de Zombie
+    const isZombie = (lead as any).warning_sent === true
 
     return (
         <div id={`lead-${lead.id}`} ref={setNodeRef} style={style} {...attributes} {...listeners} onClick={onClick} 
             className={`rounded-xl relative transition-all duration-500 ease-in-out 
             ${isUrgent ? "ring-2 ring-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse" : ""}
-            ${isOverdue ? "ring-2 ring-yellow-400 border-yellow-200" : ""}`}>
+            ${isOverdue ? "ring-2 ring-yellow-400 border-yellow-200" : ""}
+            ${isZombie ? "ring-4 ring-red-600 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.6)] animate-pulse bg-red-50" : ""}`}>
+            
             {isUrgent && (
                 <div onClick={(e) => { e.stopPropagation(); onResolveAgenda(lead); }} className="absolute -top-3 -left-3 bg-red-600 text-white p-1.5 rounded-full z-50 shadow-xl border-2 border-white animate-bounce cursor-pointer">
                     <BellRing className="h-4 w-4" />
                 </div>
             )}
-            {isOverdue && (
+            {isOverdue && !isZombie && (
                 <div className="absolute -top-3 -right-3 bg-yellow-500 text-white p-1 rounded-full z-50 shadow-lg border-2 border-white animate-bounce">
                     <AlertOctagon className="h-4 w-4" />
+                </div>
+            )}
+            {isZombie && (
+                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-3 py-1 rounded-full z-50 shadow-2xl border-2 border-white animate-bounce flex items-center gap-2">
+                    <Skull className="h-4 w-4" /> <span className="text-[10px] font-black uppercase">Recupero Inminente</span>
                 </div>
             )}
             <LeadCard lead={lead} onCallIncrement={() => onCallIncrement(lead.id)} onOmniClick={() => onOmniClick(lead.id)} />
@@ -118,6 +127,7 @@ export function KanbanBoard({ userName }: { userName?: string }) {
     const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false)
     const [isDocConfirmOpen, setIsDocConfirmOpen] = useState(false)
     const [overdueLead, setOverdueLead] = useState<Lead | null>(null)
+    const [zombieLead, setZombieLead] = useState<Lead | null>(null) // ✅ Estado para Alerta Zombie
     
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
@@ -128,7 +138,8 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         id: item.id, name: item.name, phone: item.phone, source: item.source, status: item.status.toLowerCase(),
         lastUpdate: item.last_update || item.created_at, createdAt: item.created_at, agent: item.agent_name,
         calls: item.calls || 0, quoted_prepaga: item.quoted_prepaga, quoted_plan: item.quoted_plan, quoted_price: item.quoted_price, notes: item.notes || '',
-        scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas
+        scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas,
+        warning_sent: item.warning_sent // ✅ Agregamos campo de alerta
     }))
 
     const fetchLeads = async () => {
@@ -183,9 +194,19 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         return () => { supabase.removeChannel(channel) }
     }, [CURRENT_USER])
 
+    // ✅ DETECCIÓN DE ZOMBIES (Alerta Roja)
+    useEffect(() => {
+        const foundZombie = leads.find((l: any) => l.warning_sent === true);
+        if (foundZombie) {
+            setZombieLead(foundZombie);
+            if (audioRef.current) audioRef.current.play().catch(e => console.log("Audio error", e));
+        }
+    }, [leads]);
+
+    // Detección de Vencidos (Alerta Amarilla)
     useEffect(() => {
         const found = leads.find(l => isLeadOverdue(l.lastUpdate, l.status));
-        if (found) setOverdueLead(found);
+        if (found && !found.warning_sent) setOverdueLead(found); // Prioridad al Zombie
     }, [leads]);
 
     const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
@@ -228,24 +249,16 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         }
     }
 
-    // --- NUEVA FUNCIÓN: MANEJAR CLICK EN AURICULARES ---
     const handleOmniClick = (leadId: string) => {
         const lead = leads.find(l => l.id === leadId)
         if (!lead) return
-
-        // 1. Obtener URL de LocalStorage
         const omniUrl = localStorage.getItem("omni_url")
-        
         if (!omniUrl) {
             alert("⚠️ No tenés configurado tu link de OmniLeads.\nAndá a 'Configuración' en el menú lateral y pegá tu link.")
             return
         }
-
-        // 2. Copiar teléfono al portapapeles
         const cleanPhone = lead.phone.replace(/[^0-9]/g, '')
         navigator.clipboard.writeText(cleanPhone)
-
-        // 3. Abrir pestaña
         window.open(omniUrl, '_blank')
     }
 
@@ -297,7 +310,7 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                             leads={sortLeads(col.id)} 
                             onClickLead={(l: any) => setSelectedLead(l)} 
                             onCallIncrement={handleCallIncrement} 
-                            onOmniClick={handleOmniClick} // ✅ Pasamos la nueva función aquí
+                            onOmniClick={handleOmniClick} 
                             onResolveAgenda={(l: Lead) => setShowConfirmCall(l)} 
                         />
                     ))}
@@ -414,7 +427,32 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                 onCancel={() => setIsDocConfirmOpen(false)} 
             />
 
-            <Dialog open={!!overdueLead} onOpenChange={() => setOverdueLead(null)}>
+            {/* ✅ POP-UP ALERTA ZOMBIE (NUEVO) */}
+            <Dialog open={!!zombieLead} onOpenChange={() => setZombieLead(null)}>
+                <DialogContent 
+                    className="border-4 border-red-500 max-w-md shadow-[0_0_50px_rgba(220,38,38,0.5)] animate-in zoom-in duration-300 bg-white"
+                    onPointerDownOutside={(e) => e.preventDefault()}
+                    onEscapeKeyDown={(e) => e.preventDefault()}
+                >
+                    <DialogHeader className="text-center">
+                        <div className="mx-auto bg-red-100 p-4 rounded-full mb-4 w-fit border-2 border-red-500 animate-pulse"><Skull className="h-10 w-10 text-red-600" /></div>
+                        <DialogTitle className="text-3xl font-black text-red-600 uppercase tracking-tight">¡ALERTA DE SUPERVISIÓN!</DialogTitle>
+                        <DialogDescription className="text-lg text-slate-700 mt-2 font-bold">
+                            El lead <span className="text-xl bg-red-100 px-2 rounded text-red-800">{zombieLead?.name}</span> lleva más de 72hs inactivo.
+                        </DialogDescription>
+                        <p className="text-sm text-slate-500 mt-2 italic">Si no se gestiona ahora, el sistema lo reasignará automáticamente en 24hs.</p>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-3 mt-4">
+                        <Button className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black text-lg gap-2 shadow-lg" onClick={() => window.open(`https://wa.me/${zombieLead?.phone}?text=Hola! Te escribo para retomar tu consulta.`, '_blank')}>
+                            <MessageCircle size={24} fill="currentColor" /> RECUPERAR AHORA
+                        </Button>
+                        <Button variant="outline" className="w-full h-10 text-slate-400" onClick={() => setZombieLead(null)}>Entendido, lo gestionaré.</Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* POP-UP VENCIDO NORMAL (AMARILLO) */}
+            <Dialog open={!!overdueLead && !zombieLead} onOpenChange={() => setOverdueLead(null)}>
                 <DialogContent 
                     className="border-4 border-yellow-400 max-w-md shadow-2xl animate-in zoom-in duration-300"
                     onPointerDownOutside={(e) => e.preventDefault()}

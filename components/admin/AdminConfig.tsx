@@ -360,7 +360,8 @@ export function AdminConfig() {
                                     <div className="space-y-1">
                                         <Label className="text-xs text-red-500 font-bold flex items-center gap-1"><Flame size={10}/> Quemados (+7)</Label>
                                         <div className="relative">
-                                            <Input type="number" className="pl-2 pr-8" border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
+                                            {/* --- AQUÍ ESTABA EL ERROR CORREGIDO --- */}
+                                            <Input type="number" className="pl-2 pr-8 border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
                                             <span className="absolute right-3 top-2.5 text-xs text-red-400 font-bold">días</span>
                                         </div>
                                     </div>
@@ -631,3 +632,4 @@ export function AdminConfig() {
             </Dialog>
         </div>
     )
+}

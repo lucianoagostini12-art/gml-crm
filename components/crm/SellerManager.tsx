@@ -80,8 +80,7 @@ export function SellerManager({
   >("board")
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [announcements, setAnnouncements] = useState<any[]>([])
-
+  
   // Alertas & Notificaciones
   const [expiredTasks, setExpiredTasks] = useState<any[]>([])
   
@@ -540,9 +539,17 @@ export function SellerManager({
         </header>
 
         <div className="flex-1 overflow-hidden bg-slate-50 dark:bg-slate-950/50 relative transition-colors">
-          {currentView === "board" && <KanbanBoard userName={currentUser} />}
-          {currentView === "contacts" && <ContactsView userName={currentUser} />}
-          {currentView === "agenda" && <AgendasView userName={currentUser} />}
+          {/* ✅ AQUÍ ESTÁ EL CAMBIO CLAVE: pasar setSelectedLeadId */}
+          {currentView === "board" && (
+            <KanbanBoard userName={currentUser} onLeadClick={setSelectedLeadId} />
+          )}
+          {currentView === "contacts" && (
+            <ContactsView userName={currentUser} onLeadClick={setSelectedLeadId} />
+          )}
+          {currentView === "agenda" && (
+            <AgendasView userName={currentUser} onLeadClick={setSelectedLeadId} />
+          )}
+          
           {currentView === "mysales" && <MySalesView userName={currentUser} />}
 
           {currentView === "stats" && <DashboardView />}

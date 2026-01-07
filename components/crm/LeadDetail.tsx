@@ -55,7 +55,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const [newMessage, setNewMessage] = useState("")
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   
-  // ✅ NUEVO: Mapa para avatares de logs { "Nombre Usuario": "url_foto" }
+  // ✅ 1. NUEVO: Mapa para avatares de logs { "Nombre Usuario": "url_foto" }
   const [logAvatars, setLogAvatars] = useState<Record<string, string>>({})
 
   // Estado local para Intención (para que se actualice al instante)
@@ -74,6 +74,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     if (lead && open) {
       setObs("")
       setPrepaga(lead.prepaga || "")
+      // Formato ISO para que el input datetime-local lo lea bien
       setScheduledFor(lead.scheduled_for ? new Date(lead.scheduled_for).toISOString().slice(0, 16) : "")
       setIntent(lead.intent || 'medium')
 
@@ -113,7 +114,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     }
   }, [messages])
 
-  // ✅ 24h infalible
+  // ✅ 2. CAMBIO: hourCycle 'h23' para forzar 24hs (ej: 17:00 en vez de 5:00 p.m.)
   const fmtDateTime24 = (date: Date) =>
     new Intl.DateTimeFormat("es-AR", {
       day: "2-digit",
@@ -121,27 +122,32 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
       year: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
-      hourCycle: "h23",
+      hourCycle: "h23", 
     }).format(date)
 
+  // ✅ 3. CAMBIO: Buscar fotos de perfil reales para los logs
   const fetchAuditLogs = async () => {
     if (!lead?.id) return
     const { data } = await supabase.from("audit_logs").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false })
     if (data) {
         setAuditLogs(data)
         
-        // ✅ Buscar avatares de los usuarios que aparecen en los logs
+        // Extraemos los nombres únicos
         const uniqueUsers = Array.from(new Set(data.map((l: any) => l.user_name))).filter(Boolean)
         
         if (uniqueUsers.length > 0) {
+            // Buscamos en profiles
             const { data: profiles } = await supabase
                 .from('profiles')
                 .select('full_name, avatar_url')
                 .in('full_name', uniqueUsers)
             
+            // Mapeamos nombre -> foto
             const avatarMap: Record<string, string> = {}
             profiles?.forEach((p: any) => {
-                if (p.full_name) avatarMap[p.full_name] = p.avatar_url
+                if (p.full_name && p.avatar_url) {
+                    avatarMap[p.full_name] = p.avatar_url
+                }
             })
             setLogAvatars(avatarMap)
         }
@@ -704,17 +710,19 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   <div key={i} className="flex gap-4 relative">
                     {i !== auditLogs.length - 1 && <div className="absolute left-4 top-10 bottom-[-32px] w-0.5 bg-slate-100"></div>}
                     <Avatar className="h-10 w-10 border-2 border-white shadow-md z-10 shrink-0 mt-1">
-                      {/* ✅ FOTO REAL EN HISTORIAL */}
-                      <AvatarImage src={logAvatars[log.user_name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${log.user_name}`} />
+                      {/* ✅ 4. AVATAR ACTUALIZADO CON FOTO REAL */}
+                      <AvatarImage src={logAvatars[log.user_name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${log.user_name}`} className="object-cover" />
                       <AvatarFallback className="bg-blue-600 text-white text-[10px] font-black">{log.user_name?.[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col flex-1">
                       <div className="flex items-center gap-2 mb-1 justify-between">
+                        {/* ✅ 5. HORA 24HS ARREGLADA */}
                         <span className="text-[10px] font-black text-blue-500 uppercase tracking-tighter">
                           {fmtDateTime24(new Date(log.created_at))}
                         </span>
+                        {/* ✅ 6. NOMBRE GARANTIZADO SIEMPRE VISIBLE */}
                         <Badge variant="outline" className="text-[9px] h-5 border-slate-200 text-slate-400 font-black uppercase italic tracking-tighter bg-slate-50/50">
-                          vía {log.user_name}
+                          vía {log.user_name || "Sistema"}
                         </Badge>
                       </div>
                       <span className="text-[14px] font-black text-slate-800 leading-tight">{log.action}</span>

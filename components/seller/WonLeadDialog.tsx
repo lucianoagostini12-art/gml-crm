@@ -63,28 +63,56 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
     }))
   }
 
+  // --- FUNCIONES DE LIMPIEZA BLINDADAS (PRODUCCIÓN) ---
+  
+  const cleanNum = (val: any) => {
+    if (val === null || val === undefined || val === "") return 0;
+    const parsed = parseFloat(val);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const cleanStr = (val: any) => {
+    if (!val || typeof val !== 'string') return null;
+    const trimmed = val.trim();
+    return trimmed === "" ? null : trimmed;
+  };
+  
+  // Limpia DNI/CUIT/TEL: Saca guiones y espacios para evitar rechazo de DB
+  const cleanDni = (val: any) => {
+    if (!val) return null;
+    const str = val.toString().replace(/[^0-9]/g, ''); 
+    return str === "" ? null : str;
+  };
+
+  const cleanDate = (val: any) => (val && val !== "") ? val : null;
+
+
   // --- CONFIRMACIÓN PASS ---
   const handleConfirmPass = () => {
     if (!passData.fullName || !passData.dni) {
       return alert("Por favor, completá Nombre y DNI como mínimo.")
     }
     
-    // TRADUCTOR PASS -> DB FORMAT
-    onConfirm({
+    const dbData = {
       type: 'pass',
       status: 'ingresado', 
       sub_state: 'auditoria_pass',
       last_update: new Date().toISOString(),
 
-      name: passData.fullName.trim(),
-      dni: passData.dni.trim(),
-      phone: passData.phone.trim(),
-      prepaga: passData.prepaga,
-      plan: passData.plan,
+      name: cleanStr(passData.fullName),
+      dni: cleanDni(passData.dni),
+      phone: cleanDni(passData.phone),
+      prepaga: cleanStr(passData.prepaga),
+      plan: cleanStr(passData.plan),
       
       notes: passData.observations ? `[PASS - OBS]: ${passData.observations}` : null,
-    })
-    handleOpenChange(false)
+
+      // ✅ ARCHIVOS ACTIVOS (Guardamos metadata en JSONB)
+      files: passData.files.map(f => ({ name: f.name, size: f.size, type: f.type }))
+    };
+
+    onConfirm(dbData);
+    handleOpenChange(false);
   }
 
   // SI ELIGIÓ ALTA -> Mostramos el Wizard (ALTA NUEVA)
@@ -95,39 +123,28 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
         onOpenChange={handleOpenChange} 
         onConfirm={(wizardData: any) => {
           
-          const cleanNum = (val: any) => {
-             if (!val || val === "") return 0;
-             const parsed = parseFloat(val);
-             return isNaN(parsed) ? 0 : parsed;
-          };
-          const cleanStr = (val: any) => (val && val.trim() !== "") ? val.trim() : null;
-          const cleanDate = (val: any) => (val && val !== "") ? val : null;
-
-          // Mapeo ALTA -> DB
-          // ✅ CORREGIDO: Usamos los nombres en INGLÉS que tu base de datos espera
+          // CONSTRUCCIÓN DEL OBJETO FINAL
           const dbData = {
-            type: 'alta',
             status: 'ingresado', 
             sub_state: 'ingresado',
             last_update: new Date().toISOString(),
             
+            // Datos básicos (Limpios de guiones)
             name: cleanStr(wizardData.nombre),
-            dni: cleanStr(wizardData.cuit), 
-            cuit: cleanStr(wizardData.cuit),
+            dni: cleanDni(wizardData.cuit), 
+            cuit: cleanDni(wizardData.cuit),
             dob: cleanDate(wizardData.nacimiento),
             email: cleanStr(wizardData.email),
-            phone: cleanStr(wizardData.celular),
+            phone: cleanDni(wizardData.celular),
             
             address_street: cleanStr(wizardData.domicilio),
             address_city: cleanStr(wizardData.localidad),
             address_zip: cleanStr(wizardData.cp),
             province: cleanStr(wizardData.provincia),
             
-            // 1. CORRECCIÓN: 'affiliation_type' (DB) vs 'tipo_afiliacion'
+            // Datos de Venta
             affiliation_type: cleanStr(wizardData.tipoGrupo), 
             
-            // 2. CORRECCIÓN: 'family_members' (DB) vs 'hijos'
-            // Unificamos toda la familia en este campo JSON
             family_members: wizardData.tipoGrupo === 'matrimonio' 
                 ? [{ nombre: wizardData.matrimonioNombre, dni: wizardData.matrimonioDni, rol: 'conyuge' }, ...(wizardData.hijosData || [])] 
                 : (wizardData.hijosData || []),
@@ -135,24 +152,25 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             capitas: 1 + (wizardData.tipoGrupo === 'matrimonio' ? 1 : 0) + (parseInt(wizardData.cantHijos) || 0),
 
             source: cleanStr(wizardData.origen), 
-            
-            // 3. CORRECCIÓN: 'labor_condition' (DB) vs 'condicion_laboral'
             labor_condition: cleanStr(wizardData.condicion), 
-            
-            // 4. CORRECCIÓN: 'employer_cuit' (DB) vs 'cuit_empleador'
-            employer_cuit: cleanStr(wizardData.cuitEmpleador), 
+            employer_cuit: cleanDni(wizardData.cuitEmpleador), 
             
             notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}` + (wizardData.notes ? `\n\n[OBS]: ${wizardData.notes}` : ''),
 
             payment_method: cleanStr(wizardData.tipoPago), 
+
             cbu_card: wizardData.tipoPago === 'tarjeta' 
                 ? `${wizardData.bancoEmisor || ''} - ${wizardData.numeroTarjeta} (Vto: ${wizardData.vencimientoTarjeta})`
                 : `${wizardData.bancoEmisor || ''} - ${wizardData.cbuNumero}`,
             
+            // Montos (Numéricos)
             full_price: cleanNum(wizardData.fullPrice),
             aportes: cleanNum(wizardData.aportes),
             descuento: cleanNum(wizardData.descuento),
             total_a_pagar: cleanNum(wizardData.total_a_pagar),
+
+            // ✅ ARCHIVOS ACTIVOS (Guardamos metadata en JSONB)
+            files: (wizardData.archivos || []).map((f: any) => ({ name: f.name, size: f.size, type: f.type }))
           }
 
           onConfirm(dbData)

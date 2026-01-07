@@ -22,6 +22,9 @@ import {
   AlertTriangle,
   DollarSign,
   LogOut,
+  MessageCircle,
+  CalendarClock,
+  Info
 } from "lucide-react"
 
 // --- TUS VISTAS ---
@@ -46,6 +49,13 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+// --- HELPER PARA LEER COMENTARIOS DE LA DB ---
+const parseComments = (comments: any) => {
+    if (!comments) return []
+    if (Array.isArray(comments)) return comments
+    try { return JSON.parse(comments) } catch { return [] }
+}
+
 type AppNotification = {
   id: string
   user_name: string | null
@@ -63,7 +73,7 @@ export function SellerManager({
   userName: string | null
   onLogout: () => void
 }) {
-  const currentUser = userName || "Vendedor"
+  const currentUser = userName || "Vendedora"
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [currentView, setCurrentView] = useState<
@@ -81,10 +91,10 @@ export function SellerManager({
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   
-  // Alertas & Notificaciones
+  // --- ALERTAS & NOTIFICACIONES (ESTADOS) ---
   const [expiredTasks, setExpiredTasks] = useState<any[]>([])
   
-  // ✅ CONTADORES DE ALERTAS VISUALES
+  // Contadores visuales
   const [problematicSalesCount, setProblematicSalesCount] = useState(0) 
 
   const [unreadNotifications, setUnreadNotifications] = useState<AppNotification[]>([])
@@ -96,12 +106,12 @@ export function SellerManager({
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null)
 
-  // ✅ NUEVO: Estado para la foto de perfil real
+  // Estado para la foto de perfil real
   const [realAvatarUrl, setRealAvatarUrl] = useState<string | null>(null)
 
   const lastAutoOpenAtRef = useRef<number>(0)
 
-  // --- LÓGICA DE PROBLEMAS EN VENTAS ---
+  // 1. VENTAS CON PROBLEMAS
   const fetchProblematicSales = async () => {
       const { count } = await supabase
           .from('leads')
@@ -112,20 +122,63 @@ export function SellerManager({
       setProblematicSalesCount(count || 0)
   }
 
+  // 2. ALERTAS DE AGENDA (Vencidas + Próximas)
+  const fetchAgendaAlerts = async () => {
+      // Traemos leads activos asignados a mi
+      const { data } = await supabase.from('leads')
+        .select('id, name, scheduled_for')
+        .eq('agent_name', currentUser)
+        .not('status', 'in', '("perdido","vendido")') 
+      
+      if (!data) return;
+      
+      const now = new Date();
+      const in30Mins = new Date(now.getTime() + 30 * 60000); // Dentro de 30 mins
+      let alertsList: any[] = [];
+
+      data.forEach((lead: any) => {
+          if (lead.scheduled_for) {
+              const schedDate = new Date(lead.scheduled_for);
+              // Caso 1: Vencida
+              if (schedDate < now) {
+                  alertsList.push({ 
+                      type: 'vencida', 
+                      title: `Llamada vencida: ${lead.name}`, 
+                      leadId: lead.id, 
+                      time: schedDate 
+                  })
+              } 
+              // Caso 2: Próxima (en los siguientes 30 min)
+              else if (schedDate <= in30Mins) {
+                  alertsList.push({ 
+                      type: 'proxima', 
+                      title: `Llamar pronto: ${lead.name}`, 
+                      leadId: lead.id, 
+                      time: schedDate 
+                  })
+              }
+          }
+      })
+      
+      // Ordenamos: primero las urgentes (vencidas), luego las próximas
+      alertsList.sort((a, b) => a.time.getTime() - b.time.getTime());
+      setExpiredTasks(alertsList);
+  }
+
   useEffect(() => {
     if (!currentUser) return
 
     let notifChannel: any = null
-    let quotesChannel: any = null
     let salesChannel: any = null
+    let quotesChannel: any = null // Mantenemos el canal de quotes original
     let alive = true
 
     const init = async () => {
-      // 1. Notificaciones
+      // A. Notificaciones de DB (Wiki, Anuncios)
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
-        .eq("user_name", currentUser)
+        .or(`user_name.eq.${currentUser},user_name.is.null`) // Filtro mejorado: Para mi O para todos
         .eq("read", false)
         .order("created_at", { ascending: false })
         .limit(50)
@@ -133,14 +186,15 @@ export function SellerManager({
       if (!alive) return
       if (!error && data) setUnreadNotifications(data as AppNotification[])
 
-      // 2. Chequear ventas rechazadas
+      // B. Chequeos Iniciales
       await fetchProblematicSales()
+      await fetchAgendaAlerts() // Llamamos a la nueva función de agendas
 
-      // 3. ✅ BUSCAR FOTO REAL DEL USUARIO
+      // C. Foto Real
       const { data: profileData } = await supabase
         .from('profiles')
         .select('avatar_url')
-        .eq('full_name', currentUser) // Buscamos por nombre ya que es lo que tenemos aquí
+        .eq('full_name', currentUser)
         .maybeSingle()
       
       if (profileData?.avatar_url) {
@@ -148,49 +202,87 @@ export function SellerManager({
       }
     }
 
+    // --- FUNCIÓN DE AUTO-APERTURA PROTEGIDA ---
     const openBellSoft = () => {
+      // 🛑 PROTECCIÓN: Si hay un modal abierto (LeadDetail), NO abrir el popover encima.
+      if (selectedLeadId) return;
+
       const now = Date.now()
-      if (now - lastAutoOpenAtRef.current > 1200) {
+      if (now - lastAutoOpenAtRef.current > 2000) { // Pequeño delay
         lastAutoOpenAtRef.current = now
         setIsNotifOpen(true)
       }
     }
 
-    const openAlertsSoft = () => {
-      const now = Date.now()
-      if (now - lastAutoOpenAtRef.current > 1200) {
-        lastAutoOpenAtRef.current = now
-        setIsAlertsOpen(true)
-      }
-    }
-
-    // A. Realtime: NOTIFICACIONES
+    // --- SUSCRIPCIÓN 1: NOTIFICACIONES (ANUNCIOS / WIKI) ---
     notifChannel = supabase
       .channel(`rt-notifications-${currentUser}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notifications", filter: `user_name=eq.${currentUser}` },
+        { event: "INSERT", schema: "public", table: "notifications" },
         (payload: any) => {
           const n = payload.new as AppNotification
-          setUnreadNotifications((prev) => [n, ...prev])
-          openBellSoft()
+          // Si es para mi o para todos
+          if (n.user_name === currentUser || n.user_name === null) {
+              setUnreadNotifications((prev) => [n, ...prev])
+              openBellSoft()
+          }
         }
       )
       .subscribe()
 
-    // B. Realtime: VENTAS
+    // --- SUSCRIPCIÓN 2: LEADS (CHATS / AGENDAS / VENTAS) ---
+    // Escuchamos TODO lo que pase en mis leads
     salesChannel = supabase
-      .channel(`rt-sales-problems-${currentUser}`)
+      .channel(`rt-sales-monitor-${currentUser}`)
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "leads", filter: `agent_name=eq.${currentUser}` },
+        { event: "*", schema: "public", table: "leads", filter: `agent_name=eq.${currentUser}` },
         (payload: any) => {
-            fetchProblematicSales() 
+            // 1. Recalcular Alertas siempre que algo cambie
+            fetchProblematicSales()
+            fetchAgendaAlerts() 
+
+            // 2. DETECTOR DE CHATS (Admin/OPS -> Vendedor)
+            if (payload.eventType === 'UPDATE') {
+                const newLead = payload.new;
+                const newComments = parseComments(newLead.comments);
+                
+                if (newComments.length > 0) {
+                    const lastMsg = newComments[newComments.length - 1];
+                    
+                    // Si el mensaje es reciente (margen 10s) y NO es mío -> Notificar
+                    const msgTime = new Date(lastMsg.date).getTime();
+                    const now = Date.now();
+                    const isRecent = (now - msgTime) < 10000; 
+
+                    if (lastMsg.author !== currentUser && isRecent) {
+                        // Crear notificación local "Chat"
+                        const chatNotif: AppNotification = {
+                            id: `chat-${newLead.id}-${Date.now()}`,
+                            user_name: currentUser,
+                            type: 'chat', 
+                            title: `Mensaje de ${lastMsg.author}`,
+                            body: `${lastMsg.text} (Cliente: ${newLead.name})`,
+                            read: false,
+                            created_at: new Date().toISOString()
+                        }
+                        
+                        // Evitar duplicados
+                        setUnreadNotifications(prev => {
+                            if (prev.some(n => n.body === chatNotif.body)) return prev;
+                            return [chatNotif, ...prev];
+                        });
+                        
+                        openBellSoft();
+                    }
+                }
+            }
         }
       )
       .subscribe()
 
-    // C. Realtime: QUOTES
+    // --- SUSCRIPCIÓN 3: QUOTES (Mantenida del original) ---
     quotesChannel = supabase
       .channel(`rt-quotes-${currentUser}`)
       .on(
@@ -204,7 +296,8 @@ export function SellerManager({
           const belongsToSeller = lead.assigned_to === currentUser || lead.agent_name === currentUser
           if (!belongsToSeller) return
           setQuoteAlertsCount((c) => c + 1)
-          openAlertsSoft()
+          // Usamos la misma protección para no abrir si hay modal
+          if (!selectedLeadId) setIsAlertsOpen(true);
         }
       )
       .subscribe()
@@ -217,7 +310,7 @@ export function SellerManager({
       if (quotesChannel) supabase.removeChannel(quotesChannel)
       if (salesChannel) supabase.removeChannel(salesChannel)
     }
-  }, [currentUser])
+  }, [currentUser, selectedLeadId]) // Agregado selectedLeadId para que el efecto sepa si bloquear
 
   // Fix Lead Detail
   useEffect(() => {
@@ -245,15 +338,17 @@ export function SellerManager({
   const handleCreateConfirm = async (_data: any) => { setIsCreateOpen(false) }
 
   const markAllNotificationsAsRead = async () => {
-    const ids = unreadNotifications.map((n) => n.id)
-    if (ids.length === 0) return
+    // Limpiamos UI
     setUnreadNotifications([])
+    // Solo actualizamos en DB las que tienen ID real (las de chat son locales)
+    const ids = unreadNotifications.filter(n => !n.id.startsWith('chat-')).map((n) => n.id)
+    if (ids.length === 0) return
     await supabase.from("notifications").update({ read: true }).in("id", ids)
   }
 
   return (
     <div className="flex h-screen w-full bg-white dark:bg-slate-950 overflow-hidden text-slate-900 dark:text-slate-100 transition-colors">
-      {/* --- SIDEBAR ORIGINAL (AZUL) --- */}
+      {/* --- SIDEBAR --- */}
       <aside
         className={`h-full bg-slate-50/50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out z-20 flex flex-col ${
           isSidebarOpen
@@ -305,7 +400,7 @@ export function SellerManager({
               <DollarSign className="h-4 w-4 shrink-0 text-green-600" /> Mis Ventas
             </div>
             
-            {/* ✅ CONTADOR ROJO DE PROBLEMAS EN VENTAS */}
+            {/* ✅ CONTADOR DE VENTAS PROBLEMÁTICAS */}
             {problematicSalesCount > 0 && (
               <span className="bg-red-500 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full animate-pulse shadow-sm">
                 {problematicSalesCount}
@@ -370,7 +465,7 @@ export function SellerManager({
           <div className="flex items-center gap-3 justify-between">
             <div className="flex items-center gap-2">
               <Avatar className="h-8 w-8">
-                {/* ✅ FOTO REAL AQUI */}
+                {/* ✅ FOTO REAL */}
                 <AvatarImage src={realAvatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser}`} className="object-cover" />
                 <AvatarFallback>{currentUser[0]}</AvatarFallback>
               </Avatar>
@@ -378,7 +473,7 @@ export function SellerManager({
                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">
                   {currentUser}
                 </span>
-                <span className="text-[10px] text-slate-500 uppercase">Vendedor</span>
+                <span className="text-[10px] text-slate-500 uppercase">Vendedora</span>
               </div>
             </div>
 
@@ -424,14 +519,15 @@ export function SellerManager({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* ✅ ALERTAS (triángulo): cotizaciones + vencidos */}
+            
+            {/* ⚠️ ALERTAS (TRIÁNGULO): Agendas Vencidas y Próximas */}
             <Popover open={isAlertsOpen} onOpenChange={setIsAlertsOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="text-amber-500 hover:bg-amber-50 relative"
-                  title="Alertas"
+                  title="Alertas de Agenda"
                 >
                   <AlertTriangle className="h-5 w-5" />
 
@@ -439,45 +535,47 @@ export function SellerManager({
                     <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-600 rounded-full border border-white animate-pulse"></span>
                   )}
 
-                  {quoteAlertsCount > 0 && (
+                  {(expiredTasks.length + quoteAlertsCount) > 0 && (
                     <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-red-600 text-white text-[10px] flex items-center justify-center">
-                      {quoteAlertsCount}
+                      {expiredTasks.length + quoteAlertsCount}
                     </span>
                   )}
                 </Button>
               </PopoverTrigger>
 
               <PopoverContent className="w-80 p-0" align="end">
-                <div className="p-3 border-b flex justify-between items-center">
-                  <h4 className="font-bold text-sm">Alertas</h4>
-                  <span className="text-xs text-slate-500">
-                    {expiredTasks.length + quoteAlertsCount} activas
-                  </span>
+                <div className="p-3 border-b bg-amber-50 flex justify-between items-center text-amber-900">
+                  <h4 className="font-bold text-sm">Agenda & Alertas</h4>
                 </div>
 
                 <div className="max-h-80 overflow-auto">
                   {quoteAlertsCount > 0 && (
                     <div className="p-3 border-b">
-                      <div className="text-sm font-semibold">Cotizaciones nuevas</div>
+                      <div className="text-sm font-semibold text-blue-600">Cotizaciones nuevas</div>
                       <div className="text-xs text-slate-500 mt-1">
                         Tenés {quoteAlertsCount} cotización(es) nueva(s).
                       </div>
                     </div>
                   )}
 
-                  {expiredTasks.length === 0 && quoteAlertsCount === 0 && (
-                    <div className="p-4 text-xs text-slate-500">Todo al día.</div>
+                  {expiredTasks.length > 0 ? (
+                      expiredTasks.map((task: any, i) => (
+                        <div key={i} className="p-3 border-b hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedLeadId(task.leadId)}>
+                            <div className={`flex items-center gap-2 font-bold text-xs mb-1 ${task.type === 'vencida' ? 'text-red-600' : 'text-amber-600'}`}>
+                                <CalendarClock size={12}/> {task.type === 'vencida' ? 'VENCIDA' : 'PRÓXIMA (30 min)'}
+                            </div>
+                            <p className="text-sm font-medium text-slate-700">{task.title}</p>
+                            <span className="text-[10px] text-slate-400">{new Date(task.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} hs</span>
+                        </div>
+                      ))
+                  ) : (
+                      quoteAlertsCount === 0 && <div className="p-4 text-xs text-slate-500 text-center italic">Agenda al día.</div>
                   )}
 
                   {quoteAlertsCount > 0 && (
                     <div className="p-3 border-t bg-slate-50 dark:bg-slate-900 flex justify-end">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setQuoteAlertsCount(0)}
-                        className="text-xs"
-                      >
-                        Marcar cotizaciones como vistas
+                      <Button variant="outline" size="sm" onClick={() => setQuoteAlertsCount(0)} className="text-xs">
+                        Limpiar cotizaciones
                       </Button>
                     </div>
                   )}
@@ -485,7 +583,7 @@ export function SellerManager({
               </PopoverContent>
             </Popover>
 
-            {/* ✅ NOTIFICACIONES (campanita): auto-open + listado */}
+            {/* 🔔 NOTIFICACIONES (CAMPANA): Chats, Wiki, Anuncios */}
             <Popover open={isNotifOpen} onOpenChange={setIsNotifOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="icon" className="relative dark:border-slate-700 dark:bg-slate-900">
@@ -509,25 +607,24 @@ export function SellerManager({
                     <div className="p-4 text-sm text-slate-500 text-center">Sin novedades.</div>
                   ) : (
                     unreadNotifications.map((n) => (
-                      <div key={n.id} className="p-3 border-b last:border-b-0">
+                      <div key={n.id} className={`p-3 border-b last:border-b-0 ${n.type === 'chat' ? 'bg-blue-50/50' : ''}`}>
                         <div className="flex items-start justify-between gap-2">
-                          <div className="text-sm font-semibold">
-                            {n.title ?? n.type ?? "Notificación"}
+                          <div className="text-sm font-semibold flex items-center gap-2">
+                            {/* Icono según tipo */}
+                            {n.type === 'chat' ? <MessageCircle size={14} className="text-blue-600"/> : 
+                             n.type === 'wiki' ? <BookOpen size={14} className="text-purple-500"/> : 
+                             n.type === 'announcement' ? <Megaphone size={14} className="text-orange-500"/> :
+                             <Info size={14} className="text-slate-400"/>}
+                            
+                            {n.title ?? "Notificación"}
                           </div>
-                          {n.type && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-200">
-                              {n.type}
-                            </span>
-                          )}
+                          
+                          <span className="text-[9px] text-slate-400 whitespace-nowrap">
+                            {n.created_at ? new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Ahora'}
+                          </span>
                         </div>
 
-                        {n.body && <div className="text-xs text-slate-500 mt-1">{n.body}</div>}
-
-                        {n.created_at && (
-                          <div className="text-[10px] text-slate-400 mt-1">
-                            {new Date(n.created_at).toLocaleString()}
-                          </div>
-                        )}
+                        {n.body && <div className="text-xs text-slate-600 mt-1 line-clamp-2 leading-relaxed">{n.body}</div>}
                       </div>
                     ))
                   )}
@@ -582,6 +679,7 @@ export function SellerManager({
         userName={currentUser}
       />
 
+      {/* ✅ UN SOLO LUGAR PARA EL MODAL (EL PADRE) */}
       {selectedLeadId && (
         <LeadDetail
           lead={selectedLead}

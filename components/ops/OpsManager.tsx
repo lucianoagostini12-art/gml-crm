@@ -640,27 +640,63 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 globalConfig={globalConfig}
             />
             
-            {/* --- MODAL ASIGNAR OPERADOR --- */}
+            {/* --- MODAL ASIGNAR OPERADOR (ESTÉTICA PREMIUM MEJORADA) --- */}
             <Dialog open={!!assigningOp} onOpenChange={(open) => !open && setAssigningOp(null)}>
-                <DialogContent className="max-w-[500px] w-full p-0 overflow-hidden border-0 shadow-2xl rounded-2xl gap-0">
-                    <div className="bg-slate-900 p-6 relative flex flex-col items-center justify-center text-center">
-                        <button onClick={() => setAssigningOp(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"><X size={20}/></button>
-                        <div className="h-12 w-12 bg-blue-500/20 rounded-full flex items-center justify-center mb-3 animate-pulse"><ShieldCheck className="h-6 w-6 text-blue-400"/></div>
-                        <DialogTitle className="text-white text-xl font-black tracking-tight">¿Quién toma el caso?</DialogTitle>
-                        <DialogDescription className="text-slate-400 text-xs mt-1">Seleccioná un operador/a del equipo.</DialogDescription>
+                <DialogContent className="max-w-[600px] w-full p-0 overflow-hidden border-0 shadow-2xl rounded-3xl gap-0 bg-slate-50">
+                    {/* Header Premium */}
+                    <div className="bg-slate-900 p-8 relative flex flex-col items-center justify-center text-center overflow-hidden">
+                        {/* Background Pattern */}
+                        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-400 via-slate-900 to-slate-900"></div>
+
+                        <button onClick={() => setAssigningOp(null)} className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors z-20"><X size={20}/></button>
+
+                        <div className="relative z-10 h-16 w-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-900/50 rotate-3">
+                            <ShieldCheck className="h-8 w-8 text-white"/>
+                        </div>
+                        <DialogTitle className="relative z-10 text-white text-2xl font-black tracking-tight">Asignar Responsable</DialogTitle>
+                        <DialogDescription className="relative z-10 text-blue-200 text-sm mt-1 font-medium">Seleccioná quien gestionará este caso.</DialogDescription>
                     </div>
-                    <div className="p-6 bg-white grid grid-cols-2 sm:grid-cols-3 gap-4 max-h-[400px] overflow-y-auto">
+
+                    {/* Grid Premium */}
+                    <div className="p-8 bg-slate-50 grid grid-cols-2 gap-4 max-h-[450px] overflow-y-auto">
                         {adminUsers.length > 0 ? adminUsers.map((u) => (
-                            <div key={u.id} onClick={() => confirmAssignment(u.full_name || u.email)} className="group cursor-pointer border border-slate-200 rounded-xl p-4 flex flex-col items-center hover:border-blue-500 hover:bg-blue-50 hover:shadow-lg transition-all active:scale-95 duration-200">
-                                <Avatar className="h-12 w-12 mb-2 border-2 border-white shadow-sm group-hover:scale-110 transition-transform">
-                                    <AvatarImage src={u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`} />
-                                    <AvatarFallback className="bg-purple-600 text-white font-bold">{u.full_name?.[0] || 'U'}</AvatarFallback>
-                                </Avatar>
-                                <span className="font-bold text-slate-700 group-hover:text-blue-700 text-sm truncate w-full text-center">{u.full_name || 'Usuario'}</span>
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{u.role === 'admin_god' ? 'GOD' : 'OPS'}</span>
+                            <div 
+                                key={u.id} 
+                                onClick={() => confirmAssignment(u.full_name || u.email)} 
+                                className="group relative cursor-pointer bg-white border border-slate-200 hover:border-blue-500/50 rounded-2xl p-4 flex items-center gap-4 hover:shadow-xl hover:shadow-blue-900/5 transition-all duration-300 active:scale-[0.98]"
+                            >
+                                {/* Avatar Fix: object-cover y tamaño fijo */}
+                                <div className="relative shrink-0">
+                                    <Avatar className="h-14 w-14 border-2 border-slate-100 shadow-sm group-hover:border-blue-100 transition-colors">
+                                        <AvatarImage 
+                                            src={u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`} 
+                                            className="object-cover h-full w-full" // CLAVE: object-cover para que no se deforme
+                                        />
+                                        <AvatarFallback className="bg-slate-800 text-white font-bold">{u.full_name?.[0] || 'U'}</AvatarFallback>
+                                    </Avatar>
+                                    {/* Status Dot */}
+                                    <div className="absolute bottom-0 right-0 h-3.5 w-3.5 bg-green-500 border-2 border-white rounded-full"></div>
+                                </div>
+                                
+                                <div className="flex flex-col min-w-0">
+                                    <span className="font-bold text-slate-700 text-sm group-hover:text-blue-700 truncate transition-colors">
+                                        {u.full_name || 'Usuario'}
+                                    </span>
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full w-fit mt-1 ${u.role === 'admin_god' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                        {u.role === 'admin_god' ? 'Admin' : 'Operador'}
+                                    </span>
+                                </div>
+
+                                {/* Arrow icon on hover */}
+                                <div className="absolute right-4 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-[-10px] group-hover:translate-x-0 text-blue-500">
+                                    <Check size={18} strokeWidth={3} />
+                                </div>
                             </div>
                         )) : (
-                            <p className="col-span-3 text-center text-sm text-slate-500 py-4">No hay operadores disponibles.</p>
+                            <div className="col-span-2 flex flex-col items-center justify-center py-10 opacity-50">
+                                <User className="h-10 w-10 mb-2"/>
+                                <p className="text-sm font-medium">No hay operadores disponibles.</p>
+                            </div>
                         )}
                     </div>
                 </DialogContent>

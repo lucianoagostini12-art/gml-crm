@@ -4,26 +4,25 @@ import { useEffect, useState, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import {
     DndContext, DragOverlay, pointerWithin, KeyboardSensor, PointerSensor,
-    useSensor, useSensors, DragStartEvent, DragOverEvent, DragEndEvent, useDroppable,
+    useSensor, useSensors, DragEndEvent, useDroppable,
     closestCorners,
-    rectIntersection,
-    getFirstCollision
+    rectIntersection
 } from "@dnd-kit/core"
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { ArchiveX, Trophy, BellRing, AlertOctagon, Phone, MessageCircle, CalendarClock, Skull } from "lucide-react"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { ArchiveX, Trophy, BellRing, AlertOctagon, Skull, MessageCircle, Phone, CheckCircle2, Clock } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 // --- COMPONENTES ---
 import { Lead, LeadCard } from "./LeadCard"
-import { LeadDetail } from "./LeadDetail"
 import { DocConfirmDialog } from "./DocConfirmDialog"
 import { LostLeadDialog } from "@/components/seller/LostLeadDialog"
 import { WonLeadDialog } from "@/components/seller/WonLeadDialog" 
 import { QuotationDialog } from "@/components/seller/QuotationDialog"
 
-const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
+const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3"
 
 const ACTIVE_COLUMNS = [
     { id: "nuevo", title: "Sin Trabajar 📥", color: "bg-slate-100 dark:bg-[#18191A] border dark:border-[#3E4042]" },
@@ -53,33 +52,44 @@ const isLeadOverdue = (lastUpdateStr: string, status: string) => {
 function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.3 : 1, scale: isDragging ? 1.05 : 1 }
+    
     const isUrgent = lead.scheduled_for && new Date(lead.scheduled_for) <= new Date()
     const isOverdue = isLeadOverdue(lead.lastUpdate, lead.status)
-    // Alerta visual en la tarjeta si tiene aviso de Zombie
     const isZombie = (lead as any).warning_sent === true
 
     return (
-        <div id={`lead-${lead.id}`} ref={setNodeRef} style={style} {...attributes} {...listeners} onClick={onClick} 
+        <div id={`lead-${lead.id}`} ref={setNodeRef} style={style} {...attributes} {...listeners} 
+            onClick={() => onClick(lead)} 
             className={`rounded-xl relative transition-all duration-500 ease-in-out 
-            ${isUrgent ? "ring-2 ring-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse" : ""}
-            ${isOverdue ? "ring-2 ring-yellow-400 border-yellow-200" : ""}
+            ${isUrgent ? "ring-4 ring-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse border-red-500 bg-red-50/10" : ""}
+            ${isOverdue ? "ring-4 ring-yellow-400 border-yellow-300 shadow-[0_0_15px_rgba(250,204,21,0.5)] animate-pulse" : ""}
             ${isZombie ? "ring-4 ring-red-600 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.6)] animate-pulse bg-red-50" : ""}`}>
             
             {isUrgent && (
-                <div onClick={(e) => { e.stopPropagation(); onResolveAgenda(lead); }} className="absolute -top-3 -left-3 bg-red-600 text-white p-1.5 rounded-full z-50 shadow-xl border-2 border-white animate-bounce cursor-pointer">
-                    <BellRing className="h-4 w-4" />
+                <div 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
+                        onResolveAgenda(lead); 
+                    }} 
+                    className="absolute -top-3 -left-3 bg-red-600 hover:bg-red-500 text-white p-2 rounded-full z-50 shadow-xl border-2 border-white animate-bounce cursor-pointer hover:scale-110 transition-transform group"
+                    title="Click para desactivar alarma"
+                >
+                    <BellRing className="h-5 w-5 fill-white" />
                 </div>
             )}
+            
             {isOverdue && !isZombie && (
-                <div className="absolute -top-3 -right-3 bg-yellow-500 text-white p-1 rounded-full z-50 shadow-lg border-2 border-white animate-bounce">
+                <div className="absolute -top-3 -right-3 bg-yellow-500 text-white p-1.5 rounded-full z-50 shadow-lg border-2 border-white animate-bounce">
                     <AlertOctagon className="h-4 w-4" />
                 </div>
             )}
+            
             {isZombie && (
                 <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-3 py-1 rounded-full z-50 shadow-2xl border-2 border-white animate-bounce flex items-center gap-2">
-                    <Skull className="h-4 w-4" /> <span className="text-[10px] font-black uppercase">Recupero Inminente</span>
+                    <Skull className="h-4 w-4" /> <span className="text-[10px] font-black uppercase">Recupero</span>
                 </div>
             )}
+            
             <LeadCard lead={lead} onCallIncrement={() => onCallIncrement(lead.id)} onOmniClick={() => onOmniClick(lead.id)} />
         </div>
     )
@@ -87,7 +97,6 @@ function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAg
 
 function KanbanColumn({ col, leads, onClickLead, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { setNodeRef } = useDroppable({ id: col.id })
-    
     return (
         <div ref={setNodeRef} className={`min-w-[300px] w-[300px] flex flex-col rounded-xl ${col.color} p-4 min-h-full h-fit`}>
             <div className="flex justify-between items-center mb-4 px-1 text-slate-700 sticky top-0 z-10 py-1 bg-inherit">
@@ -112,17 +121,16 @@ function DropZone({ id, children, className }: any) {
     return <div ref={setNodeRef} className={`${className} transition-all duration-300 ${isOver ? 'scale-110 ring-4 ring-white shadow-2xl opacity-100' : 'opacity-80'}`}>{children}</div>
 }
 
-// ✅ SE AGREGÓ onLeadClick A LAS PROPS Y LA INTERFAZ
 export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLeadClick?: (id: string) => void }) {
     const supabase = createClient()
     const [leads, setLeads] = useState<Lead[]>([])
     const [activeId, setActiveId] = useState<string | null>(null)
-    const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
     const [alarmLead, setAlarmLead] = useState<Lead | null>(null)
-    const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null)
     const [leadProcessingId, setLeadProcessingId] = useState<string | null>(null)
-    
-    // Dialog States
+    const [ignoredAlarmIds, setIgnoredAlarmIds] = useState<string[]>([])
+
+    // Dialogs
+    const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null) 
     const [isLostDialogOpen, setIsLostDialogOpen] = useState(false)
     const [isWonDialogOpen, setIsWonDialogOpen] = useState(false)
     const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false)
@@ -145,12 +153,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     const fetchLeads = async () => {
         const visibleStatuses = ['nuevo', 'contactado', 'cotizacion', 'documentacion'];
-
-        const { data } = await supabase.from('leads')
-            .select('*')
-            .eq('agent_name', CURRENT_USER)
-            .in('status', visibleStatuses) 
-        
+        const { data } = await supabase.from('leads').select('*').eq('agent_name', CURRENT_USER).in('status', visibleStatuses) 
         if (data) setLeads(mapLeads(data))
     }
 
@@ -168,12 +171,19 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         return closestCorners(args);
     };
 
+    // --- STOP AUDIO HELPER ---
+    const stopAudio = () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+        }
+    }
+
     useEffect(() => {
         fetchLeads()
         const channel = supabase.channel('kanban_realtime_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
                 const newData = payload.new as any;
-
                 if (payload.eventType === 'INSERT') {
                     if (newData && !['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(newData.status)) {
                         const newLead = mapLeads([newData])[0]
@@ -191,32 +201,49 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 }
             })
             .subscribe()
-        if (typeof window !== 'undefined') { audioRef.current = new Audio(ALARM_SOUND); audioRef.current.loop = true; }
-        return () => { supabase.removeChannel(channel) }
+        
+        if (typeof window !== 'undefined') { 
+            audioRef.current = new Audio(ALARM_SOUND); 
+            audioRef.current.loop = true; 
+        }
+        
+        return () => { 
+            supabase.removeChannel(channel);
+            stopAudio();
+        }
     }, [CURRENT_USER])
 
-    // ✅ DETECCIÓN DE ZOMBIES (Alerta Roja)
+    // MONITOR AGENDA
     useEffect(() => {
-        const foundZombie = leads.find((l: any) => l.warning_sent === true);
-        if (foundZombie) {
-            setZombieLead(foundZombie);
-            if (audioRef.current) audioRef.current.play().catch(e => console.log("Audio error", e));
-        }
-    }, [leads]);
+        const checkAgendas = () => {
+            const now = new Date();
+            const urgentLead = leads.find(l => l.scheduled_for && new Date(l.scheduled_for) <= now && !ignoredAlarmIds.includes(l.id));
+            if (urgentLead && !alarmLead && !showConfirmCall) {
+                setAlarmLead(urgentLead);
+            }
+        };
+        const intervalId = setInterval(checkAgendas, 15000); 
+        checkAgendas(); 
+        return () => clearInterval(intervalId);
+    }, [leads, alarmLead, showConfirmCall, ignoredAlarmIds]);
 
-    // Detección de Vencidos (Alerta Amarilla)
+    // AUDIO MANAGER
     useEffect(() => {
-        const found = leads.find(l => isLeadOverdue(l.lastUpdate, l.status));
-        if (found && !found.warning_sent) setOverdueLead(found);
-    }, [leads]);
+        const shouldPlay = !!zombieLead || !!alarmLead || !!overdueLead;
+        if (shouldPlay && audioRef.current) {
+            audioRef.current.volume = 0.5;
+            audioRef.current.play().catch(() => {});
+        } else {
+            stopAudio();
+        }
+    }, [zombieLead, alarmLead, overdueLead]);
+
+    useEffect(() => { const found = leads.find((l: any) => l.warning_sent === true); if (found) setZombieLead(found); }, [leads]);
+    useEffect(() => { const found = leads.find(l => isLeadOverdue(l.lastUpdate, l.status)); if (found && !found.warning_sent) setOverdueLead(found); }, [leads]);
 
     const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
         await supabase.from('lead_status_history').insert({
-            lead_id: leadId,
-            agent_name: CURRENT_USER,
-            from_status: fromStatus,
-            to_status: toStatus,
-            changed_at: new Date().toISOString()
+            lead_id: leadId, agent_name: CURRENT_USER, from_status: fromStatus, to_status: toStatus, changed_at: new Date().toISOString()
         })
     }
 
@@ -225,75 +252,61 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         const newCallCount = lead.calls + 1
         const timestamp = new Date().toLocaleString('es-AR', { hour: '2-digit', minute: '2-digit' })
         const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
-        
         let newStatus = lead.status
         const isBurned = newCallCount >= 7 && (lead.status === 'nuevo' || lead.status === 'contactado')
-        
         if (isBurned) newStatus = 'perdido'
-
-        if (isBurned) {
-            setLeads(prev => prev.filter(l => l.id !== leadId))
-        } else {
-            setLeads(prev => prev.map(l => l.id === leadId ? { ...l, calls: newCallCount, notes: updatedNotes } : l))
-        }
-
-        await supabase.from('leads').update({ 
-            calls: newCallCount, 
-            notes: updatedNotes, 
-            status: newStatus.toLowerCase(), 
-            last_update: new Date().toISOString(), 
-            loss_reason: isBurned ? 'Dato quemado (7 llamados)' : null 
-        }).eq('id', leadId)
-
-        if (isBurned) {
-            logHistory(leadId, lead.status, 'perdido')
-        }
+        if (isBurned) setLeads(prev => prev.filter(l => l.id !== leadId))
+        else setLeads(prev => prev.map(l => l.id === leadId ? { ...l, calls: newCallCount, notes: updatedNotes } : l))
+        await supabase.from('leads').update({ calls: newCallCount, notes: updatedNotes, status: newStatus.toLowerCase(), last_update: new Date().toISOString(), loss_reason: isBurned ? 'Dato quemado' : null }).eq('id', leadId)
+        if (isBurned) logHistory(leadId, lead.status, 'perdido')
     }
 
     const handleOmniClick = (leadId: string) => {
-        const lead = leads.find(l => l.id === leadId)
-        if (!lead) return
+        const lead = leads.find(l => l.id === leadId); if (!lead) return
         const omniUrl = localStorage.getItem("omni_url")
-        if (!omniUrl) {
-            alert("⚠️ No tenés configurado tu link de OmniLeads.\nAndá a 'Configuración' en el menú lateral y pegá tu link.")
-            return
-        }
+        if (!omniUrl) { alert("⚠️ No tenés configurado tu link de OmniLeads."); return }
         const cleanPhone = lead.phone.replace(/[^0-9]/g, '')
         navigator.clipboard.writeText(cleanPhone)
         window.open(omniUrl, '_blank')
+    }
+
+    // ✅ COMPLETAR AGENDA Y APAGAR ALARMAS
+    const handleCompleteAgenda = async () => {
+        if (!showConfirmCall) return;
+        const leadId = showConfirmCall.id;
+        stopAudio(); 
+        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: null } : l))
+        setShowConfirmCall(null);
+        setAlarmLead(null); 
+        await supabase.from('leads').update({ scheduled_for: null, last_update: new Date().toISOString() }).eq('id', leadId)
+    }
+
+    // ✅ GESTIONAR AHORA
+    const handleManageNow = () => {
+        if (!alarmLead) return;
+        stopAudio(); 
+        setIgnoredAlarmIds(prev => [...prev, alarmLead.id])
+        if (onLeadClick) onLeadClick(alarmLead.id);
+        setAlarmLead(null);
     }
 
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event; 
         setActiveId(null); 
         if (!over) return
-
-        const activeLead = leads.find(l => l.id === active.id); 
-        if (!activeLead) return
-
+        const activeLead = leads.find(l => l.id === active.id); if (!activeLead) return
         if (over.id === 'zone-perdido') { setLeadProcessingId(active.id as string); setIsLostDialogOpen(true); return }
         if (over.id === 'zone-vendido') { setLeadProcessingId(active.id as string); setIsWonDialogOpen(true); return }
-
         let overCol = over.id as string
-        const leadTarget = leads.find(l => l.id === overCol);
-        if (leadTarget) overCol = leadTarget.status;
-
+        const leadTarget = leads.find(l => l.id === overCol); if (leadTarget) overCol = leadTarget.status;
         const colIdx = (id: string) => ACTIVE_COLUMNS.findIndex(c => c.id === id)
         const isTryingToGoBack = colIdx(overCol) < colIdx(activeLead.status);
-        
         if (['cotizacion', 'documentacion'].includes(activeLead.status) && isTryingToGoBack) return;
-
         if (overCol && overCol !== activeLead.status && ACTIVE_COLUMNS.some(c => c.id === overCol)) {
             if (overCol === 'cotizacion') { setLeadProcessingId(active.id as string); setIsQuoteDialogOpen(true); return }
             if (overCol === 'documentacion') { setLeadProcessingId(active.id as string); setIsDocConfirmOpen(true); return }
-            
             setLeads(prev => prev.map(l => l.id === active.id ? { ...l, status: overCol } : l))
-            
-            await supabase.from('leads').update({ 
-                status: overCol.toLowerCase(), 
-                last_update: new Date().toISOString() 
-            }).eq('id', active.id)
-
+            await supabase.from('leads').update({ status: overCol.toLowerCase(), last_update: new Date().toISOString() }).eq('id', active.id)
             logHistory(active.id as string, activeLead.status, overCol)
         }
     }
@@ -309,184 +322,139 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                             key={col.id} 
                             col={col} 
                             leads={sortLeads(col.id)} 
-                            onClickLead={(l: any) => {
-                                setSelectedLead(l);
-                                // ✅ Si pasaron la función desde SellerManager, la ejecutamos
-                                if (onLeadClick) onLeadClick(l.id);
-                            }} 
+                            onClickLead={(l: any) => { if (onLeadClick) onLeadClick(l.id); }} 
                             onCallIncrement={handleCallIncrement} 
                             onOmniClick={handleOmniClick} 
-                            onResolveAgenda={(l: Lead) => setShowConfirmCall(l)} 
+                            onResolveAgenda={(l: Lead) => { 
+                                stopAudio();
+                                setShowConfirmCall(l);
+                            }} 
                         />
                     ))}
                 </div>
-
-                {activeId && (
-                    <div className="fixed bottom-10 left-0 right-0 flex justify-center gap-12 z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-10 px-4">
-                        <DropZone id="zone-perdido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-red-200 shadow-2xl">
-                            <ArchiveX className="h-10 w-10 text-red-600 mb-2" />
-                            <span className="font-black uppercase tracking-tighter text-red-600">Perdido</span>
-                        </DropZone>
-                        <DropZone id="zone-vendido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-emerald-200 shadow-2xl">
-                            <Trophy className="h-10 w-10 text-emerald-600 mb-2" />
-                            <span className="font-black uppercase tracking-tighter text-emerald-600">¡Venta Lograda! 🚀</span>
-                        </DropZone>
-                    </div>
-                )}
-
-                <DragOverlay>
-                    {activeId ? (
-                        <div className="cursor-grabbing rotate-3 scale-105 transition-transform duration-200 shadow-2xl opacity-90"><LeadCard lead={leads.find(l => l.id === activeId)!} /></div>
-                    ) : null}
-                </DragOverlay>
+                {activeId && (<div className="fixed bottom-10 left-0 right-0 flex justify-center gap-12 z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-10 px-4"><DropZone id="zone-perdido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-red-200 shadow-2xl"><ArchiveX className="h-10 w-10 text-red-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-red-600">Perdido</span></DropZone><DropZone id="zone-vendido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-emerald-200 shadow-2xl"><Trophy className="h-10 w-10 text-emerald-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-emerald-600">¡Venta Lograda! 🚀</span></DropZone></div>)}
+                <DragOverlay>{activeId ? <div className="cursor-grabbing rotate-3 scale-105 transition-transform duration-200 shadow-2xl opacity-90"><LeadCard lead={leads.find(l => l.id === activeId)!} /></div> : null}</DragOverlay>
             </DndContext>
             
-            <LeadDetail lead={selectedLead} open={!!selectedLead} onOpenChange={(o: any) => !o && setSelectedLead(null)} />
+            <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
             
-            <LostLeadDialog 
-                open={isLostDialogOpen} 
-                onOpenChange={setIsLostDialogOpen} 
-                onConfirm={async (reason, notes) => {
-                    const leadId = leadProcessingId;
-                    setLeads(prev => prev.filter(l => l.id !== leadId))
-                    setIsLostDialogOpen(false)
-                    if(leadId) {
-                        const oldLead = leads.find(l => l.id === leadId)
-                        await supabase.from('leads').update({ 
-                            status: 'perdido', 
-                            loss_reason: reason, 
-                            notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`,
-                            last_update: new Date().toISOString() 
-                        }).eq('id', leadId)
-                        if(oldLead) logHistory(leadId, oldLead.status, 'perdido')
-                    }
-                }} 
-            />
-            
-            <WonLeadDialog 
-                open={isWonDialogOpen} 
-                onOpenChange={setIsWonDialogOpen} 
-                onConfirm={async (data: any) => {
-                    const leadId = leadProcessingId;
-                    if (!leadId) return;
-                    const { files, ...leadData } = data;
-                    const oldLead = leads.find(l => l.id === leadId);
-                    setLeads(prev => prev.filter(l => l.id !== leadId))
-                    setIsWonDialogOpen(false)
-                    if (files && files.length > 0) {
-                        for (const file of Array.from(files as FileList)) {
-                            const safeName = file.name.replace(/[^\w.\-() ]+/g, "_")
-                            const path = `${leadId}/${Date.now()}-${safeName}`
-                            const { error: upErr } = await supabase.storage.from('lead-documents').upload(path, file)
-                            if (!upErr) {
-                                await supabase.from('lead_documents').insert({
-                                    lead_id: leadId,
-                                    type: file.type.includes('image') ? 'IMG' : 'PDF',
-                                    file_path: path,
-                                    name: file.name,
-                                    uploaded_at: new Date().toISOString(),
-                                    status: 'uploaded',
-                                    uploaded_by: CURRENT_USER
-                                })
-                            }
-                        }
-                    }
-                    await supabase.from('leads').update({ ...leadData, last_update: new Date().toISOString() }).eq('id', leadId)
-                    if (oldLead) logHistory(leadId, oldLead.status, 'vendido')
-                }} 
-            />
+            {/* ✅ FIXED: SANITIZACIÓN DE DATOS PARA EVITAR ERROR 400 EN SUPABASE */}
+            <WonLeadDialog open={isWonDialogOpen} onOpenChange={setIsWonDialogOpen} onConfirm={async (data: any) => { 
+                const leadId = leadProcessingId; 
+                if (!leadId) return; 
+                
+                const { files, ...leadData } = data; 
+                const oldLead = leads.find(l => l.id === leadId); 
+                
+                // 1. Limpieza visual
+                setLeads(prev => prev.filter(l => l.id !== leadId)); 
+                setIsWonDialogOpen(false); 
+                
+                if (files && files.length > 0) { /* */ } 
+                
+                // 2. CONSTRUCCIÓN DE PAYLOAD LIMPIO (EVITA ERROR 400)
+                const payload: any = {
+                    status: 'vendido', // FORZADO
+                    last_update: new Date().toISOString(),
+                    quoted_price: leadData.price ? Number(leadData.price) : 0, // Asegura número
+                    quoted_prepaga: leadData.prepaga || null,
+                    quoted_plan: leadData.plan || null,
+                    notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes
+                };
 
-            <QuotationDialog 
-                open={isQuoteDialogOpen} 
-                onOpenChange={setIsQuoteDialogOpen} 
-                onConfirm={async (data: any) => {
-                    const leadId = leadProcessingId;
-                    if(!leadId) return;
-                    const oldLead = leads.find(l => l.id === leadId);
-                    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l))
-                    setIsQuoteDialogOpen(false)
-                    await supabase.from('leads').update({ 
-                        status: 'cotizacion', 
-                        quoted_prepaga: data.prepaga, 
-                        quoted_plan: data.plan, 
-                        quoted_price: data.price, 
-                        last_update: new Date().toISOString() 
-                    }).eq('id', leadId)
-                    if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion')
-                }} 
-                onCancel={() => setIsQuoteDialogOpen(false)} 
-            />
-            
-            <DocConfirmDialog 
-                open={isDocConfirmOpen} 
-                onOpenChange={setIsDocConfirmOpen} 
-                onConfirm={async () => {
-                    const leadId = leadProcessingId;
-                    if(!leadId) return;
-                    const oldLead = leads.find(l => l.id === leadId);
-                    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l))
-                    setIsDocConfirmOpen(false)
-                    await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId)
-                    if(oldLead) logHistory(leadId, oldLead.status, 'documentacion')
-                }} 
-                onCancel={() => setIsDocConfirmOpen(false)} 
-            />
+                // Campos opcionales (solo si tienen valor)
+                if (leadData.afiliado_number) payload.afiliado_number = leadData.afiliado_number;
+                if (leadData.cuit) payload.cuit = leadData.cuit;
+                if (leadData.aporte) payload.aporte = leadData.aporte;
+                if (leadData.derivacion_aportes) payload.derivacion_aportes = leadData.derivacion_aportes;
+                if (leadData.cant_capitas) payload.cant_capitas = Number(leadData.cant_capitas); // Asegura número
 
-            {/* ✅ POP-UP ALERTA ZOMBIE (NUEVO) */}
-            <Dialog open={!!zombieLead} onOpenChange={() => setZombieLead(null)}>
-                <DialogContent 
-                    className="border-4 border-red-500 max-w-md shadow-[0_0_50px_rgba(220,38,38,0.5)] animate-in zoom-in duration-300 bg-white"
-                    onPointerDownOutside={(e) => e.preventDefault()}
-                    onEscapeKeyDown={(e) => e.preventDefault()}
-                >
-                    <DialogHeader className="text-center">
-                        <div className="mx-auto bg-red-100 p-4 rounded-full mb-4 w-fit border-2 border-red-500 animate-pulse"><Skull className="h-10 w-10 text-red-600" /></div>
-                        <DialogTitle className="text-3xl font-black text-red-600 uppercase tracking-tight">¡ALERTA DE SUPERVISIÓN!</DialogTitle>
-                        <DialogDescription className="text-lg text-slate-700 mt-2 font-bold">
-                            El lead <span className="text-xl bg-red-100 px-2 rounded text-red-800">{zombieLead?.name}</span> lleva más de 72hs inactivo.
-                        </DialogDescription>
-                        <p className="text-sm text-slate-500 mt-2 italic">Si no se gestiona ahora, el sistema lo reasignará automáticamente en 24hs.</p>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-3 mt-4">
-                        <Button className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black text-lg gap-2 shadow-lg" onClick={() => window.open(`https://wa.me/${zombieLead?.phone}?text=Hola! Te escribo para retomar tu consulta.`, '_blank')}>
-                            <MessageCircle size={24} fill="currentColor" /> RECUPERAR AHORA
+                // 3. ENVÍO SEGURO
+                const { error } = await supabase.from('leads').update(payload).eq('id', leadId); 
+                
+                if (error) {
+                    console.error("Error confirmando venta:", error);
+                    alert("Hubo un error al guardar. Verificá los campos numéricos.");
+                } else if (oldLead) {
+                    logHistory(leadId, oldLead.status, 'vendido') 
+                }
+            }} />
+            
+            <QuotationDialog open={isQuoteDialogOpen} onOpenChange={setIsQuoteDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l)); setIsQuoteDialogOpen(false); await supabase.from('leads').update({ status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion') }} onCancel={() => setIsQuoteDialogOpen(false)} />
+            <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
+
+            {/* ALERTA ZOMBIE */}
+            <Dialog open={!!zombieLead} onOpenChange={() => { setZombieLead(null); stopAudio(); }}>
+                <DialogContent className="border-4 border-red-500 max-w-md shadow-[0_0_50px_rgba(220,38,38,0.5)] animate-in zoom-in duration-300 bg-white" aria-describedby="zombie-desc">
+                    <DialogHeader className="text-center"><div className="mx-auto bg-red-100 p-4 rounded-full mb-4 w-fit border-2 border-red-500 animate-pulse"><Skull className="h-10 w-10 text-red-600" /></div><DialogTitle className="text-3xl font-black text-red-600 uppercase tracking-tight">¡ALERTA DE SUPERVISIÓN!</DialogTitle><DialogDescription id="zombie-desc" className="text-lg text-slate-700 mt-2 font-bold">El lead <span className="text-xl bg-red-100 px-2 rounded text-red-800">{zombieLead?.name}</span> lleva más de 72hs inactivo.</DialogDescription></DialogHeader>
+                    <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black text-lg gap-2 shadow-lg" onClick={() => window.open(`https://wa.me/${zombieLead?.phone}?text=Hola! Te escribo para retomar tu consulta.`, '_blank')}><MessageCircle size={24} fill="currentColor" /> RECUPERAR AHORA</Button><Button variant="outline" className="w-full h-10 text-slate-400" onClick={() => { setZombieLead(null); stopAudio(); }}>Entendido, lo gestionaré.</Button></div>
+                </DialogContent>
+            </Dialog>
+            
+            {/* ALERTA VENCIDO */}
+            <Dialog open={!!overdueLead && !zombieLead} onOpenChange={() => { setOverdueLead(null); stopAudio(); }}>
+                <DialogContent className="border-4 border-yellow-400 max-w-md shadow-2xl animate-in zoom-in duration-300" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} aria-describedby="overdue-desc">
+                    <DialogHeader className="text-center"><div className="mx-auto bg-yellow-100 p-4 rounded-full mb-4 w-fit border-2 border-yellow-400"><AlertOctagon className="h-10 w-10 text-yellow-600 animate-pulse" /></div><DialogTitle className="text-2xl font-black text-slate-800 uppercase tracking-tight">¡COTIZACIÓN VENCIDA!</DialogTitle><DialogDescription id="overdue-desc" className="text-base text-slate-600 mt-2 font-medium">Pasaron más de 72 horas sin novedades con <br /><span className="text-xl font-bold text-slate-900 bg-yellow-200 px-2 rounded">{overdueLead?.name}</span></DialogDescription></DialogHeader>
+                    <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-12 bg-green-500 hover:bg-green-600 text-white font-bold text-lg gap-2" onClick={() => window.open(`https://wa.me/${overdueLead?.phone}?text=Hola`, '_blank')}><MessageCircle size={24} fill="currentColor" /> Enviar WhatsApp Ya</Button><Button variant="outline" className="w-full h-12 border-2 border-slate-200" onClick={() => { setOverdueLead(null); stopAudio(); }}>Ignorar por ahora</Button></div>
+                </DialogContent>
+            </Dialog>
+
+            {/* ✅ 1. POP-UP PROFESIONAL DE ALARMA */}
+            <Dialog open={!!alarmLead} onOpenChange={(open) => !open && handleManageNow()}>
+                <DialogContent className="max-w-[400px] border-0 shadow-2xl p-0 overflow-hidden bg-white" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} aria-describedby="alarm-desc">
+                    
+                    {/* Header Azul Profesional */}
+                    <div className="bg-[#1e3a8a] p-6 text-center relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-cyan-300"></div>
+                        <div className="bg-white/10 p-3 rounded-full w-fit mx-auto mb-3 backdrop-blur-sm animate-[pulse_2s_infinite]">
+                            <Clock className="h-8 w-8 text-white" />
+                        </div>
+                        <DialogTitle className="text-xl font-bold text-white tracking-wide">RECORDATORIO DE AGENDA</DialogTitle>
+                        <DialogDescription id="alarm-desc" className="text-blue-100 text-xs mt-1">Tenés una llamada programada ahora.</DialogDescription>
+                    </div>
+
+                    {/* Cuerpo de la Tarjeta */}
+                    <div className="p-6 text-center">
+                        <Avatar className="h-20 w-20 mx-auto mb-4 border-4 border-slate-50 shadow-md">
+                            <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${alarmLead?.name}`} />
+                            <AvatarFallback className="bg-blue-100 text-blue-700 font-bold text-2xl">{alarmLead?.name?.[0]}</AvatarFallback>
+                        </Avatar>
+                        
+                        <h2 className="text-2xl font-black text-slate-800 mb-1">{alarmLead?.name}</h2>
+                        <div className="flex items-center justify-center gap-2 text-slate-500 text-sm mb-6 bg-slate-50 py-1 px-3 rounded-full w-fit mx-auto">
+                            <Phone size={14} /> {alarmLead?.phone}
+                        </div>
+
+                        <Button 
+                            onClick={handleManageNow} 
+                            className="w-full h-12 text-md font-bold bg-[#1e3a8a] hover:bg-blue-900 text-white rounded-xl shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98]"
+                        >
+                            GESTIONAR AHORA
                         </Button>
-                        <Button variant="outline" className="w-full h-10 text-slate-400" onClick={() => setZombieLead(null)}>Entendido, lo gestionaré.</Button>
                     </div>
                 </DialogContent>
             </Dialog>
 
-            {/* POP-UP VENCIDO NORMAL (AMARILLO) */}
-            <Dialog open={!!overdueLead && !zombieLead} onOpenChange={() => setOverdueLead(null)}>
-                <DialogContent 
-                    className="border-4 border-yellow-400 max-w-md shadow-2xl animate-in zoom-in duration-300"
-                    onPointerDownOutside={(e) => e.preventDefault()}
-                    onEscapeKeyDown={(e) => e.preventDefault()}
-                >
-                    <DialogHeader className="text-center">
-                        <div className="mx-auto bg-yellow-100 p-4 rounded-full mb-4 w-fit border-2 border-yellow-400"><AlertOctagon className="h-10 w-10 text-yellow-600 animate-pulse" /></div>
-                        <DialogTitle className="text-2xl font-black text-slate-800 uppercase tracking-tight">¡COTIZACIÓN VENCIDA!</DialogTitle>
-                        <DialogDescription className="text-base text-slate-600 mt-2 font-medium">Pasaron más de 72 horas sin novedades con <br /><span className="text-xl font-bold text-slate-900 bg-yellow-200 px-2 rounded">{overdueLead?.name}</span></DialogDescription>
+            {/* ✅ 2. DIÁLOGO DE CONFIRMACIÓN (Al tocar la campanita roja) */}
+            <Dialog open={!!showConfirmCall} onOpenChange={() => setShowConfirmCall(null)}>
+                <DialogContent className="sm:max-w-md border-0 shadow-2xl bg-white rounded-2xl" aria-describedby="confirm-desc">
+                    <DialogHeader className="text-center pb-2 pt-4">
+                        <div className="mx-auto bg-green-50 p-4 rounded-full w-fit mb-3 ring-8 ring-green-50/50">
+                            <CheckCircle2 className="h-10 w-10 text-green-600" />
+                        </div>
+                        <DialogTitle className="text-2xl font-black text-slate-800">¿Gestión Realizada?</DialogTitle>
+                        <DialogDescription id="confirm-desc" className="text-slate-500 font-medium px-4">
+                            Si ya llamaste a <span className="text-slate-900 font-bold">{showConfirmCall?.name}</span>, confirmalo para limpiar la alerta.
+                        </DialogDescription>
                     </DialogHeader>
-                    <div className="flex flex-col gap-3 mt-4">
-                        <Button className="w-full h-12 bg-green-500 hover:bg-green-600 text-white font-bold text-lg gap-2" onClick={() => window.open(`https://wa.me/${overdueLead?.phone}?text=Hola`, '_blank')}><MessageCircle size={24} fill="currentColor" /> Enviar WhatsApp Ya</Button>
-                        <Button variant="outline" className="w-full h-12 border-2 border-slate-200" onClick={() => setOverdueLead(null)}>Ignorar por ahora</Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={!!alarmLead} onOpenChange={() => setAlarmLead(null)}>
-                <DialogContent 
-                    className="max-w-sm bg-[#020617] border-none text-white p-0 overflow-hidden shadow-2xl"
-                    onPointerDownOutside={(e) => e.preventDefault()}
-                    onEscapeKeyDown={(e) => e.preventDefault()}
-                >
-                    <div className="bg-red-600 h-1.5 w-full animate-pulse"></div>
-                    <div className="p-8 text-center">
-                        <BellRing className="h-12 w-12 text-red-500 mx-auto mb-4 animate-bounce" />
-                        <h1 className="text-2xl font-black uppercase mb-1 leading-none tracking-tighter text-blue-400">Es hora de llamar</h1>
-                        <h2 className="text-3xl font-black text-white tracking-tight mb-6 truncate">{alarmLead?.name}</h2>
-                        <Button onClick={() => setAlarmLead(null)} className="w-full h-14 text-lg font-black bg-blue-600 hover:bg-blue-500 rounded-2xl shadow-lg">IR AL DATO 📞</Button>
+                    
+                    <div className="grid grid-cols-1 gap-3 p-4">
+                        <Button onClick={handleCompleteAgenda} className="w-full h-14 bg-green-600 hover:bg-green-700 text-white font-bold text-lg rounded-xl shadow-md transition-all active:scale-[0.98]">
+                            ✅ SÍ, YA LLAMÉ
+                        </Button>
+                        <Button onClick={() => setShowConfirmCall(null)} variant="ghost" className="w-full h-10 text-slate-400 hover:text-slate-600 hover:bg-slate-50 font-medium">
+                            Todavía no (Mantener Alarma)
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>

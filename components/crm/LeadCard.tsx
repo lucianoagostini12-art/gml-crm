@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { createClient } from "@/lib/supabase" // ✅ Conexión agregada
+import { createClient } from "@/lib/supabase" 
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -46,16 +46,19 @@ const intentStyles = {
   low: "border-l-[3px] border-l-rose-500 hover:ring-1 hover:ring-rose-500/20",
 }
 
+// ✅ CAMBIO DE COLORES SOLICITADO
 const getQuoteStyles = (prepaga?: string) => {
-    const base = "border text-slate-800 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-800/50"
     const p = prepaga || ""
-    if (p.includes("Prevención")) return `${base} border-pink-100 dark:border-pink-900/30 text-pink-800 dark:text-pink-300`
-    if (p.includes("DoctoRed")) return `${base} border-violet-100 dark:border-violet-900/30 text-violet-800 dark:text-violet-300`
-    if (p.includes("Avalian")) return `${base} border-green-100 dark:border-green-900/30 text-green-800 dark:text-green-300`
-    if (p.includes("Swiss")) return `${base} border-red-100 dark:border-red-900/30 text-red-800 dark:text-red-300`
-    if (p.includes("Galeno")) return `${base} border-blue-100 dark:border-blue-900/30 text-blue-800 dark:text-blue-300`
-    if (p.includes("AMPF")) return `${base} border-sky-100 dark:border-sky-900/30 text-sky-800 dark:text-sky-300`
-    return `${base} border-slate-100 dark:border-slate-800`
+    
+    if (p.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+    if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+    if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+    if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+    if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+    if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+    
+    // Default fallback
+    return "bg-slate-50 dark:bg-[#3A3B3C] border-slate-100 text-slate-800"
 }
 
 interface LeadCardProps {
@@ -78,19 +81,19 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
         const { data: tpls } = await supabase.from('whatsapp_templates').select('*').order('id', { ascending: true })
         if(tpls) setWppTemplates(tpls)
 
-        // 2. Avatar del Vendedor (Para mostrar abajo a la derecha)
+        // 2. Avatar del Vendedor
         if (lead.agent) {
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('avatar_url')
-                .eq('full_name', lead.agent) // Buscamos por nombre del agente asignado al lead
+                .eq('full_name', lead.agent) 
                 .maybeSingle()
             
             if (profile?.avatar_url) setAgentAvatar(profile.avatar_url)
         }
     }
     init()
-  }, [lead.agent]) // Se ejecuta si cambia el agente del lead
+  }, [lead.agent])
 
   // Lógica de "Dato Quemado"
   let callColor = "text-slate-500 hover:text-slate-700 hover:bg-slate-50 border-slate-200 dark:border-slate-700 dark:text-slate-400"

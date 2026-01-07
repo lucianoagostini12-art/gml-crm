@@ -3,16 +3,19 @@
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase"
 import { Loader2 } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 // --- IMPORTACIONES DE PANELES ---
 import { LoginView } from "@/components/auth/LoginView"
-import { AdminDashboard } from "@/components/admin/AdminDashboard"
-import { OpsManager } from "@/components/ops/OpsManager"
-import { SellerManager } from "@/components/crm/SellerManager"
-import { SetterDashboard } from "@/components/setter/SetterDashboard"
+import { AdminDashboard } from "@/components/admin/AdminDashboard" // Archivos ADMIN
+import { OpsManager } from "@/components/ops/OpsManager"         // Archivos OPS
+import { SellerManager } from "@/components/crm/SellerManager"     // Vendedora
+import { SetterDashboard } from "@/components/setter/SetterDashboard" // Gestora
 
 export default function Home() {
   const supabase = createClient()
+  const router = useRouter()
+  
   const [session, setSession] = useState<any>(null)
   const [role, setRole] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
@@ -33,7 +36,7 @@ export default function Home() {
 
     checkSession()
 
-    // 2. Escuchar cambios de estado (Login / Logout externos)
+    // 2. Escuchar cambios de estado (Login / Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
@@ -48,7 +51,6 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Buscar rol real en la tabla 'profiles'
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -60,8 +62,9 @@ export default function Home() {
       if (data) {
         setRole(data.role) 
         setUserName(data.full_name || "Usuario")
-      } else {
-        console.warn("Usuario sin perfil:", userId)
+        // Guardamos en local para acceso rápido en otros componentes
+        localStorage.setItem("gml_user_role", data.role)
+        localStorage.setItem("gml_user_name", data.full_name || "Usuario")
       }
     } catch (error) {
       console.error("Error fetching profile:", error)
@@ -70,56 +73,46 @@ export default function Home() {
     }
   }
 
-  // LOGOUT GLOBAL (Limpia todo)
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    // Forzamos recarga dura para limpiar estados de memoria (chat, notificaciones, etc.)
+    localStorage.clear()
     window.location.href = "/" 
   }
 
-  // PANTALLA DE CARGA
   if (loading) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
         <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
-        <p className="text-slate-400 text-sm font-medium animate-pulse">Cargando sistema...</p>
+        <p className="text-slate-400 text-sm font-medium animate-pulse">Cargando sistema GML...</p>
       </div>
     )
   }
 
-  // 1. SI NO HAY SESIÓN -> LOGIN
-  if (!session) {
-    return <LoginView />
-  }
+  if (!session) return <LoginView />
 
-  // 2. RUTEO DE ROLES (Director de Tráfico)
+  // --- DISTRIBUCIÓN DE ROLES ---
 
-  // A. NIVEL GERENCIAL (SOLO SUPERVISOR)
-  // Corregido: admin_god sacado de aquí
+  // 1. SUPERVISIÓN GOD -> Archivos ADMIN
   if (role === "supervisor_god") {
     return <AdminDashboard onLogout={handleLogout} />
   }
 
-  // B. NIVEL OPERATIVO (OPS + ADMIN GOD)
-  // Corregido: admin_god agregado aquí para ver OpsManager
+  // 2. ADMINISTRACIÓN (GOD y COMÚN) -> Archivos OPS
+  // La diferencia de permisos se maneja dentro de OpsManager
   if (role === "admin_god" || role === "admin_common" || role === "ops") {
-    // OpsManager maneja su propio logout internamente o via prop si se actualiza
-    // El rol se pasa para que OpsManager sepa si activar funciones GOD
     return <OpsManager role={role as any} userName={userName} />
   }
 
-  // C. SETTER (GESTORA DE LEADS)
+  // 3. GESTORA DE LEADS -> Setter
   if (role === "setter") {
-    // Le pasamos props por si el componente las acepta
     return <SetterDashboard userName={userName} onLogout={handleLogout} /> 
   }
 
-  // D. VENDEDORAS (SELLER)
+  // 4. VENDEDORA -> Seller
   if (role === "seller") {
     return <SellerManager userName={userName} onLogout={handleLogout} />
   }
 
-  // E. DEFAULT / ERROR DE ROL
-  // Si el rol no coincide con ninguno, mandamos al SellerManager como fallback seguro
+  // Fallback por seguridad (Vendedora)
   return <SellerManager userName={userName} onLogout={handleLogout} />
 }

@@ -79,8 +79,7 @@ export function AdminConfig() {
     }
 
     const fetchWppTemplates = async () => {
-        // Ordenamos por ID para mantener consistencia visual
-        const { data } = await supabase.from('whatsapp_templates').select('*').order('id', { ascending: true })
+        const { data } = await supabase.from('whatsapp_templates').select('*').order('created_at', { ascending: true })
         if (data) setWppTemplates(data)
     }
 
@@ -105,6 +104,7 @@ export function AdminConfig() {
     const saveGeneralConfig = async () => {
         setLoading(true)
         
+        // 1. Guardar Configs Generales
         const updates = [
             { key: 'ranges_5hs', value: ranges5hs },
             { key: 'ranges_8hs', value: ranges8hs },
@@ -114,7 +114,7 @@ export function AdminConfig() {
         ]
         const { error: errConfig } = await supabase.from('system_config').upsert(updates)
 
-        // Guardar Plantillas WhatsApp (Bulk Upsert con Labels nuevos)
+        // 2. Guardar Plantillas WhatsApp (Upsert masivo)
         const { error: errWpp } = await supabase.from('whatsapp_templates').upsert(wppTemplates)
 
         setLoading(false)
@@ -122,6 +122,8 @@ export function AdminConfig() {
             alert("❌ Error al guardar: " + (errConfig?.message || errWpp?.message))
         } else {
             alert("✅ Configuración guardada correctamente.")
+            // Recargar para limpiar IDs temporales si hubo nuevos
+            fetchWppTemplates()
         }
     }
 
@@ -234,9 +236,21 @@ export function AdminConfig() {
         fetchLossReasons()
     }
 
-    // --- GESTIÓN WPP TEMPLATES (NUEVO: EDICIÓN COMPLETA) ---
+    // --- GESTIÓN WPP TEMPLATES (DINÁMICO) ---
     const updateTemplate = (id: string, field: 'label' | 'message', value: string) => {
         setWppTemplates(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t))
+    }
+
+    const addTemplate = () => {
+        const newId = `tpl_${Date.now()}`
+        setWppTemplates(prev => [...prev, { id: newId, label: "Nueva Plantilla", message: "" }])
+    }
+
+    const deleteTemplate = async (id: string) => {
+        if(!confirm("¿Borrar plantilla?")) return
+        setWppTemplates(prev => prev.filter(t => t.id !== id))
+        // Borrar de DB
+        await supabase.from('whatsapp_templates').delete().eq('id', id)
     }
 
     const getRoleBadge = (role: string) => {
@@ -386,14 +400,19 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
-                {/* 3. WHATSAPP TEMPLATES (EDICIÓN MEJORADA) */}
+                {/* 3. WHATSAPP TEMPLATES (CON BOTÓN DE CREAR NUEVO) */}
                 <TabsContent value="whatsapp" className="space-y-6 mt-6">
                     <Card className="border-t-4 border-t-green-500">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-green-700">
-                                <MessageCircle className="h-5 w-5" /> Plantillas de Mensajes
-                            </CardTitle>
-                            <CardDescription>Personaliza los mensajes y los nombres de los botones para las vendedoras.</CardDescription>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <div>
+                                <CardTitle className="flex items-center gap-2 text-green-700">
+                                    <MessageCircle className="h-5 w-5" /> Plantillas de Mensajes
+                                </CardTitle>
+                                <CardDescription>Personaliza los botones de WhatsApp de las vendedoras.</CardDescription>
+                            </div>
+                            <Button size="sm" variant="outline" className="border-green-200 text-green-700 hover:bg-green-50 gap-2" onClick={addTemplate}>
+                                <Plus size={14}/> Nueva Plantilla
+                            </Button>
                         </CardHeader>
                         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {wppTemplates.length === 0 && (
@@ -403,28 +422,36 @@ export function AdminConfig() {
                                 </div>
                             )}
                             {wppTemplates.map((tpl) => (
-                                <div key={tpl.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 group hover:border-green-300 transition-colors">
-                                    <div className="flex justify-between items-center border-b pb-2 border-slate-200">
-                                        <div className="flex items-center gap-2 w-full mr-4">
-                                            <PenLine className="h-4 w-4 text-slate-400" />
+                                <div key={tpl.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 group hover:border-green-300 transition-colors relative">
+                                    
+                                    {/* Botón Borrar */}
+                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => deleteTemplate(tpl.id)}>
+                                            <Trash2 size={12}/>
+                                        </Button>
+                                    </div>
+
+                                    <div className="flex justify-between items-center border-b pb-2 border-slate-200 pr-8">
+                                        <div className="flex items-center gap-2 w-full">
+                                            <PenLine className="h-4 w-4 text-slate-400 shrink-0" />
                                             {/* INPUT PARA EDITAR EL NOMBRE DEL BOTÓN */}
                                             <Input 
                                                 value={tpl.label} 
                                                 onChange={(e) => updateTemplate(tpl.id, 'label', e.target.value)} 
-                                                className="font-bold text-slate-700 border-none shadow-none focus-visible:ring-0 p-0 h-auto bg-transparent hover:underline decoration-dashed decoration-slate-300 underline-offset-4"
-                                                title="Click para editar nombre"
+                                                className="font-bold text-slate-700 border-none shadow-none focus-visible:ring-0 p-0 h-auto bg-transparent hover:underline decoration-dashed decoration-slate-300 underline-offset-4 w-full"
+                                                title="Click para editar nombre del botón"
+                                                placeholder="Nombre del Botón"
                                             />
                                         </div>
-                                        <Badge variant="outline" className="text-[10px] text-slate-400 uppercase tracking-widest bg-white shrink-0">{tpl.id}</Badge>
                                     </div>
                                     <div className="relative">
                                         <Textarea 
                                             className="bg-white min-h-[100px] text-sm resize-none focus-visible:ring-green-500 border-slate-200"
                                             value={tpl.message}
                                             onChange={(e) => updateTemplate(tpl.id, 'message', e.target.value)}
-                                            placeholder={tpl.id === 'vacio' ? "Dejar vacío para abrir chat sin texto..." : "Escribí el mensaje aquí..."}
+                                            placeholder="Dejar vacío para abrir chat sin texto..."
                                         />
-                                        {tpl.id === 'vacio' && !tpl.message && (
+                                        {!tpl.message && (
                                             <span className="absolute top-3 left-3 text-xs text-slate-400 pointer-events-none italic">
                                                 (Mensaje vacío: solo abre el chat)
                                             </span>
@@ -548,11 +575,11 @@ export function AdminConfig() {
                                 <Select value={formData.role} onValueChange={(v) => setFormData({...formData, role: v})}>
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="seller">Vendedora</SelectItem>
-                                        <SelectItem value="setter">Gestora de Leads (Setter)</SelectItem> 
-                                        <SelectItem value="admin_common">Administrativa Común</SelectItem>
-                                        <SelectItem value="admin_god">Administrativa GOD</SelectItem>
                                         <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>
+                                        <SelectItem value="admin_god">Administración GOD</SelectItem>
+                                        <SelectItem value="admin_common">Administración Común</SelectItem>
+                                        <SelectItem value="seller">Vendedora</SelectItem>
+                                        <SelectItem value="setter">Gestora de Leads</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

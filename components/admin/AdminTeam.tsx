@@ -79,7 +79,8 @@ export function AdminTeam() {
                         salesMonth: sales,
                         leadsActive: active,
                         conversion: active > 0 ? Math.round((sales / (sales + active)) * 100) + '%' : '0%',
-                        avatarSeed: u.email
+                        // ✅ CAMBIO: Usamos avatar_url real O el generado
+                        avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`
                     }
                 })
             setSalesAgents(sellers)
@@ -92,7 +93,8 @@ export function AdminTeam() {
                     name: u.full_name || 'Admin',
                     role: u.role,
                     email: u.email,
-                    avatarSeed: u.email 
+                    // ✅ CAMBIO: Usamos avatar_url real O el generado
+                    avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`
                 }))
             setStaffMembers(staff)
         }
@@ -245,7 +247,8 @@ export function AdminTeam() {
                                         <div className="flex items-center gap-4">
                                             <div className="relative">
                                                 <Avatar className="h-16 w-16 border-4 border-white shadow-sm">
-                                                    <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${agent.avatarSeed}`} />
+                                                    {/* ✅ USO DE FOTO REAL */}
+                                                    <AvatarImage src={agent.avatar} className="object-cover"/>
                                                     <AvatarFallback>{agent.name[0]}</AvatarFallback>
                                                 </Avatar>
                                                 <span className={`absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-white ${agent.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
@@ -280,7 +283,8 @@ export function AdminTeam() {
                             <Card key={i} className="border-l-4 border-l-slate-500 p-6 flex items-start justify-between">
                                 <div className="flex items-center gap-4">
                                     <Avatar className="h-12 w-12 border">
-                                        <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${member.avatarSeed}`} />
+                                        {/* ✅ USO DE FOTO REAL */}
+                                        <AvatarImage src={member.avatar} className="object-cover" />
                                         <AvatarFallback>{member.name[0]}</AvatarFallback>
                                     </Avatar>
                                     <div>
@@ -310,7 +314,9 @@ export function AdminTeam() {
                     <div className="space-y-4 py-4">
                         <div className="flex justify-center mb-4">
                             <Avatar className="h-20 w-20 border-4 border-slate-100">
-                                <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${editForm.email}`} />
+                                {/* ✅ USO DE FOTO REAL EN MODAL */}
+                                <AvatarImage src={editingMember?.avatar} className="object-cover" />
+                                <AvatarFallback>ED</AvatarFallback>
                             </Avatar>
                         </div>
                         <div className="space-y-2">
@@ -341,7 +347,9 @@ export function AdminTeam() {
                             <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm z-10">
                                 <div className="flex items-center gap-4">
                                     <Avatar className="h-10 w-10 border">
-                                        <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${spyAgent.avatarSeed}`} />
+                                        {/* ✅ USO DE FOTO REAL EN MODAL ESPIA */}
+                                        <AvatarImage src={spyAgent.avatar} className="object-cover" />
+                                        <AvatarFallback>{spyAgent.name[0]}</AvatarFallback>
                                     </Avatar>
                                     <div>
                                         <DialogTitle className="text-lg font-black flex items-center gap-2">

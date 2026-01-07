@@ -67,18 +67,30 @@ interface LeadCardProps {
 export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) {
   const supabase = createClient()
   
-  // ✅ ESTADO LOCAL PARA LAS PLANTILLAS DE WPP
+  // ✅ ESTADOS
   const [wppTemplates, setWppTemplates] = useState<any[]>([])
+  const [agentAvatar, setAgentAvatar] = useState<string | null>(null)
 
-  // ✅ CARGAR PLANTILLAS REALES DE SUPABASE
+  // ✅ CARGA DE DATOS (Plantillas + Avatar Vendedor)
   useEffect(() => {
-    const fetchTemplates = async () => {
-        // Obtenemos las plantillas que configuraste en AdminConfig
-        const { data } = await supabase.from('whatsapp_templates').select('*').order('id', { ascending: true })
-        if(data) setWppTemplates(data)
+    const init = async () => {
+        // 1. Plantillas
+        const { data: tpls } = await supabase.from('whatsapp_templates').select('*').order('id', { ascending: true })
+        if(tpls) setWppTemplates(tpls)
+
+        // 2. Avatar del Vendedor (Para mostrar abajo a la derecha)
+        if (lead.agent) {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('avatar_url')
+                .eq('full_name', lead.agent) // Buscamos por nombre del agente asignado al lead
+                .maybeSingle()
+            
+            if (profile?.avatar_url) setAgentAvatar(profile.avatar_url)
+        }
     }
-    fetchTemplates()
-  }, []) // Solo al montar el componente
+    init()
+  }, [lead.agent]) // Se ejecuta si cambia el agente del lead
 
   // Lógica de "Dato Quemado"
   let callColor = "text-slate-500 hover:text-slate-700 hover:bg-slate-50 border-slate-200 dark:border-slate-700 dark:text-slate-400"
@@ -99,15 +111,10 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
   // ✅ FUNCIÓN DE ENVÍO DINÁMICA
   const sendWpp = (templateId: string) => {
     const cleanPhone = lead.phone.replace(/[^0-9]/g, '')
-    
-    // Buscar la plantilla seleccionada en la memoria
     const template = wppTemplates.find(t => t.id === templateId)
-    const text = template?.message || "" // Si está vacía o no existe, manda cadena vacía
-
-    // Construir URL (si hay texto agrega ?text=, sino abre el chat limpio)
+    const text = template?.message || "" 
     let url = `https://wa.me/${cleanPhone}`
     if(text) url += `?text=${encodeURIComponent(text)}`
-    
     window.open(url, '_blank')
   }
 
@@ -198,7 +205,6 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
 
         <div className="flex items-center justify-between gap-1.5">
             
-            {/* ✅ MENÚ WHATSAPP DINÁMICO */}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button 
@@ -210,17 +216,13 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-48 font-medium text-xs">
-                    {/* Si no cargaron plantillas aun */}
                     {wppTemplates.length === 0 && (
                         <DropdownMenuItem disabled>Cargando opciones...</DropdownMenuItem>
                     )}
-                    
-                    {/* Renderizado dinámico de los botones configurados en Admin */}
                     {wppTemplates.map((tpl) => (
                         <DropdownMenuItem 
                             key={tpl.id} 
                             onClick={(e) => { e.stopPropagation(); sendWpp(tpl.id) }}
-                            // Si es seguimiento/ultimatum, le ponemos color rojo de alerta
                             className={tpl.id.includes('seguimiento') || tpl.id.includes('baja') ? "text-red-600 font-bold" : ""}
                         >
                             {tpl.label}
@@ -245,7 +247,8 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
              <div className="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
                 <span className="text-[7px] text-slate-400 font-black uppercase tracking-wider">{lead.agent}</span>
                 <Avatar className="h-3 w-3 border border-slate-100">
-                    <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${lead.agent}`} />
+                    {/* ✅ FOTO REAL AQUI */}
+                    <AvatarImage src={agentAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${lead.agent}`} />
                     <AvatarFallback className="text-[4px] bg-slate-50">{lead.agent[0]}</AvatarFallback>
                 </Avatar>
              </div>

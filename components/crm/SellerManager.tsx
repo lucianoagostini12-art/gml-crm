@@ -85,7 +85,7 @@ export function SellerManager({
   const [expiredTasks, setExpiredTasks] = useState<any[]>([])
   
   // ✅ CONTADORES DE ALERTAS VISUALES
-  const [problematicSalesCount, setProblematicSalesCount] = useState(0) // Ventas rechazadas/demoradas
+  const [problematicSalesCount, setProblematicSalesCount] = useState(0) 
 
   const [unreadNotifications, setUnreadNotifications] = useState<AppNotification[]>([])
   const [isNotifOpen, setIsNotifOpen] = useState(false)
@@ -96,15 +96,18 @@ export function SellerManager({
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null)
 
+  // ✅ NUEVO: Estado para la foto de perfil real
+  const [realAvatarUrl, setRealAvatarUrl] = useState<string | null>(null)
+
   const lastAutoOpenAtRef = useRef<number>(0)
 
-  // --- LÓGICA DE PROBLEMAS EN VENTAS (NUEVO) ---
+  // --- LÓGICA DE PROBLEMAS EN VENTAS ---
   const fetchProblematicSales = async () => {
       const { count } = await supabase
           .from('leads')
           .select('*', { count: 'exact', head: true })
           .eq('agent_name', currentUser)
-          .in('status', ['rechazado', 'demoras']) // Estados problemáticos que requieren atención
+          .in('status', ['rechazado', 'demoras']) 
       
       setProblematicSalesCount(count || 0)
   }
@@ -132,6 +135,17 @@ export function SellerManager({
 
       // 2. Chequear ventas rechazadas
       await fetchProblematicSales()
+
+      // 3. ✅ BUSCAR FOTO REAL DEL USUARIO
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('full_name', currentUser) // Buscamos por nombre ya que es lo que tenemos aquí
+        .maybeSingle()
+      
+      if (profileData?.avatar_url) {
+        setRealAvatarUrl(profileData.avatar_url)
+      }
     }
 
     const openBellSoft = () => {
@@ -164,14 +178,13 @@ export function SellerManager({
       )
       .subscribe()
 
-    // B. Realtime: VENTAS (Para actualizar el contador rojo si Ops rechaza algo)
+    // B. Realtime: VENTAS
     salesChannel = supabase
       .channel(`rt-sales-problems-${currentUser}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "leads", filter: `agent_name=eq.${currentUser}` },
         (payload: any) => {
-            // Si el estado cambió a rechazado o demoras, o salió de ahí
             fetchProblematicSales() 
         }
       )
@@ -357,7 +370,8 @@ export function SellerManager({
           <div className="flex items-center gap-3 justify-between">
             <div className="flex items-center gap-2">
               <Avatar className="h-8 w-8">
-                <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser}`} />
+                {/* ✅ FOTO REAL AQUI */}
+                <AvatarImage src={realAvatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser}`} className="object-cover" />
                 <AvatarFallback>{currentUser[0]}</AvatarFallback>
               </Avatar>
               <div className="flex flex-col overflow-hidden">

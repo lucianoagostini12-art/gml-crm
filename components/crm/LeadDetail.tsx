@@ -30,7 +30,7 @@ export interface Lead {
   calls?: number
   full_price?: number
   price?: number
-  intent?: 'high' | 'medium' | 'low' // Agregado intent
+  intent?: 'high' | 'medium' | 'low'
   [key: string]: any
 }
 
@@ -55,6 +55,9 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const [newMessage, setNewMessage] = useState("")
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   
+  // ✅ NUEVO: Mapa para avatares de logs { "Nombre Usuario": "url_foto" }
+  const [logAvatars, setLogAvatars] = useState<Record<string, string>>({})
+
   // Estado local para Intención (para que se actualice al instante)
   const [intent, setIntent] = useState<'high' | 'medium' | 'low'>('medium')
 
@@ -72,7 +75,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
       setObs("")
       setPrepaga(lead.prepaga || "")
       setScheduledFor(lead.scheduled_for ? new Date(lead.scheduled_for).toISOString().slice(0, 16) : "")
-      setIntent(lead.intent || 'medium') // Inicializamos intención
+      setIntent(lead.intent || 'medium')
 
       setIsEditingPhone(false)
       setPhoneDraft(lead.phone || "")
@@ -124,7 +127,25 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const fetchAuditLogs = async () => {
     if (!lead?.id) return
     const { data } = await supabase.from("audit_logs").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false })
-    if (data) setAuditLogs(data)
+    if (data) {
+        setAuditLogs(data)
+        
+        // ✅ Buscar avatares de los usuarios que aparecen en los logs
+        const uniqueUsers = Array.from(new Set(data.map((l: any) => l.user_name))).filter(Boolean)
+        
+        if (uniqueUsers.length > 0) {
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('full_name, avatar_url')
+                .in('full_name', uniqueUsers)
+            
+            const avatarMap: Record<string, string> = {}
+            profiles?.forEach((p: any) => {
+                if (p.full_name) avatarMap[p.full_name] = p.avatar_url
+            })
+            setLogAvatars(avatarMap)
+        }
+    }
   }
 
   const fetchPlanesDeOps = async () => {
@@ -165,15 +186,10 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   // --- NUEVA FUNCIÓN: GUARDAR INTENCIÓN ---
   const handleIntentChange = async (newIntent: 'high' | 'medium' | 'low') => {
       if (!lead) return
-      setIntent(newIntent) // Optimista
-      lead.intent = newIntent // Actualizar objeto en memoria para LeadCard
+      setIntent(newIntent) 
+      lead.intent = newIntent
 
       await supabase.from("leads").update({ intent: newIntent, last_update: new Date().toISOString() }).eq("id", lead.id)
-      
-      // Log Opcional (si quieres trazar cambios de interés)
-      // await supabase.from("audit_logs").insert({
-      //   lead_id: lead.id, user_name: lead.agent, action: "Interés actualizado", details: `Nuevo interés: ${newIntent}`
-      // })
   }
 
   const saveAgenda = async () => {
@@ -188,9 +204,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
       details: `Nueva cita: ${fmtDateTime24(new Date(scheduledFor))}`,
     })
 
-    // actualizar objeto local (para que se vea ya)
     lead.scheduled_for = isoDate
-
     fetchAuditLogs()
   }
 
@@ -213,7 +227,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     fetchAuditLogs()
   }
 
-  // ✅ crea quote + si es principal, sincroniza leads.quoted_* para que el tablero se actualice
+  // ✅ crea quote
   const handleAddQuote = async () => {
     if (!lead || !newQuotePrepaga || !newQuotePlan || !newQuotePrice) return
 
@@ -235,7 +249,6 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
       details: `${newQuotePrepaga} - ${newQuotePlan} ($${newQuotePrice})${isMain ? " [PRINCIPAL]" : ""}`,
     })
 
-    // si es primera, sincronizo fields en leads para que LeadCard lo muestre
     if (isMain) {
       await supabase
         .from("leads")
@@ -259,7 +272,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     setNewQuotePrice("")
   }
 
-  // ✅ set principal quote + sync leads.quoted_*
+  // ✅ set principal quote
   const setMainQuote = async (quoteId: string) => {
     if (!lead) return
 
@@ -267,15 +280,11 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const newMain = quotes.find((q) => q.id === quoteId)
     if (!newMain) return
 
-    // nada que hacer
     if (currentMain?.id === newMain.id) return
 
-    // 1) desmarcar todas para el lead
     await supabase.from("quotes").update({ is_main: false }).eq("lead_id", lead.id)
-    // 2) marcar nueva principal
     await supabase.from("quotes").update({ is_main: true }).eq("id", quoteId)
 
-    // 3) sincronizar lead para el tablero
     await supabase
       .from("leads")
       .update({
@@ -290,7 +299,6 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     lead.quoted_plan = newMain.plan as any
     lead.quoted_price = newMain.price as any
 
-    // 4) log
     await supabase.from("audit_logs").insert({
       lead_id: lead.id,
       user_name: lead.agent,
@@ -351,7 +359,6 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const isBurned = newCallCount >= 7 && (newStatus === "nuevo" || newStatus === "contactado")
     if (isBurned) newStatus = "perdido"
 
-    // optimista local
     lead.calls = newCallCount as any
     lead.notes = updatedNotes as any
     lead.status = newStatus as any
@@ -697,7 +704,8 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   <div key={i} className="flex gap-4 relative">
                     {i !== auditLogs.length - 1 && <div className="absolute left-4 top-10 bottom-[-32px] w-0.5 bg-slate-100"></div>}
                     <Avatar className="h-10 w-10 border-2 border-white shadow-md z-10 shrink-0 mt-1">
-                      <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${log.user_name}`} />
+                      {/* ✅ FOTO REAL EN HISTORIAL */}
+                      <AvatarImage src={logAvatars[log.user_name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${log.user_name}`} />
                       <AvatarFallback className="bg-blue-600 text-white text-[10px] font-black">{log.user_name?.[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col flex-1">

@@ -29,11 +29,10 @@ export function RankingsView() {
             fromDate = new Date(now.getFullYear(), 0, 1)
         }
 
-        // ✅ CORRECCIÓN: Filtramos por TODOS los estados de éxito, no solo 'vendido'
-        // Esto asegura consistencia con el Dashboard personal
         const successStatuses = ['ingresado', 'vendido', 'cumplidas', 'legajo', 'medicas', 'precarga']
         
-        const { data, error } = await supabase
+        // 1. Traemos las ventas
+        const { data: leadsData, error } = await supabase
             .from("leads")
             .select("agent_name, capitas, created_at, status")
             .gte("created_at", fromDate.toISOString())
@@ -44,39 +43,54 @@ export function RankingsView() {
             return
         }
 
-        // Agrupamos por vendedor (filtrando localmente los estados para mayor flexibilidad)
+        // 2. Traemos los perfiles para sacar las fotos reales (NUEVO)
+        const { data: profilesData } = await supabase
+            .from("profiles")
+            .select("full_name, avatar_url")
+        
+        // Creamos un mapa: Nombre -> Foto
+        const avatarMap: Record<string, string> = {}
+        if (profilesData) {
+            profilesData.forEach(p => {
+                if (p.full_name) avatarMap[p.full_name] = p.avatar_url
+            })
+        }
+
+        // Agrupamos por vendedor
         const map: Record<string, any> = {}
 
-        data.filter((l: any) => successStatuses.includes(l.status)).forEach((l: any) => {
-            const name = l.agent_name || "Sin Nombre"
-            if (!map[name]) {
-                map[name] = {
-                    name,
-                    sales: 0,
-                    amount: 0,
-                    streak: 0,
+        if (leadsData) {
+            leadsData.filter((l: any) => successStatuses.includes(l.status)).forEach((l: any) => {
+                const name = l.agent_name || "Sin Nombre"
+                if (!map[name]) {
+                    map[name] = {
+                        name,
+                        sales: 0,
+                        amount: 0,
+                        streak: 0,
+                    }
                 }
-            }
-            // Sumamos cápitas reales, default 1 si no hay dato
-            map[name].sales += Number(l.capitas) || 1
-        })
+                map[name].sales += Number(l.capitas) || 1
+            })
 
-        // Convertimos a array + ordenamos
-        const array = Object.values(map)
-            .sort((a: any, b: any) => b.sales - a.sales)
-            .map((u: any, i: number) => ({
-                ...u,
-                position: i + 1,
-                level:
-                    u.sales >= 50 ? "ORO 🥇" :
-                    u.sales >= 25 ? "PLATA 🥈" :
-                    u.sales >= 10 ? "BRONCE 🥉" :
-                    "INICIO 🚀",
-                // Lógica simple de racha: simulamos 'on fire' si tiene muchas ventas
-                streak: u.sales >= 5 ? Math.min(u.sales, 10) : 0
-            }))
+            // Convertimos a array + ordenamos
+            const array = Object.values(map)
+                .sort((a: any, b: any) => b.sales - a.sales)
+                .map((u: any, i: number) => ({
+                    ...u,
+                    position: i + 1,
+                    level:
+                        u.sales >= 50 ? "ORO 🥇" :
+                        u.sales >= 25 ? "PLATA 🥈" :
+                        u.sales >= 10 ? "BRONCE 🥉" :
+                        "INICIO 🚀",
+                    streak: u.sales >= 5 ? Math.min(u.sales, 10) : 0,
+                    // ✅ Asignamos foto real si existe en el mapa, sino la genérica
+                    avatar: avatarMap[u.name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`
+                }))
 
-        setRankings(array)
+            setRankings(array)
+        }
         setLoading(false)
     }
 
@@ -168,7 +182,8 @@ export function RankingsView() {
                             <div className="relative">
                                 <Avatar className={`h-14 w-14 border-2 shadow-sm
                                     ${user.position === 1 ? "border-yellow-400 ring-2 ring-yellow-400/30" : "border-slate-200"}`}>
-                                    <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.name}`} />
+                                    {/* ✅ FOTO REAL APLICADA */}
+                                    <AvatarImage src={user.avatar} className="object-cover" />
                                     <AvatarFallback className="font-bold text-slate-500">{user.name[0]}</AvatarFallback>
                                 </Avatar>
                                 {user.position === 1 && (

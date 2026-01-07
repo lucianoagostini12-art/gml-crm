@@ -1,4 +1,7 @@
 "use client"
+
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { UserPlus, ArrowRightLeft, Clock, ShieldCheck, User } from "lucide-react"
@@ -22,6 +25,36 @@ const getPrepagaBadgeColor = (prepagaRaw: string) => {
 }
 
 export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any) {
+    const supabase = createClient()
+    
+    // ✅ Estado para guardar las fotos reales de los vendedores
+    const [avatarsMap, setAvatarsMap] = useState<Record<string, string>>({})
+
+    // ✅ Efecto para buscar las fotos de los vendedores que aparecen en la lista
+    useEffect(() => {
+        const fetchAvatars = async () => {
+            // Obtenemos lista única de vendedores
+            const sellerNames = Array.from(new Set(operations.map((op: any) => op.seller))).filter(Boolean) as string[]
+            
+            if (sellerNames.length === 0) return
+
+            // Buscamos sus fotos en la tabla profiles
+            const { data } = await supabase
+                .from('profiles')
+                .select('full_name, avatar_url')
+                .in('full_name', sellerNames)
+
+            // Creamos el mapa { "Nombre": "URL" }
+            const map: Record<string, string> = {}
+            data?.forEach((p: any) => {
+                if (p.avatar_url) map[p.full_name] = p.avatar_url
+            })
+            setAvatarsMap(map)
+        }
+        
+        fetchAvatars()
+    }, [operations]) // Se recalcula si cambian las operaciones
+
     return (
         <div className="space-y-3">
             {operations.length === 0 ? (
@@ -53,7 +86,8 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
                                     <div className="w-px h-3 bg-slate-200"></div>
                                     <div className="flex items-center gap-1.5 overflow-hidden">
                                         <Avatar className="h-4 w-4 border border-slate-200">
-                                            <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${op.seller || 'X'}`}/>
+                                            {/* ✅ AQUI ESTA EL CAMBIO: Usamos avatarsMap */}
+                                            <AvatarImage src={avatarsMap[op.seller] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${op.seller || 'X'}`}/>
                                             <AvatarFallback className="text-[6px]">{op.seller?.substring(0,2)}</AvatarFallback>
                                         </Avatar>
                                         <span className="truncate font-medium">{op.seller || 'Sin Asignar'}</span>

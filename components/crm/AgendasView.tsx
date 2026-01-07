@@ -7,14 +7,11 @@ import { Badge } from "@/components/ui/badge"
 import { CalendarClock, Phone, MessageCircle, StickyNote, Wallet, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-// 2. Aceptamos el nombre del usuario real como propiedad
-export function AgendasView({ userName }: { userName?: string }) {
-  // 3. Iniciamos la conexión a Supabase
+// ✅ ACTUALIZADO: Aceptamos onLeadClick
+export function AgendasView({ userName, onLeadClick }: { userName?: string, onLeadClick?: (id: string) => void }) {
   const supabase = createClient()
-
   const [tasks, setTasks] = useState<any[]>([])
 
-  // Si no le pasamos nombre, usa "Maca" por defecto para que no se rompa
   const CURRENT_USER = userName || "Maca"
 
   const fetchAgenda = async () => {
@@ -36,7 +33,6 @@ export function AgendasView({ userName }: { userName?: string }) {
   useEffect(() => {
     fetchAgenda()
 
-    // ✅ Realtime: mantiene la agenda sincronizada sin refresh
     const channel = supabase
       .channel(`agenda_${CURRENT_USER}`)
       .on(
@@ -86,7 +82,8 @@ export function AgendasView({ userName }: { userName?: string }) {
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })
 
-  const openWhatsApp = (phone: string, agent: string) => {
+  const openWhatsApp = (e: React.MouseEvent, phone: string, agent: string) => {
+    e.stopPropagation() // Evita que se abra el detalle al clickear el botón de WPP
     const clean = phone.replace(/[^0-9]/g, "")
     const msg = encodeURIComponent(
       `Hola! Soy ${agent} de GML Salud. Teníamos agendada una llamada para ahora. ¿Podés hablar?`
@@ -112,7 +109,8 @@ export function AgendasView({ userName }: { userName?: string }) {
           {tasksToday.map((task) => (
             <Card
               key={task.id}
-              className="border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow dark:bg-slate-900 dark:border-slate-800 dark:border-l-blue-500 overflow-hidden"
+              onClick={() => onLeadClick && onLeadClick(task.id)} // ✅ Click en tarjeta abre detalle
+              className="border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-all cursor-pointer hover:border-blue-300 dark:bg-slate-900 dark:border-slate-800 dark:border-l-blue-500 overflow-hidden group"
             >
               <CardContent className="p-0">
                 <div className="flex items-stretch">
@@ -128,7 +126,7 @@ export function AgendasView({ userName }: { userName?: string }) {
                   <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
                     <div className="flex justify-between items-start gap-4 mb-2">
                       <div className="min-w-0 flex-1">
-                        <h4 className="font-bold text-lg truncate">{task.name}</h4>
+                        <h4 className="font-bold text-lg truncate group-hover:text-blue-600 transition-colors">{task.name}</h4>
                         <p className="text-sm text-slate-600 dark:text-slate-400 font-mono font-bold flex items-center gap-2 mt-1">
                           <Phone className="h-3 w-3" /> {task.phone}
                         </p>
@@ -138,13 +136,16 @@ export function AgendasView({ userName }: { userName?: string }) {
                           size="icon"
                           variant="ghost"
                           className="text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
-                          onClick={() => openWhatsApp(task.phone, task.agent_name)}
+                          onClick={(e) => openWhatsApp(e, task.phone, task.agent_name)}
                         >
                           <MessageCircle className="h-5 w-5" />
                         </Button>
                         <Button
                           className="bg-slate-200 text-slate-800 hover:bg-green-100 hover:text-green-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-green-900/30 dark:hover:text-green-400 gap-2 px-4"
-                          onClick={() => handleCompleteTask(task.id, task.notes)}
+                          onClick={(e) => {
+                            e.stopPropagation(); 
+                            handleCompleteTask(task.id, task.notes);
+                          }}
                         >
                           <Check className="h-4 w-4" /> Listo
                         </Button>
@@ -200,7 +201,7 @@ export function AgendasView({ userName }: { userName?: string }) {
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {tasksFuture.map((task) => (
-            <Card key={task.id} className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
+            <Card key={task.id} className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 hover:border-blue-300 transition-colors cursor-pointer" onClick={() => onLeadClick && onLeadClick(task.id)}>
               <CardContent className="p-4">
                 <p className="text-xs font-bold text-slate-400 uppercase mb-1">{formatDate(task.scheduled_for)}</p>
                 <div className="flex justify-between items-center">

@@ -8,7 +8,8 @@ import { Search, RefreshCw, Filter, ArrowUpRight } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 
-export function ContactsView({ userName }: { userName?: string }) {
+// ✅ ACTUALIZADO: Aceptamos onLeadClick
+export function ContactsView({ userName, onLeadClick }: { userName?: string, onLeadClick?: (id: string) => void }) {
     const supabase = createClient()
     const [contacts, setContacts] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -110,7 +111,7 @@ export function ContactsView({ userName }: { userName?: string }) {
     }
 
     return (
-        <div className="p-6 h-full overflow-y-auto w-full bg-slate-50 dark:bg-slate-950">
+        <div className="p-6 h-full overflow-y-auto w-full bg-slate-50 dark:bg-slate-900">
             <div className="max-w-6xl mx-auto space-y-6">
                 
                 {/* HEADER */}
@@ -178,7 +179,13 @@ export function ContactsView({ userName }: { userName?: string }) {
                                 filtered.map(contact => (
                                     <tr key={contact.id} className="hover:bg-blue-50/50 dark:hover:bg-slate-800/50 transition-colors group">
                                         <td className="p-4">
-                                            <p className="font-bold text-slate-800 dark:text-white text-base">{contact.name}</p>
+                                            {/* ✅ Clickable para abrir detalle */}
+                                            <p 
+                                                className="font-bold text-slate-800 dark:text-white text-base hover:text-blue-600 cursor-pointer underline-offset-4 hover:underline"
+                                                onClick={() => onLeadClick && onLeadClick(contact.id)}
+                                            >
+                                                {contact.name}
+                                            </p>
                                             <div className="flex items-center gap-2 mt-1">
                                                 <span className="text-xs font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{contact.phone}</span>
                                                 <span className="text-[10px] text-slate-400 bg-slate-50 border px-1 rounded">{contact.source || "Base"}</span>

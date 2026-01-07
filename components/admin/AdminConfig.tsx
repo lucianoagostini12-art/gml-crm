@@ -172,7 +172,7 @@ export function AdminConfig() {
                 work_hours: parseInt(formData.work_hours)
             }
 
-            const response = await fetch('/api/admin/create-user', {
+            const response = await fetch('/api/create-user', {
                 method: method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)

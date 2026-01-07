@@ -1,48 +1,40 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
+// Inicializamos el cliente ADMIN (Service Role)
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // RECUERDA TENER ESTO EN .ENV.LOCAL
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
+
+// --- CREAR USUARIO (POST) ---
 export async function POST(request: Request) {
   try {
-    // ⚠️ IMPORTANTE: Necesitas esta clave en tu archivo .env.local
-    // Si no la tienes, búscala en Supabase > Project Settings > API > service_role secret
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-    if (!serviceRoleKey) {
-      return NextResponse.json({ error: "Falta la Service Role Key" }, { status: 500 })
-    }
-
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      serviceRoleKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    )
-
     const body = await request.json()
     const { email, password, full_name, role, work_hours } = body
 
-    // 1. Crear usuario en Auth con Email Confirmado (¡El secreto del sobrecito!)
+    // 1. Crear usuario en Auth (Confirmado y Encriptado OK)
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true, // 👈 ESTO PONE EL SOBRECITO AUTOMÁTICAMENTE
+      email_confirm: true,
       user_metadata: { full_name }
     })
 
     if (authError) throw authError
     if (!authData.user) throw new Error("No se pudo crear el usuario")
 
-    const userId = authData.user.id
-
-    // 2. Crear el perfil público
+    // 2. Crear Perfil
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .upsert({
-        id: userId,
+        id: authData.user.id,
         email,
         full_name,
         role,
@@ -51,10 +43,40 @@ export async function POST(request: Request) {
 
     if (profileError) throw profileError
 
-    return NextResponse.json({ id: userId, message: "Usuario creado y confirmado OK" })
+    return NextResponse.json({ id: authData.user.id, message: "Usuario creado OK" })
 
   } catch (error: any) {
     console.error('Error creando usuario:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}
+
+// --- EDITAR USUARIO (PUT) ---
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json()
+    const { id, password, full_name, role, work_hours } = body
+
+    // 1. Si hay contraseña nueva, la actualizamos
+    if (password && password.trim() !== "") {
+      const { error: passError } = await supabaseAdmin.auth.admin.updateUserById(id, {
+        password: password
+      })
+      if (passError) throw passError
+    }
+
+    // 2. Actualizar Perfil
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .update({ full_name, role, work_hours })
+      .eq('id', id)
+
+    if (profileError) throw profileError
+
+    return NextResponse.json({ message: "Usuario actualizado OK" })
+
+  } catch (error: any) {
+    console.error('Error editando usuario:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

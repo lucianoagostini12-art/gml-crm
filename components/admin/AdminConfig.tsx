@@ -27,21 +27,14 @@ export function AdminConfig() {
     const [loading, setLoading] = useState(false)
     const [newReason, setNewReason] = useState("")
 
-    // Estados de UI
     const [showPassword, setShowPassword] = useState(false)
 
-    // Estados de Comisiones
+    // Configs
     const [ranges5hs, setRanges5hs] = useState<any[]>([])
     const [ranges8hs, setRanges8hs] = useState<any[]>([])
     const [absorb5, setAbsorb5] = useState("8")
     const [absorb8, setAbsorb8] = useState("12")
-
-    // Estado Configuración Cementerio
-    const [freezeConfig, setFreezeConfig] = useState({
-        fantasmas: 30, precio: 60, interes: 45, quemados: 45, basural: 365
-    })
-
-    // Estado Plantillas WhatsApp
+    const [freezeConfig, setFreezeConfig] = useState({ fantasmas: 30, precio: 60, interes: 45, quemados: 45, basural: 365 })
     const [wppTemplates, setWppTemplates] = useState<any[]>([])
 
     // Formulario Usuario
@@ -49,7 +42,6 @@ export function AdminConfig() {
         name: "", email: "", password: "", role: "seller", work_hours: "5", avatar: ""
     })
     
-    // Estado para guardar el archivo físico antes de subirlo
     const [avatarFile, setAvatarFile] = useState<File | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -102,7 +94,6 @@ export function AdminConfig() {
         }
     }
 
-    // --- GUARDAR CONFIG ---
     const saveGeneralConfig = async () => {
         setLoading(true)
         const updates = [
@@ -116,29 +107,11 @@ export function AdminConfig() {
         const { error: errWpp } = await supabase.from('whatsapp_templates').upsert(wppTemplates)
 
         setLoading(false)
-        if (errConfig || errWpp) {
-            alert("❌ Error al guardar.")
-        } else {
-            alert("✅ Configuración guardada.")
-            fetchWppTemplates() 
-        }
+        if (errConfig || errWpp) alert("❌ Error al guardar.")
+        else { alert("✅ Configuración guardada."); fetchWppTemplates() }
     }
 
-    // --- HELPERS TRAMOS ---
-    const updateRange = (list: any[], setList: any, id: number, field: string, value: string) => {
-        const val = field === 'max' && value === '+' ? 999 : parseInt(value) || 0
-        const newList = list.map(item => item.id === id ? { ...item, [field]: val } : item)
-        setList(newList)
-    }
-    const addRange = (list: any[], setList: any) => {
-        const newId = list.length > 0 ? Math.max(...list.map(i => i.id)) + 1 : 1
-        setList([...list, { id: newId, min: 0, max: 999, percent: 0 }])
-    }
-    const removeRange = (list: any[], setList: any, id: number) => {
-        setList(list.filter(i => i.id !== id))
-    }
-
-    // --- MODALES ---
+    // --- MANEJO USUARIOS ---
     const openCreateModal = () => {
         setEditingUserId(null)
         setAvatarFile(null)
@@ -165,9 +138,7 @@ export function AdminConfig() {
         if (file) {
             setAvatarFile(file)
             const reader = new FileReader()
-            reader.onloadend = () => {
-                setFormData(prev => ({ ...prev, avatar: reader.result as string }))
-            }
+            reader.onloadend = () => setFormData(prev => ({ ...prev, avatar: reader.result as string }))
             reader.readAsDataURL(file)
         }
     }
@@ -176,15 +147,13 @@ export function AdminConfig() {
         const fileExt = file.name.split('.').pop()
         const fileName = `${userId}-${Date.now()}.${fileExt}`
         const filePath = `${fileName}`
-
-        const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true })
-        if (uploadError) { console.error(uploadError); return null }
-
+        const { error } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true })
+        if (error) return null
         const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
         return data.publicUrl
     }
 
-    // --- GUARDAR USUARIO (LA PARTE CLAVE) ---
+    // --- GUARDAR (CREAR O EDITAR) ---
     const handleSaveUser = async () => {
         if (!formData.name || !formData.email) return alert("Nombre y Email obligatorios.")
         setLoading(true)
@@ -192,61 +161,50 @@ export function AdminConfig() {
         try {
             let targetUserId = editingUserId
             
-            // 1. SI ES NUEVO: USAMOS LA API (Esto arregla el login)
-            if (!targetUserId) {
-                if (!formData.password) {
-                    setLoading(false)
-                    return alert("Contraseña obligatoria para nuevos usuarios.")
-                }
-
-                // 🚀 AQUÍ ESTÁ LA MAGIA: USAR FETCH A LA API, NO RPC A LA BD
-                const response = await fetch('/api/admin/create-user', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: formData.email,
-                        password: formData.password,
-                        full_name: formData.name,
-                        role: formData.role,
-                        work_hours: parseInt(formData.work_hours)
-                    })
-                })
-
-                if (!response.ok) {
-                    const errorData = await response.json()
-                    throw new Error(errorData.error || "Error al crear usuario")
-                }
-
-                const data = await response.json()
-                targetUserId = data.id
-                alert("Usuario creado exitosamente. ✅")
-
-            } else {
-                // 2. SI ES EDICIÓN: Usamos Supabase directo (solo actualiza datos)
-                const { error } = await supabase.from('profiles').update({
-                    full_name: formData.name,
-                    role: formData.role,
-                    work_hours: parseInt(formData.work_hours),
-                }).eq('id', targetUserId)
-
-                if (error) throw error
-                if (formData.password) alert("Nota: Para cambiar la contraseña, usá el panel de Supabase Auth.")
-                else alert("Usuario actualizado.")
+            // 1. LLAMADA A LA API (Para crear O editar datos sensibles)
+            const method = targetUserId ? 'PUT' : 'POST'
+            const payload = {
+                id: targetUserId, // Solo necesario para PUT
+                email: formData.email,
+                password: formData.password,
+                full_name: formData.name,
+                role: formData.role,
+                work_hours: parseInt(formData.work_hours)
             }
 
-            // 3. SUBIDA DE FOTO (Igual para ambos)
+            const response = await fetch('/api/admin/create-user', {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+
+            const responseData = await response.json()
+
+            if (!response.ok) {
+                throw new Error(responseData.error || "Error al procesar usuario")
+            }
+
+            // Si fue creación, capturamos el nuevo ID
+            if (!targetUserId) {
+                targetUserId = responseData.id
+                alert("Usuario creado exitosamente. ✅")
+            } else {
+                alert("Usuario actualizado exitosamente. ✅")
+            }
+
+            // 2. SUBIDA DE FOTO (Si corresponde)
             if (targetUserId && avatarFile) {
                 const publicAvatarUrl = await uploadAvatar(targetUserId, avatarFile)
                 if (publicAvatarUrl) {
                     await supabase.from('profiles').update({ avatar_url: publicAvatarUrl }).eq('id', targetUserId)
                 }
             } else if (targetUserId && !avatarFile && formData.avatar.startsWith('http')) {
-                 // Mantener avatar anterior si no se cambió
                  await supabase.from('profiles').update({ avatar_url: formData.avatar }).eq('id', targetUserId)
             }
 
             await fetchUsers()
             setIsUserModalOpen(false)
+
         } catch (e: any) {
             console.error(e)
             alert("Error: " + e.message)
@@ -257,20 +215,25 @@ export function AdminConfig() {
 
     const handleDeleteUser = async (id: string) => {
         if (!confirm("¿Estás seguro? Se borrará el acceso.")) return
-        
-        // Al usar Delete Cascade en SQL, borrar el perfil o el usuario Auth debería limpiar todo.
         const { error } = await supabase.from('profiles').delete().eq('id', id)
-        
-        if (error) {
-             console.error(error)
-             alert("Error al borrar. Intenta desde el panel de Supabase.")
-        } else {
+        if (error) alert("Error al borrar. Intenta desde el panel de Supabase.")
+        else {
              alert("Perfil eliminado.")
              setUsers(users.filter(u => u.id !== id))
         }
     }
 
-    // ... Resto de funciones (addLossReason, templates, etc.) se mantienen igual
+    // ... Helpers de UI ...
+    const updateRange = (list: any[], setList: any, id: number, field: string, value: string) => {
+        const val = field === 'max' && value === '+' ? 999 : parseInt(value) || 0
+        const newList = list.map(item => item.id === id ? { ...item, [field]: val } : item)
+        setList(newList)
+    }
+    const addRange = (list: any[], setList: any) => {
+        const newId = list.length > 0 ? Math.max(...list.map(i => i.id)) + 1 : 1
+        setList([...list, { id: newId, min: 0, max: 999, percent: 0 }])
+    }
+    const removeRange = (list: any[], setList: any, id: number) => { setList(list.filter(i => i.id !== id)) }
     const addLossReason = async () => {
         if (!newReason.trim()) return
         const { error } = await supabase.from('loss_reasons').insert({ reason: newReason })
@@ -365,9 +328,8 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
-                {/* Resto de Tabs (CRM, Whatsapp, Comisiones, Sistema) se mantienen igual */}
+                {/* Resto de Tabs (CRM, Whatsapp, Comisiones, Sistema) se mantienen igual... */}
                 <TabsContent value="crm" className="space-y-6 mt-6">
-                    {/* ... Contenido CRM igual al anterior ... */}
                     <Card className="border-l-4 border-l-blue-500">
                         <CardHeader><CardTitle className="flex items-center gap-2"><Snowflake className="h-5 w-5 text-blue-500"/> Configuración de Cementerio</CardTitle></CardHeader>
                         <CardContent>
@@ -390,7 +352,6 @@ export function AdminConfig() {
                 </TabsContent>
 
                 <TabsContent value="whatsapp" className="space-y-6 mt-6">
-                    {/* ... Contenido Whatsapp igual al anterior ... */}
                     <Card className="border-t-4 border-t-green-500">
                         <CardHeader className="flex flex-row justify-between">
                             <div><CardTitle className="flex gap-2 text-green-700"><MessageCircle className="h-5 w-5"/> Plantillas</CardTitle><CardDescription>Mensajes y botones.</CardDescription></div>
@@ -409,7 +370,6 @@ export function AdminConfig() {
                 </TabsContent>
 
                 <TabsContent value="commissions" className="space-y-4">
-                    {/* ... Contenido Comisiones igual al anterior ... */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <Card className="border-t-4 border-t-blue-500">
                             <CardHeader><CardTitle className="text-blue-700">Jornada 5 Hs</CardTitle></CardHeader>
@@ -462,55 +422,18 @@ export function AdminConfig() {
                             </div>
                         </div>
 
-                        <div className="grid gap-2">
-                            <Label>Nombre Completo</Label>
-                            <Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
-                        </div>
-                        
+                        <div className="grid gap-2"><Label>Nombre Completo</Label><Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} /></div>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="grid gap-2">
-                                <Label>Rol</Label>
-                                <Select value={formData.role} onValueChange={(v) => setFormData({...formData, role: v})}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>
-                                        <SelectItem value="admin_god">Administración GOD</SelectItem>
-                                        <SelectItem value="admin_common">Administración Común</SelectItem>
-                                        <SelectItem value="seller">Vendedora</SelectItem>
-                                        <SelectItem value="setter">Gestora de Leads</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            
-                            {formData.role === 'seller' && (
-                                <div className="grid gap-2">
-                                    <Label>Jornada</Label>
-                                    <Select value={formData.work_hours} onValueChange={(v) => setFormData({...formData, work_hours: v})}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="5">5 Horas</SelectItem>
-                                            <SelectItem value="8">8 Horas</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
+                            <div className="grid gap-2"><Label>Rol</Label><Select value={formData.role} onValueChange={(v) => setFormData({...formData, role: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="supervisor_god">Supervisión GOD</SelectItem><SelectItem value="admin_god">Administración GOD</SelectItem><SelectItem value="admin_common">Administración Común</SelectItem><SelectItem value="seller">Vendedora</SelectItem><SelectItem value="setter">Gestora de Leads</SelectItem></SelectContent></Select></div>
+                            {formData.role === 'seller' && (<div className="grid gap-2"><Label>Jornada</Label><Select value={formData.work_hours} onValueChange={(v) => setFormData({...formData, work_hours: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="5">5 Horas</SelectItem><SelectItem value="8">8 Horas</SelectItem></SelectContent></Select></div>)}
                         </div>
-
-                        <div className="grid gap-2">
-                            <Label>Email (Acceso)</Label>
-                            <Input value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} placeholder="nombre@gml.com" />
-                        </div>
-                        
+                        <div className="grid gap-2"><Label>Email (Acceso)</Label><Input value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} placeholder="nombre@gml.com" /></div>
                         <div className="grid gap-2">
                             <Label className="flex justify-between">{editingUserId ? "Nueva Contraseña" : "Contraseña"}{editingUserId && <span className="text-xs text-slate-400 font-normal">(Dejar vacío para no cambiar)</span>}</Label>
                             <div className="relative"><Input type={showPassword ? "text" : "password"} value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} placeholder={editingUserId ? "●●●●●●" : "Crear clave..."} /><Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full text-slate-400" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}</Button></div>
                         </div>
                     </div>
-                    <DialogFooter>
-                        <Button onClick={handleSaveUser} disabled={loading} className="w-full">
-                            {loading ? "Guardando..." : "Guardar Usuario"}
-                        </Button>
-                    </DialogFooter>
+                    <DialogFooter><Button onClick={handleSaveUser} disabled={loading} className="w-full">{loading ? "Guardando..." : "Guardar Usuario"}</Button></DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

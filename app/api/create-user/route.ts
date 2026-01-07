@@ -1,25 +1,31 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-// Inicializamos el cliente ADMIN (Service Role)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // RECUERDA TENER ESTO EN .ENV.LOCAL
-  {
+// Función helper para obtener el cliente admin solo cuando se necesita
+const getSupabaseAdmin = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Faltan las variables de entorno de Supabase en el servidor.")
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false
     }
-  }
-)
+  })
+}
 
 // --- CREAR USUARIO (POST) ---
 export async function POST(request: Request) {
   try {
+    const supabaseAdmin = getSupabaseAdmin() // Inicializamos aquí, no afuera
     const body = await request.json()
     const { email, password, full_name, role, work_hours } = body
 
-    // 1. Crear usuario en Auth (Confirmado y Encriptado OK)
+    // 1. Crear usuario en Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -54,10 +60,11 @@ export async function POST(request: Request) {
 // --- EDITAR USUARIO (PUT) ---
 export async function PUT(request: Request) {
   try {
+    const supabaseAdmin = getSupabaseAdmin() // Inicializamos aquí
     const body = await request.json()
     const { id, password, full_name, role, work_hours } = body
 
-    // 1. Si hay contraseña nueva, la actualizamos
+    // 1. Actualizar pass si existe
     if (password && password.trim() !== "") {
       const { error: passError } = await supabaseAdmin.auth.admin.updateUserById(id, {
         password: password

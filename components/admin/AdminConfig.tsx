@@ -51,7 +51,6 @@ export function AdminConfig() {
     
     // Estado para guardar el archivo físico antes de subirlo
     const [avatarFile, setAvatarFile] = useState<File | null>(null)
-    
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // --- CARGA INICIAL ---
@@ -71,7 +70,6 @@ export function AdminConfig() {
                 email: u.email, 
                 role: u.role || "seller",
                 work_hours: u.work_hours || 5,
-                // Si tiene avatar_url usamos esa, si no, generamos uno temporal
                 avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`
             })))
         }
@@ -104,7 +102,7 @@ export function AdminConfig() {
         }
     }
 
-    // --- GUARDAR CONFIGURACIÓN GENERAL ---
+    // --- GUARDAR CONFIG ---
     const saveGeneralConfig = async () => {
         setLoading(true)
         const updates = [
@@ -119,14 +117,14 @@ export function AdminConfig() {
 
         setLoading(false)
         if (errConfig || errWpp) {
-            alert("❌ Error al guardar: " + (errConfig?.message || errWpp?.message))
+            alert("❌ Error al guardar.")
         } else {
-            alert("✅ Configuración guardada correctamente.")
+            alert("✅ Configuración guardada.")
             fetchWppTemplates() 
         }
     }
 
-    // --- GESTIÓN DE TRAMOS ---
+    // --- HELPERS TRAMOS ---
     const updateRange = (list: any[], setList: any, id: number, field: string, value: string) => {
         const val = field === 'max' && value === '+' ? 999 : parseInt(value) || 0
         const newList = list.map(item => item.id === id ? { ...item, [field]: val } : item)
@@ -140,7 +138,7 @@ export function AdminConfig() {
         setList(list.filter(i => i.id !== id))
     }
 
-    // --- GESTIÓN USUARIOS ---
+    // --- MODALES ---
     const openCreateModal = () => {
         setEditingUserId(null)
         setAvatarFile(null)
@@ -179,35 +177,29 @@ export function AdminConfig() {
         const fileName = `${userId}-${Date.now()}.${fileExt}`
         const filePath = `${fileName}`
 
-        const { error: uploadError } = await supabase.storage
-            .from('avatars')
-            .upload(filePath, file, { upsert: true })
-
-        if (uploadError) {
-            console.error('Error uploading avatar:', uploadError)
-            return null
-        }
+        const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true })
+        if (uploadError) { console.error(uploadError); return null }
 
         const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
         return data.publicUrl
     }
 
+    // --- GUARDAR USUARIO (LA PARTE CLAVE) ---
     const handleSaveUser = async () => {
         if (!formData.name || !formData.email) return alert("Nombre y Email obligatorios.")
         setLoading(true)
 
         try {
             let targetUserId = editingUserId
-            let publicAvatarUrl = null
-
-            // 1. Si es NUEVO usuario: USAR API BACKEND (Crea con email confirmado y pass segura)
+            
+            // 1. SI ES NUEVO: USAMOS LA API (Esto arregla el login)
             if (!targetUserId) {
                 if (!formData.password) {
                     setLoading(false)
                     return alert("Contraseña obligatoria para nuevos usuarios.")
                 }
 
-                // LLAMADA A LA API QUE CREAMOS
+                // 🚀 AQUÍ ESTÁ LA MAGIA: USAR FETCH A LA API, NO RPC A LA BD
                 const response = await fetch('/api/admin/create-user', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -227,11 +219,10 @@ export function AdminConfig() {
 
                 const data = await response.json()
                 targetUserId = data.id
-                
                 alert("Usuario creado exitosamente. ✅")
 
             } else {
-                // 2. Si es EDICIÓN: Usamos Supabase client directo (como antes)
+                // 2. SI ES EDICIÓN: Usamos Supabase directo (solo actualiza datos)
                 const { error } = await supabase.from('profiles').update({
                     full_name: formData.name,
                     role: formData.role,
@@ -243,18 +234,15 @@ export function AdminConfig() {
                 else alert("Usuario actualizado.")
             }
 
-            // 3. GESTIÓN DE FOTO (Igual para ambos casos)
+            // 3. SUBIDA DE FOTO (Igual para ambos)
             if (targetUserId && avatarFile) {
-                publicAvatarUrl = await uploadAvatar(targetUserId, avatarFile)
+                const publicAvatarUrl = await uploadAvatar(targetUserId, avatarFile)
                 if (publicAvatarUrl) {
-                    await supabase.from('profiles')
-                        .update({ avatar_url: publicAvatarUrl })
-                        .eq('id', targetUserId)
+                    await supabase.from('profiles').update({ avatar_url: publicAvatarUrl }).eq('id', targetUserId)
                 }
             } else if (targetUserId && !avatarFile && formData.avatar.startsWith('http')) {
-                 await supabase.from('profiles')
-                        .update({ avatar_url: formData.avatar })
-                        .eq('id', targetUserId)
+                 // Mantener avatar anterior si no se cambió
+                 await supabase.from('profiles').update({ avatar_url: formData.avatar }).eq('id', targetUserId)
             }
 
             await fetchUsers()
@@ -271,9 +259,6 @@ export function AdminConfig() {
         if (!confirm("¿Estás seguro? Se borrará el acceso.")) return
         
         // Al usar Delete Cascade en SQL, borrar el perfil o el usuario Auth debería limpiar todo.
-        // Como cliente no puede borrar Auth Users directamente (por seguridad), 
-        // borramos el perfil y confiamos en el trigger, O SOLO lo marcamos visualmente.
-        // Para borrar DE VERDAD, lo ideal es otra API Route, pero probemos borrando perfil:
         const { error } = await supabase.from('profiles').delete().eq('id', id)
         
         if (error) {
@@ -477,18 +462,55 @@ export function AdminConfig() {
                             </div>
                         </div>
 
-                        <div className="grid gap-2"><Label>Nombre Completo</Label><Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} /></div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="grid gap-2"><Label>Rol</Label><Select value={formData.role} onValueChange={(v) => setFormData({...formData, role: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="supervisor_god">Supervisión GOD</SelectItem><SelectItem value="admin_god">Administración GOD</SelectItem><SelectItem value="admin_common">Administración Común</SelectItem><SelectItem value="seller">Vendedora</SelectItem><SelectItem value="setter">Gestora de Leads</SelectItem></SelectContent></Select></div>
-                            {formData.role === 'seller' && (<div className="grid gap-2"><Label>Jornada</Label><Select value={formData.work_hours} onValueChange={(v) => setFormData({...formData, work_hours: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="5">5 Horas</SelectItem><SelectItem value="8">8 Horas</SelectItem></SelectContent></Select></div>)}
+                        <div className="grid gap-2">
+                            <Label>Nombre Completo</Label>
+                            <Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
                         </div>
-                        <div className="grid gap-2"><Label>Email (Acceso)</Label><Input value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} placeholder="nombre@gml.com" /></div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                                <Label>Rol</Label>
+                                <Select value={formData.role} onValueChange={(v) => setFormData({...formData, role: v})}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="supervisor_god">Supervisión GOD</SelectItem>
+                                        <SelectItem value="admin_god">Administración GOD</SelectItem>
+                                        <SelectItem value="admin_common">Administración Común</SelectItem>
+                                        <SelectItem value="seller">Vendedora</SelectItem>
+                                        <SelectItem value="setter">Gestora de Leads</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            
+                            {formData.role === 'seller' && (
+                                <div className="grid gap-2">
+                                    <Label>Jornada</Label>
+                                    <Select value={formData.work_hours} onValueChange={(v) => setFormData({...formData, work_hours: v})}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="5">5 Horas</SelectItem>
+                                            <SelectItem value="8">8 Horas</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Email (Acceso)</Label>
+                            <Input value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} placeholder="nombre@gml.com" />
+                        </div>
+                        
                         <div className="grid gap-2">
                             <Label className="flex justify-between">{editingUserId ? "Nueva Contraseña" : "Contraseña"}{editingUserId && <span className="text-xs text-slate-400 font-normal">(Dejar vacío para no cambiar)</span>}</Label>
                             <div className="relative"><Input type={showPassword ? "text" : "password"} value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} placeholder={editingUserId ? "●●●●●●" : "Crear clave..."} /><Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full text-slate-400" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}</Button></div>
                         </div>
                     </div>
-                    <DialogFooter><Button onClick={handleSaveUser} disabled={loading} className="w-full">{loading ? "Guardando..." : "Guardar Usuario"}</Button></DialogFooter>
+                    <DialogFooter>
+                        <Button onClick={handleSaveUser} disabled={loading} className="w-full">
+                            {loading ? "Guardando..." : "Guardar Usuario"}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

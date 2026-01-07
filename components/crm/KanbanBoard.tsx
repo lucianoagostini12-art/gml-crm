@@ -112,7 +112,8 @@ function DropZone({ id, children, className }: any) {
     return <div ref={setNodeRef} className={`${className} transition-all duration-300 ${isOver ? 'scale-110 ring-4 ring-white shadow-2xl opacity-100' : 'opacity-80'}`}>{children}</div>
 }
 
-export function KanbanBoard({ userName }: { userName?: string }) {
+// ✅ SE AGREGÓ onLeadClick A LAS PROPS Y LA INTERFAZ
+export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLeadClick?: (id: string) => void }) {
     const supabase = createClient()
     const [leads, setLeads] = useState<Lead[]>([])
     const [activeId, setActiveId] = useState<string | null>(null)
@@ -127,7 +128,7 @@ export function KanbanBoard({ userName }: { userName?: string }) {
     const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false)
     const [isDocConfirmOpen, setIsDocConfirmOpen] = useState(false)
     const [overdueLead, setOverdueLead] = useState<Lead | null>(null)
-    const [zombieLead, setZombieLead] = useState<Lead | null>(null) // ✅ Estado para Alerta Zombie
+    const [zombieLead, setZombieLead] = useState<Lead | null>(null)
     
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
@@ -139,7 +140,7 @@ export function KanbanBoard({ userName }: { userName?: string }) {
         lastUpdate: item.last_update || item.created_at, createdAt: item.created_at, agent: item.agent_name,
         calls: item.calls || 0, quoted_prepaga: item.quoted_prepaga, quoted_plan: item.quoted_plan, quoted_price: item.quoted_price, notes: item.notes || '',
         scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas,
-        warning_sent: item.warning_sent // ✅ Agregamos campo de alerta
+        warning_sent: item.warning_sent 
     }))
 
     const fetchLeads = async () => {
@@ -206,7 +207,7 @@ export function KanbanBoard({ userName }: { userName?: string }) {
     // Detección de Vencidos (Alerta Amarilla)
     useEffect(() => {
         const found = leads.find(l => isLeadOverdue(l.lastUpdate, l.status));
-        if (found && !found.warning_sent) setOverdueLead(found); // Prioridad al Zombie
+        if (found && !found.warning_sent) setOverdueLead(found);
     }, [leads]);
 
     const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
@@ -308,7 +309,11 @@ export function KanbanBoard({ userName }: { userName?: string }) {
                             key={col.id} 
                             col={col} 
                             leads={sortLeads(col.id)} 
-                            onClickLead={(l: any) => setSelectedLead(l)} 
+                            onClickLead={(l: any) => {
+                                setSelectedLead(l);
+                                // ✅ Si pasaron la función desde SellerManager, la ejecutamos
+                                if (onLeadClick) onLeadClick(l.id);
+                            }} 
                             onCallIncrement={handleCallIncrement} 
                             onOmniClick={handleOmniClick} 
                             onResolveAgenda={(l: Lead) => setShowConfirmCall(l)} 

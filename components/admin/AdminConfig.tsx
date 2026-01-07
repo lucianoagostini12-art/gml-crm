@@ -12,8 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame } from "lucide-react"
+import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame, MessageCircle, RefreshCw, PenLine } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Textarea } from "@/components/ui/textarea"
 
 export function AdminConfig() {
     const supabase = createClient()
@@ -29,29 +30,23 @@ export function AdminConfig() {
     // Estados de UI
     const [showPassword, setShowPassword] = useState(false)
 
-    // Estados de Comisiones (Se guardan en DB)
+    // Estados de Comisiones
     const [ranges5hs, setRanges5hs] = useState<any[]>([])
     const [ranges8hs, setRanges8hs] = useState<any[]>([])
     const [absorb5, setAbsorb5] = useState("8")
     const [absorb8, setAbsorb8] = useState("12")
 
-    // Estado Configuración Cementerio (Freeze Times) - NUEVO
+    // Estado Configuración Cementerio
     const [freezeConfig, setFreezeConfig] = useState({
-        fantasmas: 30,
-        precio: 60,
-        interes: 45,
-        quemados: 45,
-        basural: 365
+        fantasmas: 30, precio: 60, interes: 45, quemados: 45, basural: 365
     })
+
+    // Estado Plantillas WhatsApp
+    const [wppTemplates, setWppTemplates] = useState<any[]>([])
 
     // Formulario Usuario
     const [formData, setFormData] = useState({
-        name: "",
-        email: "",
-        password: "",
-        role: "seller",
-        work_hours: "5",
-        avatar: ""
+        name: "", email: "", password: "", role: "seller", work_hours: "5", avatar: ""
     })
     
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -61,6 +56,7 @@ export function AdminConfig() {
         fetchUsers()
         fetchLossReasons()
         fetchConfigs()
+        fetchWppTemplates()
     }, [])
 
     const fetchUsers = async () => {
@@ -82,6 +78,12 @@ export function AdminConfig() {
         if (data) setLossReasons(data)
     }
 
+    const fetchWppTemplates = async () => {
+        // Ordenamos por ID para mantener consistencia visual
+        const { data } = await supabase.from('whatsapp_templates').select('*').order('id', { ascending: true })
+        if (data) setWppTemplates(data)
+    }
+
     const fetchConfigs = async () => {
         const { data } = await supabase.from('system_config').select('*')
         if (data) {
@@ -89,37 +91,37 @@ export function AdminConfig() {
             const r8 = data.find(c => c.key === 'ranges_8hs')?.value
             const a5 = data.find(c => c.key === 'absorb_5hs')?.value
             const a8 = data.find(c => c.key === 'absorb_8hs')?.value
-            const gz = data.find(c => c.key === 'graveyard_config')?.value // Cargar config cementerio
+            const gz = data.find(c => c.key === 'graveyard_config')?.value
 
-            // Si hay datos en DB los usamos, sino usamos defaults vacíos para no romper
             if (r5) setRanges5hs(r5); else setRanges5hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (r8) setRanges8hs(r8); else setRanges8hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (a5) setAbsorb5(a5)
             if (a8) setAbsorb8(a8)
-            if (gz) setFreezeConfig(gz) // Setear estado cementerio
+            if (gz) setFreezeConfig(gz)
         }
     }
 
-    // --- GUARDAR CONFIGURACIÓN GENERAL (REAL) ---
+    // --- GUARDAR CONFIGURACIÓN GENERAL ---
     const saveGeneralConfig = async () => {
         setLoading(true)
         
-        // Upsert masivo para asegurar persistencia
         const updates = [
             { key: 'ranges_5hs', value: ranges5hs },
             { key: 'ranges_8hs', value: ranges8hs },
             { key: 'absorb_5hs', value: absorb5 },
             { key: 'absorb_8hs', value: absorb8 },
-            { key: 'graveyard_config', value: freezeConfig } // Guardar config cementerio
+            { key: 'graveyard_config', value: freezeConfig }
         ]
+        const { error: errConfig } = await supabase.from('system_config').upsert(updates)
 
-        const { error } = await supabase.from('system_config').upsert(updates)
+        // Guardar Plantillas WhatsApp (Bulk Upsert con Labels nuevos)
+        const { error: errWpp } = await supabase.from('whatsapp_templates').upsert(wppTemplates)
 
         setLoading(false)
-        if (error) {
-            alert("❌ Error al guardar: " + error.message)
+        if (errConfig || errWpp) {
+            alert("❌ Error al guardar: " + (errConfig?.message || errWpp?.message))
         } else {
-            alert("✅ Configuración guardada correctamente en Base de Datos.")
+            alert("✅ Configuración guardada correctamente.")
         }
     }
 
@@ -137,7 +139,7 @@ export function AdminConfig() {
         setList(list.filter(i => i.id !== id))
     }
 
-    // --- GESTIÓN USUARIOS (SOLUCIÓN PUNTO 14) ---
+    // --- GESTIÓN USUARIOS ---
     const openCreateModal = () => {
         setEditingUserId(null)
         setFormData({ name: "", email: "", password: "", role: "seller", work_hours: "5", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` })
@@ -174,7 +176,6 @@ export function AdminConfig() {
 
         try {
             if (editingUserId) {
-                // UPDATE PERFIL EXISTENTE (Solo actualizamos metadata del perfil)
                 const { error } = await supabase.from('profiles').update({
                     full_name: formData.name,
                     role: formData.role,
@@ -183,31 +184,24 @@ export function AdminConfig() {
                 }).eq('id', editingUserId)
 
                 if (error) throw error
-                if (formData.password) alert("Nota: Para cambiar la contraseña de un usuario existente, usá el panel de Supabase Auth o enviá un mail de recuperación.")
-                else alert("Usuario actualizado correctamente.")
+                if (formData.password) alert("Nota: Para cambiar la contraseña, usá el panel de Supabase Auth.")
+                else alert("Usuario actualizado.")
 
             } else {
-                // CREAR NUEVO USUARIO (Usando la función RPC 'create_new_user')
                 if (!formData.password) {
                     setLoading(false)
-                    return alert("La contraseña es obligatoria para nuevos usuarios.")
+                    return alert("Contraseña obligatoria para nuevos usuarios.")
                 }
-
-                const { data, error } = await supabase.rpc('create_new_user', {
+                const { error } = await supabase.rpc('create_new_user', {
                     email: formData.email,
                     password: formData.password,
                     full_name: formData.name,
                     role: formData.role,
                     work_hours: parseInt(formData.work_hours)
                 })
-                
-                if (error) {
-                    throw error
-                } else {
-                    alert("Usuario creado exitosamente con acceso al sistema. ✅")
-                }
+                if (error) throw error
+                else alert("Usuario creado exitosamente. ✅")
             }
-
             await fetchUsers()
             setIsUserModalOpen(false)
         } catch (e: any) {
@@ -220,8 +214,6 @@ export function AdminConfig() {
 
     const handleDeleteUser = async (id: string) => {
         if (!confirm("¿Estás seguro? Se borrará el acceso.")) return
-        // Nota: Para borrar completamente, idealmente se debería usar una RPC de borrado de usuario auth.
-        // Por ahora borramos el perfil, lo que quita acceso visual.
         await supabase.from('profiles').delete().eq('id', id)
         setUsers(users.filter(u => u.id !== id))
     }
@@ -242,21 +234,19 @@ export function AdminConfig() {
         fetchLossReasons()
     }
 
-    // --- LÓGICA DE ROLES VISUAL (Incluye Setter) ---
+    // --- GESTIÓN WPP TEMPLATES (NUEVO: EDICIÓN COMPLETA) ---
+    const updateTemplate = (id: string, field: 'label' | 'message', value: string) => {
+        setWppTemplates(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t))
+    }
+
     const getRoleBadge = (role: string) => {
         switch(role) {
-            case 'supervisor_god': 
-                return <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold border-0 shadow-sm gap-1"><Crown size={12}/> Supervisión GOD</Badge>
-            case 'admin_god': 
-                return <Badge className="bg-purple-600 hover:bg-purple-700 text-white font-bold border-0 shadow-sm gap-1"><ShieldAlert size={12}/> Admin GOD</Badge>
-            case 'admin_common': 
-                return <Badge className="bg-pink-500 hover:bg-pink-600 text-white font-medium border-0 gap-1"><Briefcase size={12}/> Administrativa</Badge>
-            case 'setter': 
-                return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white font-medium border-0 gap-1"><Headset size={12}/> Gestora Leads</Badge>
-            case 'seller': 
-                return <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50 font-medium">Vendedora</Badge>
-            default: 
-                return <Badge variant="secondary">Sin Rol</Badge>
+            case 'supervisor_god': return <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold border-0 shadow-sm gap-1"><Crown size={12}/> Supervisión GOD</Badge>
+            case 'admin_god': return <Badge className="bg-purple-600 hover:bg-purple-700 text-white font-bold border-0 shadow-sm gap-1"><ShieldAlert size={12}/> Admin GOD</Badge>
+            case 'admin_common': return <Badge className="bg-pink-500 hover:bg-pink-600 text-white font-medium border-0 gap-1"><Briefcase size={12}/> Administrativa</Badge>
+            case 'setter': return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white font-medium border-0 gap-1"><Headset size={12}/> Gestora Leads</Badge>
+            case 'seller': return <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50 font-medium">Vendedora</Badge>
+            default: return <Badge variant="secondary">Sin Rol</Badge>
         }
     }
 
@@ -270,9 +260,10 @@ export function AdminConfig() {
             </div>
 
             <Tabs defaultValue="users" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 h-12 bg-slate-100 dark:bg-slate-900">
+                <TabsList className="grid w-full grid-cols-5 h-12 bg-slate-100 dark:bg-slate-900">
                     <TabsTrigger value="users">👥 Usuarios</TabsTrigger>
                     <TabsTrigger value="crm">⚙️ CRM & Estados</TabsTrigger>
+                    <TabsTrigger value="whatsapp">💬 WhatsApp</TabsTrigger>
                     <TabsTrigger value="commissions">💰 Comisiones</TabsTrigger>
                     <TabsTrigger value="system">🔒 Sistema</TabsTrigger>
                 </TabsList>
@@ -324,7 +315,6 @@ export function AdminConfig() {
                 <TabsContent value="crm" className="space-y-6 mt-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         
-                        {/* CONFIGURACIÓN CEMENTERIO (NUEVO) */}
                         <Card className="md:col-span-2 border-l-4 border-l-blue-500">
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2"><Snowflake className="h-5 w-5 text-blue-500"/> Configuración de Cementerio</CardTitle>
@@ -396,7 +386,57 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
-                {/* 3. COMISIONES */}
+                {/* 3. WHATSAPP TEMPLATES (EDICIÓN MEJORADA) */}
+                <TabsContent value="whatsapp" className="space-y-6 mt-6">
+                    <Card className="border-t-4 border-t-green-500">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-green-700">
+                                <MessageCircle className="h-5 w-5" /> Plantillas de Mensajes
+                            </CardTitle>
+                            <CardDescription>Personaliza los mensajes y los nombres de los botones para las vendedoras.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {wppTemplates.length === 0 && (
+                                <div className="col-span-2 text-center py-8 text-slate-400 flex flex-col items-center">
+                                    <RefreshCw className="h-8 w-8 mb-2 animate-spin opacity-50"/>
+                                    <p>Cargando plantillas...</p>
+                                </div>
+                            )}
+                            {wppTemplates.map((tpl) => (
+                                <div key={tpl.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 group hover:border-green-300 transition-colors">
+                                    <div className="flex justify-between items-center border-b pb-2 border-slate-200">
+                                        <div className="flex items-center gap-2 w-full mr-4">
+                                            <PenLine className="h-4 w-4 text-slate-400" />
+                                            {/* INPUT PARA EDITAR EL NOMBRE DEL BOTÓN */}
+                                            <Input 
+                                                value={tpl.label} 
+                                                onChange={(e) => updateTemplate(tpl.id, 'label', e.target.value)} 
+                                                className="font-bold text-slate-700 border-none shadow-none focus-visible:ring-0 p-0 h-auto bg-transparent hover:underline decoration-dashed decoration-slate-300 underline-offset-4"
+                                                title="Click para editar nombre"
+                                            />
+                                        </div>
+                                        <Badge variant="outline" className="text-[10px] text-slate-400 uppercase tracking-widest bg-white shrink-0">{tpl.id}</Badge>
+                                    </div>
+                                    <div className="relative">
+                                        <Textarea 
+                                            className="bg-white min-h-[100px] text-sm resize-none focus-visible:ring-green-500 border-slate-200"
+                                            value={tpl.message}
+                                            onChange={(e) => updateTemplate(tpl.id, 'message', e.target.value)}
+                                            placeholder={tpl.id === 'vacio' ? "Dejar vacío para abrir chat sin texto..." : "Escribí el mensaje aquí..."}
+                                        />
+                                        {tpl.id === 'vacio' && !tpl.message && (
+                                            <span className="absolute top-3 left-3 text-xs text-slate-400 pointer-events-none italic">
+                                                (Mensaje vacío: solo abre el chat)
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* 4. COMISIONES */}
                 <TabsContent value="commissions" className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <Card className="border-t-4 border-t-blue-500">
@@ -459,6 +499,7 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
+                {/* 5. SISTEMA */}
                 <TabsContent value="system" className="space-y-4">
                     <Card>
                         <CardHeader><CardTitle className="flex items-center gap-2"><Globe className="h-5 w-5 text-slate-600"/> Acceso</CardTitle></CardHeader>

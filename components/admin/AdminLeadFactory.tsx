@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap } from "lucide-react"
+import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -30,6 +30,7 @@ const FREEZE_CONFIG: Record<string, number> = {
     precio: 60,     // "Caro"
     interes: 45,    // "Lo pienso"
     quemados: 45,   // "+7 llamados"
+    zombies: 0,     // ✅ AGREGADO: Los Zombies ya vienen "muertos" por tiempo, se pueden reciclar al instante
     basural: 365    // Datos malos
 }
 
@@ -91,7 +92,8 @@ export function AdminLeadFactory() {
     fantasmas: 0,
     precio: 0,
     interes: 0,
-    quemados: 0, // ✅ AGREGADO: Contador para datos quemados
+    quemados: 0,
+    zombies: 0, // ✅ AGREGADO: Contador para zombies
     basural: 0,
   })
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null)
@@ -282,16 +284,25 @@ export function AdminLeadFactory() {
 
   // --- 3. CEMENTERIO (ESTADÍSTICAS REALES) ---
   const fetchGraveyardStats = async () => {
-    const { data, error } = await supabase.from("leads").select("loss_reason").eq("status", "perdido")
+    // Buscamos leads 'perdidos' o asignados a 'Zombie 🧟'
+    const { data, error } = await supabase
+      .from("leads")
+      .select("agent_name, loss_reason, status")
+      .or("status.eq.perdido,agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
+
     if (error) console.error(error)
 
     if (data) {
-      const stats = { fantasmas: 0, precio: 0, interes: 0, quemados: 0, basural: 0 }
+      const stats = { fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, basural: 0 }
       ;(data as any[]).forEach((l: any) => {
+        const agent = l.agent_name || ""
         const reason = l.loss_reason?.toLowerCase() || ""
         
-        // ✅ LÓGICA DE CLASIFICACIÓN CON QUEMADOS
-        if (reason.includes("quemado") || reason.includes("7 llamados")) stats.quemados++
+        // ✅ PRIORIDAD: Si es Zombie/Recupero, va al cajón Zombie
+        if (agent === "Zombie 🧟" || agent === "Recupero") {
+            stats.zombies++
+        } 
+        else if (reason.includes("quemado") || reason.includes("7 llamados")) stats.quemados++
         else if (reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
         else if (reason.includes("precio") || reason.includes("caro")) stats.precio++
         else if (reason.includes("interes") || reason.includes("no quiere")) stats.interes++
@@ -302,10 +313,23 @@ export function AdminLeadFactory() {
   }
 
   const fetchDrawerLeads = async (category: string) => {
+    // ✅ NUEVO CAJÓN ZOMBIE: Busca por agente, no por status
+    if (category === "zombies") {
+        const { data, error } = await supabase
+            .from("leads")
+            .select("*")
+            .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
+            .limit(100)
+        
+        if (error) console.error(error)
+        if (data) setDrawerLeads(data as Lead[])
+        return
+    }
+
+    // CAJONES CLÁSICOS (Status = Perdido)
     let reasonFilter = ""
     let query = supabase.from("leads").select("*").eq("status", "perdido").limit(100)
 
-    // ✅ FILTRO ESPECÍFICO PARA CADA CAJÓN
     if (category === "quemados") {
         query = query.ilike('loss_reason', '%quemado%')
     } else if (category === "fantasmas") {
@@ -330,7 +354,6 @@ export function AdminLeadFactory() {
   const executeAssign = async (origin: "inbox" | "redistribucion" | "cementerio") => {
     if (selectedLeads.length === 0 || !targetAgent) return alert("Seleccioná leads y un destino.")
 
-    // Si estás en inbox y elegiste duplicados, avisamos
     if (origin === "inbox") {
       const dupSelected = selectedLeads.filter((id) => !!dupMap[id])
       if (dupSelected.length > 0) {
@@ -351,7 +374,9 @@ export function AdminLeadFactory() {
     if (origin === "cementerio") {
       updates.status = "nuevo"
       updates.loss_reason = null
-      updates.calls = 0 // ✅ Reseteamos llamadas para que no vuelva a caer en quemados al toque
+      updates.warning_sent = false // Limpiamos alertas de zombie si las tenía
+      updates.warning_date = null
+      updates.calls = 0 
     }
 
     const { error } = await supabase.from("leads").update(updates).in("id", selectedLeads)
@@ -456,8 +481,8 @@ export function AdminLeadFactory() {
 
   // --- HELPERS UI ---
   const handleSelectAll = (list: Lead[], checked: boolean) => {
-    // ✅ Solo seleccionamos los disponibles (no congelados)
     if(activeDrawer) {
+        // Bloquear selección de congelados
         const available = list.filter(l => !checkFreezeStatus(l, activeDrawer).isFrozen)
         if (checked) setSelectedLeads(available.map((l) => l.id))
         else setSelectedLeads([])
@@ -777,8 +802,24 @@ export function AdminLeadFactory() {
           {!activeDrawer ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               
-              {/* ✅ TARJETA: QUEMADOS (NUEVA) */}
-              <Card className="hover:border-red-500 cursor-pointer group border-l-4 border-l-red-500 shadow-md bg-red-50/30" onClick={() => { setActiveDrawer("quemados"); fetchDrawerLeads("quemados"); }}>
+              {/* ✅ 1. CAJÓN ZOMBIE (NUEVO) */}
+              <Card className="hover:border-purple-500 cursor-pointer group border-l-4 border-l-purple-600 shadow-md bg-purple-50/20" onClick={() => { setActiveDrawer("zombies"); fetchDrawerLeads("zombies"); }}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-black text-purple-700 uppercase tracking-widest group-hover:text-purple-800 flex items-center gap-2">
+                    <Skull className="h-4 w-4"/> Fosa Zombie
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex justify-between items-end">
+                    <span className="text-4xl font-black text-slate-800 dark:text-white">{graveyardStats.zombies}</span>
+                    <Badge className="bg-purple-200 text-purple-900 border-purple-300">Recuperables</Badge>
+                  </div>
+                  <p className="text-xs text-purple-500 mt-2 font-medium">Expirados Salud del Tubo</p>
+                </CardContent>
+              </Card>
+
+              {/* ✅ 2. CAJÓN QUEMADOS */}
+              <Card className="hover:border-red-500 cursor-pointer group border-l-4 border-l-red-500 shadow-md bg-red-50/20" onClick={() => { setActiveDrawer("quemados"); fetchDrawerLeads("quemados"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-red-600 uppercase tracking-widest group-hover:text-red-700 flex items-center gap-2">
                     <Flame className="h-4 w-4 animate-pulse"/> Datos Quemados
@@ -837,19 +878,6 @@ export function AdminLeadFactory() {
                   <p className="text-xs text-slate-400 mt-2">Lo pensará</p>
                 </CardContent>
               </Card>
-
-              <Card className="opacity-60 border-dashed border-2">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-black text-slate-400 uppercase tracking-widest">Basural</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex justify-between items-end">
-                    <span className="text-4xl font-black text-slate-400">{graveyardStats.basural}</span>
-                    <Badge variant="outline">Descarte</Badge>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-2">Datos inválidos / Quejas</p>
-                </CardContent>
-              </Card>
             </div>
           ) : (
             <Card className="border-t-4 border-t-slate-500 shadow-xl animate-in slide-in-from-bottom-4">
@@ -859,8 +887,10 @@ export function AdminLeadFactory() {
                     ← Volver
                   </Button>
                   <CardTitle className="capitalize flex items-center gap-2">
-                    {/* ✅ ÍCONO DINÁMICO */}
-                    {activeDrawer === 'quemados' ? <Flame className="h-5 w-5 text-red-500 animate-pulse"/> : <Recycle className="h-5 w-5" />} 
+                    {/* ✅ ÍCONOS DINÁMICOS */}
+                    {activeDrawer === 'zombies' ? <Skull className="h-5 w-5 text-purple-600"/> :
+                     activeDrawer === 'quemados' ? <Flame className="h-5 w-5 text-red-500 animate-pulse"/> : 
+                     <Recycle className="h-5 w-5" />} 
                     Cajón: {activeDrawer}
                   </CardTitle>
                 </div>
@@ -939,11 +969,14 @@ export function AdminLeadFactory() {
                                 )}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline" className={activeDrawer === 'quemados' ? 'text-red-600 border-red-200 bg-red-50' : ''}>
-                                  {l.loss_reason || "Desconocido"}
+                              <Badge variant="outline" className={
+                                  activeDrawer === 'quemados' ? 'text-red-600 border-red-200 bg-red-50' : 
+                                  activeDrawer === 'zombies' ? 'text-purple-600 border-purple-200 bg-purple-50' : ''
+                              }>
+                                  {l.loss_reason || (activeDrawer === 'zombies' ? 'Inactividad' : "Desconocido")}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-xs">{l.agent_name}</TableCell>
+                            <TableCell className="text-xs">{l.agent_name === 'Zombie 🧟' ? 'Sistema' : l.agent_name}</TableCell>
                           </TableRow>
                         )
                       })

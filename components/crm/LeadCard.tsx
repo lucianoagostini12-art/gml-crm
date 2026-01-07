@@ -1,12 +1,13 @@
 "use client"
 
-import React from "react"
+import React, { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase" // ✅ Conexión agregada
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { MoreHorizontal, Flame, Skull, Headset, CalendarClock, Phone, Activity, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 // --- TIPOS ---
 export type Lead = {
@@ -38,16 +39,13 @@ const WhatsAppIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
-// --- ESTILOS VISUALES COMPACTOS Y PREMIUM ---
-
-// Fondos blancos limpios con bordes de color sutiles
+// --- ESTILOS VISUALES ---
 const intentStyles = {
   high: "border-l-[3px] border-l-emerald-500 hover:ring-1 hover:ring-emerald-500/20",
   medium: "border-l-[3px] border-l-amber-500 hover:ring-1 hover:ring-amber-500/20",
   low: "border-l-[3px] border-l-rose-500 hover:ring-1 hover:ring-rose-500/20",
 }
 
-// Estilos de cotización más sutiles y compactos
 const getQuoteStyles = (prepaga?: string) => {
     const base = "border text-slate-800 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-800/50"
     const p = prepaga || ""
@@ -67,7 +65,21 @@ interface LeadCardProps {
 }
 
 export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) {
+  const supabase = createClient()
   
+  // ✅ ESTADO LOCAL PARA LAS PLANTILLAS DE WPP
+  const [wppTemplates, setWppTemplates] = useState<any[]>([])
+
+  // ✅ CARGAR PLANTILLAS REALES DE SUPABASE
+  useEffect(() => {
+    const fetchTemplates = async () => {
+        // Obtenemos las plantillas que configuraste en AdminConfig
+        const { data } = await supabase.from('whatsapp_templates').select('*').order('id', { ascending: true })
+        if(data) setWppTemplates(data)
+    }
+    fetchTemplates()
+  }, []) // Solo al montar el componente
+
   // Lógica de "Dato Quemado"
   let callColor = "text-slate-500 hover:text-slate-700 hover:bg-slate-50 border-slate-200 dark:border-slate-700 dark:text-slate-400"
   let callIcon = <Phone className="h-3.5 w-3.5 mr-1.5" />
@@ -84,12 +96,18 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
 
   const priceFormatter = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 })
 
-  const sendWpp = (type: string) => {
+  // ✅ FUNCIÓN DE ENVÍO DINÁMICA
+  const sendWpp = (templateId: string) => {
     const cleanPhone = lead.phone.replace(/[^0-9]/g, '')
-    let text = ""
-    if (type === 'no_contesta') text = "Hola! Te llamé recién pero no pudimos conectar. ¿En qué horario preferís que te contacte?"; 
-    if (type === 'cotizacion') text = "Hola! Acá te adjunto la propuesta que vimos recién.";
-    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`
+    
+    // Buscar la plantilla seleccionada en la memoria
+    const template = wppTemplates.find(t => t.id === templateId)
+    const text = template?.message || "" // Si está vacía o no existe, manda cadena vacía
+
+    // Construir URL (si hay texto agrega ?text=, sino abre el chat limpio)
+    let url = `https://wa.me/${cleanPhone}`
+    if(text) url += `?text=${encodeURIComponent(text)}`
+    
     window.open(url, '_blank')
   }
 
@@ -106,7 +124,6 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
   const quoteStyle = getQuoteStyles(lead.quoted_prepaga)
 
   return (
-    // TARJETA PRINCIPAL: Fondo blanco, padding reducido, margen reducido
     <Card className={`
         mb-1.5 transition-all duration-200 ease-in-out cursor-pointer group relative
         bg-white dark:bg-slate-900 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-0.5
@@ -117,28 +134,23 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
         rounded-lg overflow-visible
     `}>
       
-      {/* Badge Agenda Super Compacto */}
       {isScheduled && (
           <div className="absolute -top-2.5 left-2 bg-blue-600 shadow-sm text-white text-[8px] font-bold px-2 py-0.5 rounded-sm flex items-center z-20 tracking-wider border border-white dark:border-slate-900">
               <CalendarClock className="h-2.5 w-2.5 mr-1" /> {scheduleDisplay}
           </div>
       )}
 
-      {/* Botón opciones (más pequeño) */}
       <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
          <Button variant="ghost" className="h-5 w-5 p-0 text-slate-300 hover:text-slate-500 rounded-full hover:bg-slate-100">
             <MoreHorizontal className="h-3.5 w-3.5" />
          </Button>
       </div>
 
-      {/* HEADER COMPACTO (Padding p-2) */}
       <CardHeader className="p-2 pb-0 flex flex-col items-start space-y-0 relative">
         <div className="flex items-center gap-1.5 mb-1 w-full pr-4">
-            {/* ORIGEN MAS GRANDE */}
             <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-bold uppercase bg-slate-50 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 rounded-[4px] tracking-wider shadow-sm">
                 {lead.source}
             </Badge>
-            {/* FECHA MAS VISIBLE */}
             <span className="text-[10px] font-semibold text-slate-400 flex items-center bg-slate-50 px-1.5 rounded-sm">
                 <Clock className="h-2.5 w-2.5 mr-1" />
                 {compactDate}
@@ -146,13 +158,11 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
         </div>
 
         <div className="w-full">
-          {/* NOMBRE MAS GRANDE Y LEGIBLE */}
           <h4 className="font-black text-[15px] text-slate-800 dark:text-slate-100 truncate tracking-tight leading-snug mb-1">
             {lead.name}
           </h4>
           
           <div className="flex justify-between items-center">
-             {/* TELEFONO MAS GRANDE Y DESTACADO */}
              <div className="text-[12px] text-slate-600 dark:text-slate-300 font-bold font-mono tracking-tight bg-slate-100/50 px-1.5 py-0.5 rounded border border-slate-200/50 inline-block shadow-sm">
                 {lead.phone}
              </div>
@@ -166,10 +176,8 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
         </div>
       </CardHeader>
       
-      {/* CONTENT COMPACTO (Padding p-2) */}
       <CardContent className="p-2 pt-2 space-y-2">
         
-        {/* Ticket Cotización Ultra Compacto */}
         {lead.quoted_price && lead.quoted_price > 0 && (
             <div className={`${quoteStyle} border rounded-[4px] px-2 py-1 relative overflow-hidden transition-all`}>
                 <div className="flex justify-between items-center relative z-10">
@@ -188,14 +196,13 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
 
         <div className="h-px w-full bg-slate-100 dark:bg-slate-800" />
 
-        {/* Barra de Acciones Compacta (Botones h-7) */}
         <div className="flex items-center justify-between gap-1.5">
             
+            {/* ✅ MENÚ WHATSAPP DINÁMICO */}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button 
                         size="sm" 
-                        // Botón verde WPP más pequeño (h-7) y texto más chico
                         className="flex-1 h-7 bg-[#25D366] hover:bg-[#20ba5a] text-white border-0 shadow-sm transition-all rounded-[4px] px-2"
                     >
                         <WhatsAppIcon className="h-3.5 w-3.5 mr-1 fill-current" />
@@ -203,10 +210,22 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-48 font-medium text-xs">
-                    <DropdownMenuItem onClick={(e) => {e.stopPropagation(); sendWpp('no_contesta')}}>👋 Plantilla No Contesta</DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => {e.stopPropagation(); sendWpp('cotizacion')}}>💲 Enviar Cotización</DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={(e) => {e.stopPropagation(); sendWpp('seguimiento')}} className="text-red-600 font-bold">🛑 Ultimátum</DropdownMenuItem>
+                    {/* Si no cargaron plantillas aun */}
+                    {wppTemplates.length === 0 && (
+                        <DropdownMenuItem disabled>Cargando opciones...</DropdownMenuItem>
+                    )}
+                    
+                    {/* Renderizado dinámico de los botones configurados en Admin */}
+                    {wppTemplates.map((tpl) => (
+                        <DropdownMenuItem 
+                            key={tpl.id} 
+                            onClick={(e) => { e.stopPropagation(); sendWpp(tpl.id) }}
+                            // Si es seguimiento/ultimatum, le ponemos color rojo de alerta
+                            className={tpl.id.includes('seguimiento') || tpl.id.includes('baja') ? "text-red-600 font-bold" : ""}
+                        >
+                            {tpl.label}
+                        </DropdownMenuItem>
+                    ))}
                 </DropdownMenuContent>
             </DropdownMenu>
 
@@ -222,7 +241,6 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
             </Button>
         </div>
 
-        {/* Footer Agente Ultra Compacto */}
         <div className="flex justify-end pt-0.5">
              <div className="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
                 <span className="text-[7px] text-slate-400 font-black uppercase tracking-wider">{lead.agent}</span>

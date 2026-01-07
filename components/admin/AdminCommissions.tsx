@@ -16,7 +16,8 @@ type Seller = {
 
 type LeadRow = {
   agent_name: string | null
-  operator: string | null
+  prepaga: string | null
+  plan: string | null
   price: number | null
   status: string | null
   created_at: string
@@ -47,7 +48,7 @@ const DEFAULT_SETTINGS: CommissionSettings = {
 
   special_unit_value: 30000,
   special_pct: 0.1,
-  special_operator_keywords: ["A1", "500"],
+  special_operator_keywords: ["A1", "500", "Sancor"], // Palabras clave para detectar ventas especiales
 
   tier1_qty: 6,
   tier1_pct: 0.15,
@@ -66,7 +67,7 @@ export function AdminCommissions() {
   const now = new Date()
   const [loading, setLoading] = useState(true)
 
-  // filtros
+  // Filtros
   const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1))
   const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()))
   const [yearOptions, setYearOptions] = useState<string[]>([])
@@ -93,7 +94,7 @@ export function AdminCommissions() {
     []
   )
 
-  // ✅ Años dinámicos desde primer lead hasta año actual + 1
+  // ✅ 1. Años dinámicos (Inteligente)
   const buildYearOptions = async () => {
     const currentYear = new Date().getFullYear()
     let minYear = currentYear
@@ -112,7 +113,7 @@ export function AdminCommissions() {
     if (!years.includes(selectedYear)) setSelectedYear(String(currentYear))
   }
 
-  // ✅ Trae settings (si no existe fila, usa defaults)
+  // ✅ 2. Trae settings de la base de datos
   const fetchSettings = async () => {
     try {
       const { data, error } = await supabase.from("commission_settings").select("*").eq("id", 1).maybeSingle()
@@ -141,9 +142,9 @@ export function AdminCommissions() {
     } catch {}
   }
 
-  // ✅ Trae sellers reales desde profiles + horas desde commission_staff
+  // ✅ 3. Trae Vendedores Reales (Profiles + Commission Staff)
   const fetchSellers = async () => {
-    // profiles(role='seller') => id + full_name
+    // A. Traemos perfiles con rol seller
     const { data: profs, error } = await supabase.from("profiles").select("id, full_name, role").eq("role", "seller")
     if (error) {
       setSellers([])
@@ -162,7 +163,7 @@ export function AdminCommissions() {
       return
     }
 
-    // horas desde commission_staff
+    // B. Cruzamos con tabla de horas (commission_staff)
     const ids = base.map((b: any) => b.id)
     const { data: staffRows } = await supabase.from("commission_staff").select("id, hours, is_active").in("id", ids)
 
@@ -177,8 +178,7 @@ export function AdminCommissions() {
         return {
           id: b.id,
           name: b.name,
-          hours: st?.hours ?? 5, // default 5
-          // si no hay fila, lo tratamos como activo
+          hours: st?.hours ?? 5, // Default 5 horas si no está configurado
           _active: st?.is_active ?? true,
         } as any
       })
@@ -189,14 +189,14 @@ export function AdminCommissions() {
     setSellers(merged)
   }
 
-  // ✅ Trae leads cumplidas del período
+  // ✅ 4. Trae Ventas CUMPLIDAS del período
   const fetchLeads = async () => {
     const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
     const endDate = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
 
     const { data, error } = await supabase
       .from("leads")
-      .select("agent_name, operator, price, status, created_at")
+      .select("agent_name, prepaga, plan, price, status, created_at") // Corregido: traemos prepaga y plan
       .gte("created_at", startDate)
       .lte("created_at", endDate)
 
@@ -206,7 +206,7 @@ export function AdminCommissions() {
     }
 
     const safe = Array.isArray(data) ? (data as LeadRow[]) : []
-    // status puede venir con mayúsculas o variaciones
+    // Filtramos SOLO las que Ops marcó como cumplidas
     const onlyFulfilled = safe.filter((l) => norm(l.status) === "cumplidas")
     setLeads(onlyFulfilled)
   }
@@ -219,7 +219,6 @@ export function AdminCommissions() {
 
   useEffect(() => {
     buildYearOptions()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -238,15 +237,16 @@ export function AdminCommissions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth, selectedYear])
 
-  // --- Cálculo por agente (MISMA idea que tu lógica, pero con settings reales) ---
+  // --- LÓGICA DE CÁLCULO DE COMISIÓN ---
   const calculateCommission = (seller: Seller) => {
     const keywords = settings.special_operator_keywords.map((k) => norm(k)).filter(Boolean)
 
     const agentLeads = leads.filter((l) => norm(l.agent_name) === norm(seller.name))
 
+    // Detección de Especiales: Buscamos en Prepaga o Plan (más seguro que operator)
     const special = agentLeads.filter((l) => {
-      const op = norm(l.operator)
-      return keywords.some((k) => k && op.includes(k))
+      const textToCheck = norm(l.prepaga) + " " + norm(l.plan)
+      return keywords.some((k) => k && textToCheck.includes(k))
     }).length
 
     const scaleQty = agentLeads.length - special
@@ -254,38 +254,43 @@ export function AdminCommissions() {
     let commissionTotal = 0
     const breakdown: string[] = []
 
-    // Especial
+    // 1. Cálculo Especiales
     const specialRevenue = special * settings.special_unit_value * settings.special_pct
     if (special > 0) {
       commissionTotal += specialRevenue
       breakdown.push(`Esp. (${settings.special_operator_keywords.join("/")}) : ${special} vtas = $${Math.round(specialRevenue).toLocaleString("es-AR")}`)
     } else {
-      breakdown.push(`Esp. (${settings.special_operator_keywords.join("/")}) : 0 vtas`)
+      // Opcional: mostrar 0 si quieres que sepan que no hubo especiales
+      // breakdown.push(`Esp.: 0`) 
     }
 
-    // Escala
+    // 2. Cálculo Escala (Absorción)
     const absorbed = seller.hours === 5 ? settings.absorbed_5h : settings.absorbed_8h
     let scaleRevenue = 0
 
     if (scaleQty > absorbed) {
       let remaining = scaleQty - absorbed
 
+      // Tier 1
       const t1 = Math.min(remaining, settings.tier1_qty)
       scaleRevenue += t1 * settings.avg_value * settings.tier1_pct
       remaining -= t1
 
+      // Tier 2
       if (remaining > 0) {
         const t2 = Math.min(remaining, settings.tier2_qty)
         scaleRevenue += t2 * settings.avg_value * settings.tier2_pct
         remaining -= t2
       }
 
+      // Tier 3
       if (remaining > 0) {
         const t3 = Math.min(remaining, settings.tier3_qty)
         scaleRevenue += t3 * settings.avg_value * settings.tier3_pct
         remaining -= t3
       }
 
+      // Tier 4 (Infinito)
       if (remaining > 0) {
         scaleRevenue += remaining * settings.avg_value * settings.tier4_pct
       }
@@ -293,7 +298,7 @@ export function AdminCommissions() {
       commissionTotal += scaleRevenue
       breakdown.push(`Escala: ${scaleQty} vtas = $${Math.round(scaleRevenue).toLocaleString("es-AR")}`)
     } else {
-      breakdown.push(`Escala: ${scaleQty} vtas (Absorbidas por jornada)`)
+      breakdown.push(`Escala: ${scaleQty} vtas (Absorbidas por base ${absorbed})`)
     }
 
     return {
@@ -314,6 +319,7 @@ export function AdminCommissions() {
         </div>
 
         <div className="flex gap-2 items-center">
+          {/* Selector MES */}
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-[140px] font-bold">
               <SelectValue placeholder="Mes" />
@@ -327,6 +333,7 @@ export function AdminCommissions() {
             </SelectContent>
           </Select>
 
+          {/* Selector AÑO (Inteligente) */}
           <Select value={selectedYear} onValueChange={setSelectedYear}>
             <SelectTrigger className="w-[110px] font-bold">
               <SelectValue placeholder="Año" />
@@ -390,7 +397,7 @@ export function AdminCommissions() {
               {sellers.length === 0 && !loading && (
                 <TableRow>
                   <TableCell className="pl-6 py-6 text-slate-500" colSpan={5}>
-                    No hay vendedores (profiles.role='seller') activos para mostrar.
+                    No hay vendedores activos para liquidar en este periodo.
                   </TableCell>
                 </TableRow>
               )}

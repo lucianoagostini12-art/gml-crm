@@ -145,10 +145,30 @@ export function AdminMetrics() {
   const [dateStart, setDateStart] = useState<string>(firstDay)
   const [dateEnd, setDateEnd] = useState<string>(today)
   const [agent, setAgent] = useState("global")
+  
+  // Estado para la lista real de agentes
+  const [agentsList, setAgentsList] = useState<string[]>([])
 
   const [metrics, setMetrics] = useState<any>(null)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // 1. CARGA INICIAL DE AGENTES REALES
+  useEffect(() => {
+    const loadAgents = async () => {
+        const { data } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('role', 'seller') // Solo vendedores reales
+        
+        if (data) {
+            // Filtramos nombres nulos y ordenamos alfabéticamente
+            const names = data.map(p => p.full_name).filter(Boolean) as string[]
+            setAgentsList(names.sort())
+        }
+    }
+    loadAgents()
+  }, [])
 
   // Presets calendario
   const setPreset = (days: number | string) => {
@@ -190,8 +210,6 @@ export function AdminMetrics() {
     setLoading(true)
 
     // --- 1) LEADS (mínimo necesario) ---
-    // Usamos select * para evitar errores si faltan columnas específicas como first_contact_at
-    // pero intentamos mapear lo que existe
     let leadsQuery = supabase
       .from("leads")
       .select("*") 
@@ -199,9 +217,8 @@ export function AdminMetrics() {
       .lte("created_at", `${dateEnd}T23:59:59`)
 
     if (agent !== "global") {
-      const agentName = agent.charAt(0).toUpperCase() + agent.slice(1)
-      // Intentamos filtrar por columna agent_name si existe
-      leadsQuery = leadsQuery.ilike("agent_name", `%${agentName}%`)
+      // Filtro exacto por nombre completo (más preciso que ilike parcial)
+      leadsQuery = leadsQuery.eq("agent_name", agent)
     }
 
     const { data: leadsRaw, error: leadsErr } = await leadsQuery
@@ -210,21 +227,17 @@ export function AdminMetrics() {
     const leads: Lead[] = Array.isArray(leadsRaw) ? (leadsRaw as any) : []
 
     // --- 2) HISTORIAL DE ESTADOS (gestión real) ---
-    // Mapeamos las columnas de la BD (status, created_at) a lo que espera este componente (to_status, changed_at)
     let events: StatusEvent[] = []
     try {
       let evQuery = supabase
         .from("lead_status_history")
-        .select("id, lead_id, agent_name, to_status:status, changed_at:created_at") // Alias clave para que funcione el gráfico
+        .select("id, lead_id, agent_name, to_status:status, changed_at:created_at") 
         .gte("created_at", `${dateStart}T00:00:00`)
         .lte("created_at", `${dateEnd}T23:59:59`)
         .order("created_at", { ascending: true })
 
       if (agent !== "global") {
-        const agentName = agent.charAt(0).toUpperCase() + agent.slice(1)
-        // Nota: Si lead_status_history no tiene agent_name, este filtro podría fallar en historial, 
-        // pero seguimos adelante para no romper la app.
-        evQuery = evQuery.ilike("agent_name", `%${agentName}%`)
+        evQuery = evQuery.eq("agent_name", agent)
       }
 
       const { data: evRaw, error: evErr } = await evQuery
@@ -274,8 +287,6 @@ export function AdminMetrics() {
     const strikeRate = totalLeads > 0 ? ((salesCount / totalLeads) * 100).toFixed(1) : "0.0"
 
     // --- Velocidad real (primer “contacto/gestión”) ---
-    // 1) first_contact_at si existe en la tabla leads
-    // 2) fallback: primer evento en lead_status_history para ese lead
     const firstEventByLead = new Map<string, string>()
     for (const ev of events) {
       if (!firstEventByLead.has(ev.lead_id)) firstEventByLead.set(ev.lead_id, ev.changed_at)
@@ -592,6 +603,7 @@ export function AdminMetrics() {
 
           <div className="h-8 w-px bg-slate-200 hidden md:block"></div>
 
+          {/* SELECTOR DE AGENTES REAL (CARGADO DESDE SUPABASE) */}
           <Select value={agent} onValueChange={setAgent}>
             <SelectTrigger
               className={`w-[200px] font-bold border-none h-10 ${
@@ -602,10 +614,10 @@ export function AdminMetrics() {
               <SelectValue placeholder="Agente" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="global">🌍 Global (Empresa)</SelectItem>
-              <SelectItem value="maca">👩‍💼 Maca (Vendedora)</SelectItem>
-              <SelectItem value="gonza">👨‍💼 Gonza (Vendedora)</SelectItem>
-              <SelectItem value="cami">🎣 Cami (Gestora)</SelectItem>
+              <SelectItem value="global" className="font-bold">🌍 Global (Empresa)</SelectItem>
+              {agentsList.map(name => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
 

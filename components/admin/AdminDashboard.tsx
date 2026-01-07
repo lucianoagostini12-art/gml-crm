@@ -11,7 +11,6 @@ import {
   Database,
   Sliders,
   Activity,
-  CheckCircle2,
   ShieldAlert,
   Calculator,
   CalendarDays,
@@ -19,12 +18,15 @@ import {
   BookOpen,
   UserPlus,
   X,
-  ArrowRight,
   Sparkles,
   RefreshCw,
   LifeBuoy,
   Megaphone,
-  Bell
+  Bell,
+  PanelLeftClose,
+  ChevronDown,
+  ChevronRight,
+  Menu
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -162,51 +164,198 @@ function AdminOverview() {
   )
 }
 
-// --- DASHBOARD PRINCIPAL ---
+// --- SIDEBAR UNIFICADO ESTILO OPS ---
+function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifications, markAllRead, isBellOpen, setIsBellOpen }: any) {
+    const [sections, setSections] = useState({
+        gestion: true,
+        equipo: true,
+        sistema: true,
+        comunicacion: true
+    })
+
+    const toggleSection = (key: keyof typeof sections) => {
+        setSections(prev => ({ ...prev, [key]: !prev[key] }))
+    }
+
+    // Componente Botón Sidebar
+    const SidebarBtn = ({ active, onClick, icon, label, isSubItem = false, colorClass = "text-slate-400" }: any) => (
+        <button 
+            onClick={onClick} 
+            className={`w-full flex items-center ${open ? 'justify-start px-3' : 'justify-center'} py-2 rounded-md text-xs font-medium transition-all duration-200 
+            ${active ? 'bg-blue-600 text-white shadow-md' : `${colorClass} hover:bg-slate-800 hover:text-white`}
+            ${isSubItem && open ? 'pl-6' : ''}`}
+            title={!open ? label : undefined}
+        >
+            <div className={`mr-3 shrink-0 ${active ? 'text-white' : ''}`}>{icon}</div>
+            {open && <span className="flex-1 text-left truncate">{label}</span>}
+        </button>
+    )
+
+    // Componente Header Sección
+    const SectionHeader = ({ label, sectionKey }: { label: string, sectionKey: keyof typeof sections }) => {
+        if (!open) return <div className="border-t border-slate-800 my-2 mx-2"></div>
+        return (
+            <div 
+                className="flex items-center justify-between px-3 py-2 cursor-pointer text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-slate-300 transition-colors mt-2"
+                onClick={() => toggleSection(sectionKey)}
+            >
+                {label}
+                {sections[sectionKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+            </div>
+        )
+    }
+
+    return (
+        <aside className={`${open ? 'w-[240px]' : 'w-[70px]'} transition-all duration-300 bg-[#0F172A] text-white flex flex-col shrink-0 z-50 shadow-2xl border-r border-slate-800 h-screen sticky top-0`}>
+            {/* HEADER */}
+            <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
+                {open ? (
+                    <span className="font-black text-xl tracking-tighter text-white flex items-center gap-1">
+                        GML <span className="text-blue-500">SUPERVISIÓN</span>
+                    </span>
+                ) : (
+                    <span className="font-black text-xl text-blue-500">G</span>
+                )}
+                <Button variant="ghost" size="icon" onClick={() => setOpen(!open)} className="text-slate-400 hover:text-white h-8 w-8 ml-auto hover:bg-slate-800">
+                    <PanelLeftClose size={18}/>
+                </Button>
+            </div>
+
+            {/* NAV SCROLLABLE */}
+            <nav className="p-3 space-y-1 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+                
+                {/* 1. GESTIÓN OPERATIVA */}
+                <SectionHeader label="Gestión" sectionKey="gestion" />
+                {(open ? sections.gestion : true) && (
+                    <div className="space-y-1 animate-in slide-in-from-top-1">
+                        <SidebarBtn active={view === 'overview'} onClick={() => setView('overview')} icon={<LayoutDashboard size={20}/>} label="Visión Global" />
+                        <SidebarBtn active={view === 'conteo'} onClick={() => setView('conteo')} icon={<Calculator size={20} className="text-indigo-400"/>} label="Conteo Vivo" />
+                        <SidebarBtn active={view === 'leads'} onClick={() => setView('leads')} icon={<Layers size={20} className="text-orange-400"/>} label="Leads" />
+                        <SidebarBtn active={view === 'setter'} onClick={() => setView('setter')} icon={<UserPlus size={20} className="text-pink-400"/>} label="Setter" />
+                        <SidebarBtn active={view === 'agendas'} onClick={() => setView('agendas')} icon={<CalendarDays size={20} className="text-blue-500"/>} label="Agendas" />
+                    </div>
+                )}
+
+                {/* 2. EQUIPO Y FINANZAS */}
+                <SectionHeader label="Equipo & Finanzas" sectionKey="equipo" />
+                {(open ? sections.equipo : true) && (
+                    <div className="space-y-1 animate-in slide-in-from-top-1">
+                        <SidebarBtn active={view === 'team'} onClick={() => setView('team')} icon={<Users size={20} className="text-blue-400"/>} label="Equipo" />
+                        <SidebarBtn active={view === 'metrics'} onClick={() => setView('metrics')} icon={<BarChart4 size={20} className="text-purple-400"/>} label="Analítica" />
+                        <SidebarBtn active={view === 'commissions'} onClick={() => setView('commissions')} icon={<Banknote size={20} className="text-green-400"/>} label="Liquidación" />
+                    </div>
+                )}
+
+                {/* 3. COMUNICACIÓN */}
+                <SectionHeader label="Comunicación" sectionKey="comunicacion" />
+                {(open ? sections.comunicacion : true) && (
+                    <div className="space-y-1 animate-in slide-in-from-top-1">
+                        <SidebarBtn active={view === 'announcements'} onClick={() => setView('announcements')} icon={<Megaphone size={20} className="text-pink-500"/>} label="Comunicados" />
+                        <SidebarBtn active={view === 'resources'} onClick={() => setView('resources')} icon={<BookOpen size={20} className="text-yellow-400"/>} label="Recursos" />
+                    </div>
+                )}
+
+                {/* 4. SISTEMA */}
+                <SectionHeader label="Sistema" sectionKey="sistema" />
+                {(open ? sections.sistema : true) && (
+                    <div className="space-y-1 animate-in slide-in-from-top-1">
+                        <SidebarBtn active={view === 'health'} onClick={() => setView('health')} icon={<LifeBuoy size={20} className="text-emerald-400"/>} label="Salud del Tubo" />
+                        <SidebarBtn active={view === 'logs'} onClick={() => setView('logs')} icon={<ShieldAlert size={20} className="text-red-400"/>} label="Auditoría" />
+                        <SidebarBtn active={view === 'database'} onClick={() => setView('database')} icon={<Database size={20} className="text-slate-400"/>} label="Base de Datos" />
+                        <SidebarBtn active={view === 'config'} onClick={() => setView('config')} icon={<Sliders size={20} className="text-slate-400"/>} label="Configuración" />
+                    </div>
+                )}
+
+                {/* FOOTER */}
+                <div className="mt-auto pt-4 pb-2 border-t border-slate-800 space-y-2">
+                    {/* NOTIFICACIONES EN FOOTER (Si está colapsado, se ve el ícono con punto rojo) */}
+                    <Popover open={isBellOpen} onOpenChange={setIsBellOpen}>
+                        <PopoverTrigger asChild>
+                            <button className={`w-full flex items-center ${open ? 'justify-start px-3' : 'justify-center'} py-2 rounded-md text-xs font-medium transition-all duration-200 text-slate-400 hover:bg-slate-800 hover:text-white relative`}>
+                                <div className="mr-3 shrink-0 relative">
+                                    <Bell size={18} />
+                                    {notifications.length > 0 && <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-slate-900 animate-pulse"></span>}
+                                </div>
+                                {open && <span className="flex-1 text-left">Notificaciones</span>}
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 p-0 bg-white text-slate-900 shadow-xl border-0 ml-4" side="right" align="end">
+                            <div className="p-3 border-b flex justify-between items-center bg-slate-50">
+                                <span className="text-xs font-bold text-slate-600">Novedades</span>
+                                {notifications.length > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600" onClick={markAllRead}>Limpiar</Button>}
+                            </div>
+                            <div className="max-h-[300px] overflow-y-auto">
+                                {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
+                                    notifications.map((n: any) => (
+                                        <div key={n.id} className="p-3 border-b hover:bg-slate-50 transition-colors last:border-0">
+                                            <div className="flex items-start gap-3">
+                                                <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 shrink-0"></div>
+                                                <div>
+                                                    <h5 className="text-xs font-bold text-slate-800">{n.title}</h5>
+                                                    <p className="text-[10px] text-slate-500 mt-0.5">{n.body}</p>
+                                                    <span className="text-[9px] text-slate-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                }
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+
+                    {/* PERFIL DE USUARIO */}
+                    <div className={`flex items-center gap-3 px-2 py-2 rounded-xl bg-slate-800/50 border border-slate-800 mx-1 transition-all ${open ? 'justify-start' : 'justify-center'}`}>
+                        <Avatar className="h-9 w-9 ring-2 ring-blue-500/30">
+                            <AvatarImage src={userData.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userData.name}`} className="object-cover" />
+                            <AvatarFallback className="bg-blue-600 text-white font-bold text-xs">{userData.name.substring(0,2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        {open && (
+                            <div className="flex flex-col overflow-hidden">
+                                <span className="text-xs font-black text-white truncate">{userData.name}</span>
+                                <span className="text-[10px] text-blue-400 truncate font-bold uppercase">{userData.role?.replace('_', ' ')}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <SidebarBtn onClick={onLogout} icon={<LogOut size={18} className="text-red-400"/>} label="Cerrar Sesión" />
+                </div>
+            </nav>
+        </aside>
+    )
+}
+
+// --- DASHBOARD PRINCIPAL (COMPLETAMENTE INTEGRADO) ---
 export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const supabase = createClient()
   const [view, setView] = useState("overview")
+  const [sidebarOpen, setSidebarOpen] = useState(true) // Estado para abrir/cerrar sidebar
   const [incomingAlert, setIncomingAlert] = useState<any>(null)
   
-  // ESTADO PARA DATOS DEL USUARIO
+  // ESTADO USUARIO
   const [userData, setUserData] = useState<{ name: string; email: string; avatar?: string; role?: string }>({
-    name: "Cargando...",
-    email: "",
-    avatar: undefined,
-    role: "Admin"
+    name: "Cargando...", email: "", avatar: undefined, role: "Admin"
   })
 
-  // ESTADO PARA NOTIFICACIONES REALES
+  // ESTADO NOTIFICACIONES
   const [notifications, setNotifications] = useState<any[]>([])
   const [isBellOpen, setIsBellOpen] = useState(false)
 
-  // LOGOUT SEGURO
   const handleSafeLogout = async () => {
     await supabase.auth.signOut()
     onLogout()
   }
 
-  // MARCAR LEÍDAS
   const markAllRead = async () => {
     const ids = notifications.map(n => n.id)
-    setNotifications([]) // Optimistic update
-    if (ids.length > 0) {
-        await supabase.from('notifications').update({ read: true }).in('id', ids)
-    }
+    setNotifications([]) 
+    if (ids.length > 0) await supabase.from('notifications').update({ read: true }).in('id', ids)
   }
 
   useEffect(() => {
     const initUserData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-
       if (user) {
-        // Cargar Perfil
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name, avatar_url, role')
-            .eq('id', user.id)
-            .single()
-
+        const { data: profile } = await supabase.from('profiles').select('full_name, avatar_url, role').eq('id', user.id).single()
         setUserData({
           name: profile?.full_name || user.email?.split("@")[0] || "Admin",
           email: user.email || "",
@@ -214,36 +363,22 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           role: profile?.role || "Admin God"
         })
 
-        // Cargar Notificaciones Iniciales
-        const { data: notifs } = await supabase
-            .from('notifications')
-            .select('*')
-            .eq('read', false)
-            .order('created_at', { ascending: false })
-            .limit(20)
-            
+        const { data: notifs } = await supabase.from('notifications').select('*').eq('read', false).order('created_at', { ascending: false }).limit(20)
         if(notifs) setNotifications(notifs)
 
-        // Realtime Perfil
         const profileChannel = supabase.channel("admin_profile_changes")
           .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${user.id}` },
             (payload) => {
               const newProfile = payload.new as any
               setUserData((prev) => ({ ...prev, name: newProfile.full_name || prev.name, avatar: newProfile.avatar_url || prev.avatar }))
             }
-          )
-          .subscribe()
-
+          ).subscribe()
         return () => { supabase.removeChannel(profileChannel) }
       }
     }
-
     initUserData()
 
-    // Realtime GLOBAL (Alertas de Leads Nuevos + Notificaciones de Sistema)
-    const globalChannel = supabase
-      .channel("god_mode_global")
-      // 1. POPUP DE DATO NUEVO (Solo si es status 'nuevo')
+    const globalChannel = supabase.channel("god_mode_global")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, (payload) => {
         const newLead = payload.new as any
         if (newLead.status === 'nuevo') {
@@ -255,20 +390,18 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             })
         }
       })
-      // 2. CAMPANITA (Notificaciones generales)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
            setNotifications(prev => [payload.new, ...prev])
       })
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(globalChannel)
-    }
+    return () => { supabase.removeChannel(globalChannel) }
   }, [])
 
   return (
     <div className="flex h-screen w-full bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative overflow-hidden">
-      {/* ALERTA FLOTANTE (Solo Datos Nuevos) */}
+      
+      {/* ALERTA FLOTANTE */}
       {incomingAlert && (
         <div className="fixed z-[9999] bottom-6 right-6 animate-in slide-in-from-right-full cursor-pointer" onClick={() => {setView("leads"); setIncomingAlert(null)}}>
           <div className="bg-slate-900 text-white rounded-xl shadow-2xl border-l-4 border-l-emerald-500 p-4 w-80 hover:bg-slate-800 transition-colors">
@@ -287,139 +420,19 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         </div>
       )}
 
-      {/* SIDEBAR FIXED LAYOUT */}
-      <aside className="w-64 h-full bg-slate-900 text-white flex flex-col shrink-0 shadow-2xl z-20 border-r border-slate-800">
-        {/* HEADER - FIXED */}
-        <div className="h-16 shrink-0 flex items-center px-6 border-b border-slate-800 font-black text-xl text-blue-400 tracking-tighter">
-          GML <span className="text-white ml-1 italic">GOD MODE</span>
-        </div>
-
-        {/* NAV - SCROLLABLE */}
-        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-          <nav className="space-y-1">
-            <Button variant={view === "overview" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("overview")}>
-              <LayoutDashboard className="h-4 w-4" /> Visión Global
-            </Button>
-
-            <Button variant={view === "conteo" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("conteo")}>
-              <Calculator className="h-4 w-4 text-indigo-400" /> Conteo (Vivo)
-            </Button>
-
-            <Button variant={view === "leads" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("leads")}>
-              <Layers className="h-4 w-4 text-orange-400" /> Leads
-            </Button>
-
-            <Button variant={view === "setter" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("setter")}>
-              <UserPlus className="h-4 w-4 text-pink-400" /> Setter
-            </Button>
-
-            <Button variant={view === "agendas" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("agendas")}>
-              <CalendarDays className="h-4 w-4 text-blue-500" /> Agendas
-            </Button>
-
-            <Button variant={view === "metrics" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("metrics")}>
-              <BarChart4 className="h-4 w-4 text-purple-400" /> Analítica
-            </Button>
-
-            <Button variant={view === "commissions" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("commissions")}>
-              <Banknote className="h-4 w-4 text-green-400" /> Liquidación
-            </Button>
-
-            <Button variant={view === "health" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("health")}>
-              <LifeBuoy className="h-4 w-4 text-green-400" /> Salud del Tubo
-            </Button>
-
-            <Button variant={view === "team" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("team")}>
-              <Users className="h-4 w-4 text-blue-400" /> Equipo
-            </Button>
-
-            <Button variant={view === "resources" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setView("resources")}>
-              <BookOpen className="h-4 w-4 text-pink-400" /> Recursos
-            </Button>
-
-            <Button
-              variant={view === "announcements" ? "secondary" : "ghost"}
-              className="w-full justify-start gap-3"
-              onClick={() => setView("announcements")}
-            >
-              <Megaphone className="h-4 w-4 text-pink-500" /> Comunicados
-            </Button>
-
-            <Button variant={view === "logs" ? "secondary" : "ghost"} className="w-full justify-start gap-3 text-red-400" onClick={() => setView("logs")}>
-              <ShieldAlert className="h-4 w-4" /> Auditoría
-            </Button>
-
-            <div className="pt-4 mt-4 border-t border-slate-800 space-y-1">
-              <Button
-                variant={view === "database" ? "secondary" : "ghost"}
-                className="w-full justify-start gap-3 text-slate-400"
-                onClick={() => setView("database")}
-              >
-                <Database className="h-4 w-4" /> Base de Datos
-              </Button>
-              <Button
-                variant={view === "config" ? "secondary" : "ghost"}
-                className="w-full justify-start gap-3 text-slate-400"
-                onClick={() => setView("config")}
-              >
-                <Sliders className="h-4 w-4" /> Configuración
-              </Button>
-            </div>
-          </nav>
-        </div>
-
-        {/* FOOTER - PERFIL DE USUARIO REAL */}
-        <div className="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
-          <div className="flex items-center gap-3 mb-4 px-2">
-             {/* CAMPANITA ADMIN */}
-            <Popover open={isBellOpen} onOpenChange={setIsBellOpen}>
-                <PopoverTrigger asChild>
-                    <Button size="icon" variant="ghost" className="relative hover:bg-slate-800 text-slate-400 hover:text-white">
-                        <Bell className="h-5 w-5" />
-                        {notifications.length > 0 && <span className="absolute top-0 right-0 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-slate-900 animate-pulse"></span>}
-                    </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0 bg-white text-slate-900 shadow-xl border-0" align="start" side="top">
-                    <div className="p-3 border-b flex justify-between items-center bg-slate-50">
-                        <span className="text-xs font-bold text-slate-600">Notificaciones</span>
-                        {notifications.length > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600" onClick={markAllRead}>Marcar leídas</Button>}
-                    </div>
-                    <div className="max-h-[300px] overflow-y-auto">
-                        {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
-                            notifications.map((n) => (
-                                <div key={n.id} className="p-3 border-b hover:bg-slate-50 transition-colors last:border-0">
-                                    <div className="flex items-start gap-3">
-                                        <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 shrink-0"></div>
-                                        <div>
-                                            <h5 className="text-xs font-bold text-slate-800">{n.title}</h5>
-                                            <p className="text-[10px] text-slate-500 mt-0.5">{n.body}</p>
-                                            <span className="text-[9px] text-slate-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))
-                        }
-                    </div>
-                </PopoverContent>
-            </Popover>
-
-            <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                <Avatar className="h-9 w-9 border-2 border-blue-500 shadow-sm shrink-0">
-                <AvatarImage src={userData.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${userData.name}`} />
-                <AvatarFallback className="bg-slate-800 text-blue-400 font-bold">{userData.name.substring(0, 2).toUpperCase()}</AvatarFallback>
-                </Avatar>
-                <div className="overflow-hidden">
-                <p className="font-bold text-xs text-white truncate capitalize">{userData.name}</p>
-                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">{userData.role || "Gerencia"}</p>
-                </div>
-            </div>
-          </div>
-
-          <Button variant="destructive" className="w-full h-9 text-xs font-bold" onClick={handleSafeLogout}>
-            <LogOut className="h-3.5 w-3.5 mr-2" /> CERRAR SESIÓN
-          </Button>
-        </div>
-      </aside>
+      {/* SIDEBAR NUEVO UNIFICADO */}
+      <AdminSidebar 
+        open={sidebarOpen} 
+        setOpen={setSidebarOpen} 
+        view={view} 
+        setView={setView} 
+        userData={userData}
+        onLogout={handleSafeLogout}
+        notifications={notifications}
+        markAllRead={markAllRead}
+        isBellOpen={isBellOpen}
+        setIsBellOpen={setIsBellOpen}
+      />
 
       {/* CONTENIDO PRINCIPAL */}
       <main className="flex-1 h-full overflow-hidden bg-slate-50 dark:bg-slate-950 relative">

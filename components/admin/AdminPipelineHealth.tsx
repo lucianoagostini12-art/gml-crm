@@ -4,7 +4,8 @@ import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { AlertTriangle, Sprout, Target, ThermometerSun, AlertOctagon, TrendingUp, Send, Trash, Filter, RefreshCw, Calendar, Users } from "lucide-react"
+// ✅ AGREGADO "Users" AQUÍ:
+import { AlertTriangle, Sprout, Target, ThermometerSun, AlertOctagon, Send, Trash, Filter, RefreshCw, Clock, Users } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,16 +15,17 @@ export function AdminPipelineHealth() {
     const supabase = createClient()
     const [loading, setLoading] = useState(true)
     
-    // --- FILTROS PARA EL RATIO DE VENTAS ---
+    // Filtros
     const currentYear = new Date().getFullYear()
     const [selectedMonth, setSelectedMonth] = useState((new Date().getMonth() + 1).toString())
     const [selectedYear, setSelectedYear] = useState(currentYear.toString())
-    const years = Array.from({ length: (currentYear + 1) - 2024 + 1 }, (_, i) => (2024 + i).toString())
+    const years = Array.from({ length: 5 }, (_, i) => (2024 + i).toString())
 
     // ESTADOS
     const [stats, setStats] = useState({
-        freshZombies: 0,
-        warnedZombies: 0,
+        freshZombies: 0,      // +72hs sin aviso (Listos para avisar)
+        pendingZombies: 0,    // Avisados hace menos de 24hs (En gracia)
+        killableZombies: 0,   // Avisados hace +24hs (Listos para cementerio)
         totalZombies: 0,
         coverage: 0,
         agentsRatio: [] as any[]
@@ -32,87 +34,92 @@ export function AdminPipelineHealth() {
     const fetchData = async () => {
         setLoading(true)
         
-        // 1. TRAER CARTERA ACTIVA (SNAPSHOT ACTUAL)
-        // Traemos TODO lo que no esté muerto para ver quién tiene leads en mano.
-        // Sin filtro de fecha de creación, para que aparezcan vendedores con leads viejos.
-        const { data: activeLeads, error: errorActive } = await supabase
+        // 1. CARTERA ACTIVA (Excluimos ya a los Zombies y bajas)
+        const { data: activeLeads } = await supabase
             .from('leads')
             .select('*')
-            .not('status', 'in', '("perdido","rechazado","baja","vendido","cumplidas")') // Solo stock vivo
+            .not('status', 'in', '("perdido","rechazado","baja","vendido","cumplidas","finalizada")') 
+            .neq('agent_name', 'Zombie 🧟') // Ignoramos los que ya están en el cementerio
 
-        // 2. TRAER VENTAS DEL MES SELECCIONADO (PARA EL RATIO)
+        // 2. VENTAS DEL MES
         const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
         const endDate = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
         
-        const { data: salesInMonth, error: errorSales } = await supabase
+        const { data: salesInMonth } = await supabase
             .from('leads')
-            .select('*')
-            .eq('status', 'cumplidas') // Solo ventas
-            .gte('last_update', startDate) // En este mes
+            .select('agent_name')
+            .eq('status', 'cumplidas')
+            .gte('last_update', startDate)
             .lte('last_update', endDate)
 
         if (activeLeads && salesInMonth) {
             const now = new Date()
             
-            // --- A. CÁLCULO DE ZOMBIES (SOBRE CARTERA ACTIVA) ---
-            const zombies = activeLeads.filter(l => {
+            // --- LÓGICA ZOMBIE REFINADA ---
+            const allZombies = activeLeads.filter(l => {
                 const lastUp = new Date(l.last_update || l.created_at)
                 const diffHours = (now.getTime() - lastUp.getTime()) / (1000 * 60 * 60)
                 return diffHours > 72 // +3 días sin tocar
             })
 
-            const fresh = zombies.filter(z => !z.warning_sent).length
-            const warned = zombies.filter(z => z.warning_sent).length
+            // 1. Frescos: No tienen aviso
+            const fresh = allZombies.filter(z => !z.warning_sent).length
 
-            // --- B. LISTA UNIFICADA DE VENDEDORES ---
-            // Unimos los que tienen stock activo + los que vendieron algo este mes
+            // 2. Avisados: Tienen aviso
+            const warned = allZombies.filter(z => z.warning_sent)
+
+            // Desglose de avisados por tiempo (Regla de 24hs)
+            let pending = 0
+            let killable = 0
+
+            warned.forEach(z => {
+                if (z.warning_date) {
+                    const warnDate = new Date(z.warning_date)
+                    const hoursSinceWarn = (now.getTime() - warnDate.getTime()) / (1000 * 60 * 60)
+                    
+                    if (hoursSinceWarn < 24) {
+                        pending++ // En periodo de gracia
+                    } else {
+                        killable++ // Pasaron 24hs, listos para cementerio
+                    }
+                } else {
+                    // Si tiene warning_sent true pero no date (caso borde), lo mandamos a killable
+                    killable++
+                }
+            })
+
+            // --- RATIOS Y COBERTURA ---
             const agentsWithStock = activeLeads.map(l => l.agent_name).filter(Boolean)
             const agentsWithSales = salesInMonth.map(l => l.agent_name).filter(Boolean)
             
-            // Set único de nombres (normalizado)
             const allAgents = [...new Set([...agentsWithStock, ...agentsWithSales])]
+                .filter(name => name !== 'Recupero' && name !== 'Sistema' && name !== 'Zombie 🧟')
 
-            // --- C. CÁLCULO DE RATIOS ---
             const ratios = allAgents.map(agent => {
-                // Stock que tiene hoy en la mano
                 const currentStock = activeLeads.filter(l => l.agent_name === agent).length
-                // Ventas que cerró este mes
                 const monthSales = salesInMonth.filter(l => l.agent_name === agent).length
-                
-                // Ratio: (Stock Actual + Ventas) / Ventas
-                // Si tiene 50 en mano y vendió 5, gestionó 55. Ratio = 11.
                 const totalManaged = currentStock + monthSales
                 const ratioVal = monthSales > 0 ? Math.round(totalManaged / monthSales) : totalManaged
                 
                 let color = "bg-blue-500"
-                let status = "Normal"
-                
                 if (monthSales === 0) {
-                    if (currentStock > 0) { color = "bg-red-500"; status = "Sin Cierre" }
-                    else { color = "bg-slate-300"; status = "Sin Stock" }
+                    color = currentStock > 0 ? "bg-red-500" : "bg-slate-300"
                 } else if (ratioVal <= 15) { 
-                    color = "bg-green-500"; status = "Excelente" 
+                    color = "bg-green-500" 
                 } else if (ratioVal > 30) { 
-                    color = "bg-orange-500"; status = "Revisar" 
+                    color = "bg-orange-500" 
                 }
 
-                return { 
-                    name: agent, 
-                    ratio: ratioVal, 
-                    color, 
-                    status, 
-                    stock: currentStock, 
-                    sales: monthSales 
-                }
-            }).sort((a, b) => b.stock - a.stock) // Ordenar por volumen de cartera
+                return { name: agent, ratio: ratioVal, color, stock: currentStock, sales: monthSales }
+            }).sort((a, b) => b.stock - a.stock)
 
-            // --- D. NIVEL DE SIEMBRA ---
-            const coverage = Math.min(100, Math.round((activeLeads.length / 200) * 100)) // Meta: 200 leads activos globales
+            const coverage = Math.min(100, Math.round((activeLeads.length / 200) * 100))
 
             setStats({
                 freshZombies: fresh,
-                warnedZombies: warned,
-                totalZombies: fresh + warned,
+                pendingZombies: pending,
+                killableZombies: killable,
+                totalZombies: allZombies.length,
                 coverage,
                 agentsRatio: ratios
             })
@@ -122,30 +129,52 @@ export function AdminPipelineHealth() {
 
     useEffect(() => {
         fetchData()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedMonth, selectedYear])
 
-    // --- ACCIONES DB ---
+    // --- ACCIÓN 1: AVISAR ---
     const handleSendWarning = async () => {
-        if (!confirm("¿Avisar a vendedoras sobre leads estancados?")) return
+        if (!confirm(`¿Enviar alerta a los dueños de ${stats.freshZombies} leads estancados?`)) return
+        
         const limitDate = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
-        
-        await supabase.from('leads')
-            .update({ warning_sent: true, warning_date: new Date().toISOString() })
+        const nowIso = new Date().toISOString()
+
+        const { error } = await supabase.from('leads')
+            .update({ 
+                warning_sent: true, 
+                warning_date: nowIso, // Guardamos la hora exacta del aviso para contar 24hs
+                last_update: nowIso   // Movemos el lead arriba en el kanban
+            })
             .lt('last_update', limitDate)
-            .not('status', 'in', '("cumplidas","vendido","perdido","rechazado","baja")')
-            .is('warning_sent', false)
+            .not('status', 'in', '("cumplidas","vendido","perdido","rechazado","baja","finalizada")')
+            .neq('agent_name', 'Zombie 🧟')
+            .is('warning_sent', false) // Solo a los que no tienen aviso
         
-        fetchData()
+        if (error) alert("Error al enviar avisos: " + error.message)
+        else fetchData()
     }
 
+    // --- ACCIÓN 2: MOVER A CEMENTERIO ---
     const handleExecuteKill = async () => {
-        if (!confirm("¿Mover leads avisados a RECUPERO?")) return
+        if (!confirm(`¿Mover ${stats.killableZombies} leads al Cementerio Zombie 🧟?\nSolo se moverán los que recibieron aviso hace más de 24hs.`)) return
         
-        await supabase.from('leads')
-            .update({ agent_name: 'Recupero', status: 'nuevo', warning_sent: false, notes: 'Recuperado AdminPipeline' })
+        // Calculamos la fecha límite: Ahora menos 24 horas
+        const deadline24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+        const { error } = await supabase.from('leads')
+            .update({ 
+                agent_name: 'Zombie 🧟', // DESTINO: CEMENTERIO
+                status: 'nuevo',         // Estado Nuevo para reasignar fácil
+                warning_sent: false,     // Limpiamos alertas
+                warning_date: null,
+                notes: `[ZOMBIE]: Recuperado por inactividad post-aviso.`,
+                last_update: new Date().toISOString()
+            })
             .eq('warning_sent', true)
+            .lt('warning_date', deadline24h) // FILTRO CLAVE: Solo si el aviso fue ANTES de hace 24hs
         
-        fetchData()
+        if (error) alert("Error al mover al cementerio: " + error.message)
+        else fetchData()
     }
 
     return (
@@ -160,7 +189,7 @@ export function AdminPipelineHealth() {
                     <p className="text-slate-500 font-medium">Estado real de la cartera activa.</p>
                 </div>
                 
-                <div className="flex gap-2 bg-white p-2 rounded-xl border shadow-sm items-center">
+                <div className="flex gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border shadow-sm items-center">
                     <Filter className="h-4 w-4 text-slate-400 ml-1" />
                     <Select value={selectedMonth} onValueChange={setSelectedMonth}>
                         <SelectTrigger className="w-[120px] font-bold border-none h-8"><SelectValue /></SelectTrigger>
@@ -181,66 +210,123 @@ export function AdminPipelineHealth() {
             </div>
 
             {/* 1. NIVEL DE SIEMBRA */}
-            <Card className="border-t-4 border-t-green-500 shadow-lg">
-                <CardHeader><CardTitle className="flex items-center gap-2 text-slate-700 dark:text-slate-200"><Sprout className="h-5 w-5 text-green-600" /> Nivel de Siembra (Stock Activo)</CardTitle></CardHeader>
+            <Card className="border-t-4 border-t-green-500 shadow-lg dark:bg-[#1e1e1e]">
+                <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-slate-700 dark:text-slate-200 text-lg">
+                        <Sprout className="h-5 w-5 text-green-600" /> Nivel de Siembra (Stock Activo)
+                    </CardTitle>
+                </CardHeader>
                 <CardContent>
                     <div className="flex justify-between items-end mb-2">
-                        <div><p className="text-4xl font-black text-slate-800 dark:text-white">{stats.coverage}%</p><p className="text-xs text-slate-400 uppercase font-bold">Ocupación Cartera Global</p></div>
-                        <Badge variant="outline" className={stats.coverage > 80 ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}>{stats.coverage >= 100 ? 'Cartera Llena' : 'Espacio Disponible'}</Badge>
+                        <div>
+                            <p className="text-4xl font-black text-slate-800 dark:text-white">{stats.coverage}%</p>
+                            <p className="text-xs text-slate-400 uppercase font-bold">Ocupación Cartera Global (Meta: 200 Leads)</p>
+                        </div>
+                        <Badge variant="outline" className={stats.coverage > 80 ? "bg-green-100 text-green-700 border-green-200" : "bg-blue-100 text-blue-700 border-blue-200"}>
+                            {stats.coverage >= 100 ? 'Cartera Llena' : 'Espacio Disponible'}
+                        </Badge>
                     </div>
-                    <Progress value={stats.coverage} className="h-4 bg-slate-100" />
+                    <Progress value={stats.coverage} className="h-4 bg-slate-100 dark:bg-slate-800" />
                 </CardContent>
             </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
-                {/* 2. ZOMBIES (CARTERA ACTIVA) */}
-                <Card className="border-t-4 border-t-red-500 shadow-lg">
-                    <CardHeader><CardTitle className="flex items-center gap-2 text-slate-700 dark:text-slate-200"><AlertTriangle className="h-5 w-5 text-red-500" /> Gestión de Zombies</CardTitle></CardHeader>
+                {/* 2. ZOMBIES (LÓGICA MEJORADA) */}
+                <Card className="border-t-4 border-t-red-500 shadow-lg dark:bg-[#1e1e1e]">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-slate-700 dark:text-slate-200 text-lg">
+                            <AlertTriangle className="h-5 w-5 text-red-500" /> Gestión de Zombies
+                        </CardTitle>
+                    </CardHeader>
                     <CardContent>
                         <div className="flex items-center gap-4 mb-6">
-                            <div className="p-4 bg-red-100 rounded-full"><AlertOctagon className="h-8 w-8 text-red-600" /></div>
+                            <div className="p-4 bg-red-100 rounded-full border-2 border-red-200 dark:bg-red-900/20 dark:border-red-900"><AlertOctagon className="h-8 w-8 text-red-600" /></div>
                             <div>
-                                <p className="text-3xl font-black text-red-600">{stats.totalZombies}</p>
-                                <p className="text-xs font-bold text-slate-500 uppercase">Leads Estancados &gt;72hs</p>
+                                <p className="text-4xl font-black text-red-600">{stats.totalZombies}</p>
+                                <p className="text-xs font-bold text-slate-500 uppercase">Total Leads Estancados</p>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                            <Button variant="outline" className="h-auto py-3 flex flex-col gap-1 border-yellow-200 bg-yellow-50 hover:bg-yellow-100 text-yellow-800" onClick={handleSendWarning} disabled={stats.freshZombies === 0}>
-                                <span className="flex items-center gap-2 font-bold"><Send className="h-4 w-4"/> Avisar ({stats.freshZombies})</span>
-                            </Button>
-                            <Button variant="outline" className="h-auto py-3 flex flex-col gap-1 border-red-200 bg-red-50 hover:bg-red-100 text-red-800" onClick={handleExecuteKill} disabled={stats.warnedZombies === 0}>
-                                <span className="flex items-center gap-2 font-bold"><Trash className="h-4 w-4"/> Recuperar ({stats.warnedZombies})</span>
-                            </Button>
+                        
+                        <div className="space-y-3">
+                            {/* BOTÓN 1: AVISAR */}
+                            <div className="flex gap-2 items-center">
+                                <Button 
+                                    className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-bold" 
+                                    onClick={handleSendWarning} 
+                                    disabled={stats.freshZombies === 0}
+                                >
+                                    <Send className="h-4 w-4 mr-2"/> AVISAR ({stats.freshZombies})
+                                </Button>
+                                {/* Tooltip Nativo */}
+                                <div className="bg-slate-100 dark:bg-slate-800 p-2 rounded-full text-slate-400 cursor-help" title="Envía alerta y espera 24hs para habilitar el recupero.">
+                                    <Clock className="h-4 w-4"/>
+                                </div>
+                            </div>
+
+                            {/* BOTÓN 2: RECUPERAR (CON LÓGICA 24HS) */}
+                            <div className="flex gap-2 items-center">
+                                <Button 
+                                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold" 
+                                    onClick={handleExecuteKill} 
+                                    disabled={stats.killableZombies === 0}
+                                >
+                                    <Trash className="h-4 w-4 mr-2"/> CEMENTERIO ({stats.killableZombies})
+                                </Button>
+                                {stats.pendingZombies > 0 && (
+                                    <div className="text-[10px] font-bold text-orange-500 bg-orange-50 px-2 py-1 rounded border border-orange-200 animate-pulse">
+                                        ⏳ {stats.pendingZombies} en espera 24hs
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* 3. RATIO DE TIRO (TODOS LOS AGENTES) */}
-                <Card className="border-t-4 border-t-blue-500 shadow-lg">
-                    <CardHeader><CardTitle className="flex items-center gap-2 text-slate-700 dark:text-slate-200"><Target className="h-5 w-5 text-blue-500" /> Eficiencia de Cartera (Mes)</CardTitle></CardHeader>
-                    <CardContent>
-                        <div className="flex justify-between items-center mb-4"><p className="text-xs text-slate-500">Leads gestionados para <b>1 venta</b>.</p><span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">Obj: &lt; 25</span></div>
-                        <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
+                {/* 3. RATIO DE TIRO */}
+                <Card className="border-t-4 border-t-blue-500 shadow-lg flex flex-col dark:bg-[#1e1e1e]">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-slate-700 dark:text-slate-200 text-lg">
+                            <Target className="h-5 w-5 text-blue-500" /> Eficiencia de Cartera
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex-1 flex flex-col min-h-0">
+                        <div className="flex justify-between items-center mb-4">
+                            <p className="text-xs text-slate-500">Leads gestionados para lograr <b>1 venta</b>.</p>
+                            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100">Obj: &lt; 25</span>
+                        </div>
+                        
+                        <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1 max-h-[250px]">
                             {stats.agentsRatio.length > 0 ? stats.agentsRatio.map((agent: any) => (
-                                <div key={agent.name} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                                    <Avatar className="h-8 w-8 border border-slate-200"><AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${agent.name}`} /><AvatarFallback>{agent.name[0]}</AvatarFallback></Avatar>
+                                <div key={agent.name} className="flex items-center gap-3 p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-lg transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-800">
+                                    <Avatar className="h-8 w-8 border border-slate-200 shadow-sm">
+                                        <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${agent.name}`} />
+                                        <AvatarFallback className="text-[9px] font-bold">{agent.name[0]}</AvatarFallback>
+                                    </Avatar>
                                     <div className="flex-1 space-y-1">
                                         <div className="flex justify-between text-xs items-center">
                                             <div>
-                                                <span className="font-bold text-slate-700 block">{agent.name}</span>
-                                                <span className="text-[9px] text-slate-400 uppercase font-bold">Stock: {agent.stock} | Ventas: {agent.sales}</span>
+                                                <span className="font-bold text-slate-700 dark:text-slate-300 block">{agent.name}</span>
+                                                <span className="text-[9px] text-slate-400 uppercase font-bold flex gap-2">
+                                                    <span>Stock: {agent.stock}</span>
+                                                    <span className="text-green-600">Ventas: {agent.sales}</span>
+                                                </span>
                                             </div>
-                                            <Badge variant="outline" className={`${agent.sales === 0 ? "border-red-200 text-red-600 bg-red-50" : "border-green-200 text-green-700 bg-green-50"}`}>
+                                            <Badge variant="outline" className={`font-mono text-[10px] ${agent.sales === 0 ? "border-red-200 text-red-600 bg-red-50" : "border-green-200 text-green-700 bg-green-50"}`}>
                                                 {agent.sales === 0 ? "0 Vtas" : `1:${agent.ratio}`}
                                             </Badge>
                                         </div>
-                                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                            <div className={`h-full ${agent.color}`} style={{width: `${agent.sales === 0 ? 100 : Math.min((agent.ratio / 50) * 100, 100)}%`}}></div>
+                                        <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                            <div className={`h-full ${agent.color} transition-all duration-500`} style={{width: `${agent.sales === 0 ? 100 : Math.min((agent.ratio / 50) * 100, 100)}%`}}></div>
                                         </div>
                                     </div>
                                 </div>
-                            )) : <div className="flex flex-col items-center py-8 text-slate-400"><Users className="h-8 w-8 mb-2 opacity-50"/><p className="text-xs">Sin agentes con stock activo.</p></div>}
+                            )) : (
+                                <div className="flex flex-col items-center py-8 text-slate-400">
+                                    <Users className="h-8 w-8 mb-2 opacity-30"/>
+                                    <p className="text-xs font-medium">Sin agentes con stock activo.</p>
+                                </div>
+                            )}
                         </div>
                     </CardContent>
                 </Card>

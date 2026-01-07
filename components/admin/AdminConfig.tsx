@@ -49,6 +49,9 @@ export function AdminConfig() {
         name: "", email: "", password: "", role: "seller", work_hours: "5", avatar: ""
     })
     
+    // ✅ NUEVO: Estado para guardar el archivo físico antes de subirlo
+    const [avatarFile, setAvatarFile] = useState<File | null>(null)
+    
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // --- CARGA INICIAL ---
@@ -68,6 +71,7 @@ export function AdminConfig() {
                 email: u.email, 
                 role: u.role || "seller",
                 work_hours: u.work_hours || 5,
+                // Si tiene avatar_url usamos esa, si no, generamos uno temporal
                 avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`
             })))
         }
@@ -122,7 +126,7 @@ export function AdminConfig() {
             alert("❌ Error al guardar: " + (errConfig?.message || errWpp?.message))
         } else {
             alert("✅ Configuración guardada correctamente.")
-            fetchWppTemplates() // Refrescar para tener los IDs limpios si hubo nuevos
+            fetchWppTemplates() 
         }
     }
 
@@ -143,12 +147,14 @@ export function AdminConfig() {
     // --- GESTIÓN USUARIOS ---
     const openCreateModal = () => {
         setEditingUserId(null)
+        setAvatarFile(null) // Resetear archivo
         setFormData({ name: "", email: "", password: "", role: "seller", work_hours: "5", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` })
         setIsUserModalOpen(true)
     }
 
     const openEditModal = (user: any) => {
         setEditingUserId(user.id)
+        setAvatarFile(null) // Resetear archivo
         setFormData({ 
             name: user.name, 
             email: user.email, 
@@ -163,6 +169,10 @@ export function AdminConfig() {
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (file) {
+            // 1. Guardamos el archivo real para subirlo después
+            setAvatarFile(file)
+
+            // 2. Creamos una preview para que el usuario vea qué eligió
             const reader = new FileReader()
             reader.onloadend = () => {
                 setFormData(prev => ({ ...prev, avatar: reader.result as string }))
@@ -171,38 +181,84 @@ export function AdminConfig() {
         }
     }
 
+    // ✅ FUNCIÓN DE SUBIDA DE IMAGEN
+    const uploadAvatar = async (userId: string, file: File) => {
+        const fileExt = file.name.split('.').pop()
+        const fileName = `${userId}-${Date.now()}.${fileExt}`
+        const filePath = `${fileName}`
+
+        // Subir al bucket 'avatars'
+        const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(filePath, file, { upsert: true })
+
+        if (uploadError) {
+            console.error('Error uploading avatar:', uploadError)
+            return null
+        }
+
+        // Obtener URL pública
+        const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
+        return data.publicUrl
+    }
+
     const handleSaveUser = async () => {
         if (!formData.name || !formData.email) return alert("Nombre y Email obligatorios.")
         setLoading(true)
 
         try {
-            if (editingUserId) {
-                const { error } = await supabase.from('profiles').update({
-                    full_name: formData.name,
-                    role: formData.role,
-                    work_hours: parseInt(formData.work_hours),
-                    avatar_url: formData.avatar
-                }).eq('id', editingUserId)
+            let targetUserId = editingUserId
+            let publicAvatarUrl = null
 
-                if (error) throw error
-                if (formData.password) alert("Nota: Para cambiar la contraseña, usá el panel de Supabase Auth.")
-                else alert("Usuario actualizado.")
-
-            } else {
+            // 1. Si es usuario NUEVO, primero lo creamos para tener su ID
+            if (!targetUserId) {
                 if (!formData.password) {
                     setLoading(false)
                     return alert("Contraseña obligatoria para nuevos usuarios.")
                 }
-                const { error } = await supabase.rpc('create_new_user', {
+                const { data: newId, error } = await supabase.rpc('create_new_user', {
                     email: formData.email,
                     password: formData.password,
                     full_name: formData.name,
                     role: formData.role,
                     work_hours: parseInt(formData.work_hours)
                 })
+                
                 if (error) throw error
-                else alert("Usuario creado exitosamente. ✅")
+                targetUserId = newId // Ya tenemos el ID del nuevo usuario
+                alert("Usuario creado exitosamente. ✅")
+            } else {
+                // Si estamos editando, actualizamos los datos básicos primero
+                const { error } = await supabase.from('profiles').update({
+                    full_name: formData.name,
+                    role: formData.role,
+                    work_hours: parseInt(formData.work_hours),
+                    // NOTA: Aún no guardamos el avatar_url aquí si es que hay archivo nuevo
+                }).eq('id', targetUserId)
+
+                if (error) throw error
+                if (formData.password) alert("Nota: Para cambiar la contraseña, usá el panel de Supabase Auth.")
+                else alert("Usuario actualizado.")
             }
+
+            // 2. AHORA GESTIONAMOS LA FOTO (Si hay archivo nuevo y tenemos ID)
+            if (targetUserId && avatarFile) {
+                // Subir foto real al bucket
+                publicAvatarUrl = await uploadAvatar(targetUserId, avatarFile)
+                
+                if (publicAvatarUrl) {
+                    // Actualizar el perfil con la URL real de la nube
+                    await supabase.from('profiles')
+                        .update({ avatar_url: publicAvatarUrl })
+                        .eq('id', targetUserId)
+                }
+            } else if (targetUserId && !avatarFile && formData.avatar.startsWith('http')) {
+                // Si no subió archivo nuevo pero ya tenía una URL (o la de DiceBear), nos aseguramos que esté guardada
+                 await supabase.from('profiles')
+                        .update({ avatar_url: formData.avatar })
+                        .eq('id', targetUserId)
+            }
+
             await fetchUsers()
             setIsUserModalOpen(false)
         } catch (e: any) {
@@ -242,14 +298,12 @@ export function AdminConfig() {
 
     const addTemplate = () => {
         const newId = `tpl_${Date.now()}`
-        // Crea una plantilla vacía localmente
         setWppTemplates(prev => [...prev, { id: newId, label: "Nueva Plantilla", message: "" }])
     }
 
     const deleteTemplate = async (id: string) => {
         if(!confirm("¿Borrar plantilla?")) return
         setWppTemplates(prev => prev.filter(t => t.id !== id))
-        // Borrar de DB si ya existía
         await supabase.from('whatsapp_templates').delete().eq('id', id)
     }
 
@@ -360,7 +414,6 @@ export function AdminConfig() {
                                     <div className="space-y-1">
                                         <Label className="text-xs text-red-500 font-bold flex items-center gap-1"><Flame size={10}/> Quemados (+7)</Label>
                                         <div className="relative">
-                                            {/* --- AQUÍ ESTABA EL ERROR CORREGIDO --- */}
                                             <Input type="number" className="pl-2 pr-8 border-red-200 bg-red-50" value={freezeConfig.quemados} onChange={e => setFreezeConfig({...freezeConfig, quemados: parseInt(e.target.value) || 0})}/>
                                             <span className="absolute right-3 top-2.5 text-xs text-red-400 font-bold">días</span>
                                         </div>
@@ -401,7 +454,7 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
-                {/* 3. WHATSAPP TEMPLATES (CON BOTÓN DE CREAR NUEVO) */}
+                {/* 3. WHATSAPP TEMPLATES */}
                 <TabsContent value="whatsapp" className="space-y-6 mt-6">
                     <Card className="border-t-4 border-t-green-500">
                         <CardHeader className="flex flex-row items-center justify-between">
@@ -425,7 +478,6 @@ export function AdminConfig() {
                             {wppTemplates.map((tpl) => (
                                 <div key={tpl.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 group hover:border-green-300 transition-colors relative">
                                     
-                                    {/* Botón Borrar */}
                                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => deleteTemplate(tpl.id)}>
                                             <Trash2 size={12}/>
@@ -435,7 +487,6 @@ export function AdminConfig() {
                                     <div className="flex justify-between items-center border-b pb-2 border-slate-200 pr-8">
                                         <div className="flex items-center gap-2 w-full">
                                             <PenLine className="h-4 w-4 text-slate-400 shrink-0" />
-                                            {/* INPUT PARA EDITAR EL NOMBRE DEL BOTÓN */}
                                             <Input 
                                                 value={tpl.label} 
                                                 onChange={(e) => updateTemplate(tpl.id, 'label', e.target.value)} 

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
-import { Search, Bell, PartyPopper, X, UserPlus, Sparkles, Undo2, Lock, AlertTriangle, Filter, MessageCircle, Clock, Wallet, ShieldCheck, Calendar as CalendarIcon, Trash2, PlusCircle, Building2, User, RefreshCw, Send, Check } from "lucide-react"
+import { Search, Bell, PartyPopper, X, UserPlus, Sparkles, Undo2, Lock, AlertTriangle, Filter, MessageCircle, Clock, Wallet, ShieldCheck, Calendar as CalendarIcon, Trash2, PlusCircle, Building2, User, RefreshCw, Send, Check, ArrowRightLeft, FileCheck, Megaphone, Store } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -49,9 +49,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [profiles, setProfiles] = useState<any[]>([]) 
     
     // --- CONFIGURACIÓN GLOBAL ---
-    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any}>({
+    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any, origins: string[]}>({
         prepagas: [], 
-        subStates: {}
+        subStates: {},
+        origins: ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro'] // Defaults robustos
     })
 
     // --- PERMISOS DINÁMICOS ---
@@ -89,7 +90,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     // --- CARGA MANUAL ---
     const [isManualLoadOpen, setIsManualLoadOpen] = useState(false)
     const [manualLoadData, setManualLoadData] = useState({
-        clientName: "", dni: "", prepaga: "", plan: "", source: "Oficina", specificSeller: ""
+        clientName: "", 
+        dni: "", 
+        prepaga: "", 
+        plan: "", 
+        source: "", 
+        specificSeller: "",
+        type: "alta" // 'alta' | 'pass'
     })
 
     // --- NOTIFICACIONES ---
@@ -121,7 +128,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (data) {
             const p = data.find(c => c.key === 'prepagas_plans')?.value || []
             const s = data.find(c => c.key === 'workflow_substates')?.value || {}
-            setGlobalConfig({ prepagas: p, subStates: s })
+            // ✅ Intentamos cargar origenes personalizados, si no existen usamos los default
+            const o = data.find(c => c.key === 'sales_origins')?.value || ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro']
+            
+            setGlobalConfig({ prepagas: p, subStates: s, origins: o })
         }
     }
 
@@ -489,16 +499,16 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             prepaga: manualLoadData.prepaga || "Generica",
             status: "ingresado", 
             sub_state: "Carga Manual", 
-            agent_name: manualLoadData.source === 'Vendedor' ? manualLoadData.specificSeller : manualLoadData.source, 
+            agent_name: manualLoadData.specificSeller || "Admin", // ✅ SIEMPRE USA EL VENDEDOR ELEGIDO
             created_at: new Date().toISOString(), 
             last_update: new Date().toISOString(), 
-            type: "alta", 
-            source: "Manual Admin"
+            type: manualLoadData.type, // ✅ 'alta' o 'pass'
+            source: manualLoadData.source || "Manual Admin" // ✅ ORIGEN DEL DATO
         })
 
         if (!error) {
             setIsManualLoadOpen(false)
-            setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "Oficina", specificSeller: "" }) 
+            setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "", specificSeller: "", type: "alta" }) 
             showToast("✅ Operación guardada en Base de Datos", 'success')
             fetchOperations() 
         } else {
@@ -720,15 +730,36 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 </DialogContent>
             </Dialog>
 
-            {/* --- MODAL DE CARGA MANUAL (Ahora con Planes Reales) --- */}
+            {/* --- MODAL DE CARGA MANUAL MEJORADO (ALTA VS PASS + ORIGENES Y VENDEDOR SIEMPRE) --- */}
             <Dialog open={isManualLoadOpen} onOpenChange={setIsManualLoadOpen}>
                 <DialogContent className="max-w-lg p-0 overflow-hidden border-0 shadow-2xl rounded-2xl gap-0">
-                    <div className="bg-[#1e3a8a] p-6 text-white text-center">
-                        <div className="mx-auto bg-white/20 p-3 rounded-full w-fit mb-3"><UserPlus className="h-8 w-8 text-white"/></div>
+                    <div className="bg-[#1e3a8a] p-6 text-white text-center transition-colors duration-300">
+                        <div className="mx-auto bg-white/20 p-3 rounded-full w-fit mb-3">
+                            {manualLoadData.type === 'alta' ? <FileCheck className="h-8 w-8 text-white"/> : <ArrowRightLeft className="h-8 w-8 text-white"/>}
+                        </div>
                         <DialogTitle className="text-xl font-bold">Carga Manual de Operación</DialogTitle>
-                        <DialogDescription className="text-blue-200 text-xs">Ingreso administrativo de ventas externas o propias.</DialogDescription>
+                        <DialogDescription className="text-white/70 text-xs">
+                            {manualLoadData.type === 'alta' ? 'Ingreso de Venta Nueva' : 'Ingreso de Traspaso (Pass)'}
+                        </DialogDescription>
                     </div>
-                    <div className="p-6 bg-white space-y-4">
+                    
+                    <div className="p-6 bg-white space-y-5">
+                        {/* SELECTOR DE TIPO (ALTA VS PASS) */}
+                        <div className="flex bg-slate-100 p-1 rounded-lg">
+                            <button 
+                                onClick={() => setManualLoadData({...manualLoadData, type: 'alta'})}
+                                className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'alta' ? 'bg-white text-blue-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                ✨ Alta Nueva
+                            </button>
+                            <button 
+                                onClick={() => setManualLoadData({...manualLoadData, type: 'pass'})}
+                                className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'pass' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                🔄 Pass / Traspaso
+                            </button>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Nombre Completo</Label><Input value={manualLoadData.clientName} onChange={e => setManualLoadData({...manualLoadData, clientName: e.target.value})} placeholder="Ej: Juan Pérez" className="h-9 text-slate-900"/></div>
                             <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">DNI / CUIL</Label><Input value={manualLoadData.dni} onChange={e => setManualLoadData({...manualLoadData, dni: e.target.value})} placeholder="Sin puntos" className="h-9 text-slate-900"/></div>
@@ -763,30 +794,41 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         
                         <Separator className="bg-slate-100"/>
                         
-                        <div className="space-y-3">
-                            <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Building2 size={14}/> Origen de la Venta</Label>
-                            <div className="grid grid-cols-3 gap-2">
-                                {['Oficina', 'Iara', 'Otros', 'Vendedor'].map((src) => (
-                                    <div key={src} className={`border rounded-lg p-2 text-center text-xs font-bold cursor-pointer transition-all ${manualLoadData.source === src ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'hover:bg-slate-50 text-slate-600'}`} onClick={() => setManualLoadData({...manualLoadData, source: src})}>{src}</div>
-                                ))}
+                        <div className="grid grid-cols-2 gap-4">
+                             {/* SELECCION DE ORIGEN (DESPLEGABLE SIEMPRE) */}
+                            <div className="space-y-1">
+                                <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Megaphone size={12}/> Origen del Dato</Label>
+                                <Select value={manualLoadData.source} onValueChange={(v) => setManualLoadData({...manualLoadData, source: v})}>
+                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Ej: Google Ads..."/></SelectTrigger>
+                                    <SelectContent>
+                                        {globalConfig.origins.map((src) => (
+                                             <SelectItem key={src} value={src}>{src}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
-                            
-                            {manualLoadData.source === 'Vendedor' && (
-                                <div className="pt-2 animate-in slide-in-from-top-2">
-                                    <Label className="text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1"><User size={12}/> Seleccionar Vendedor</Label>
-                                    <Select value={manualLoadData.specificSeller} onValueChange={(v) => setManualLoadData({...manualLoadData, specificSeller: v})}>
-                                        <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Elegir de la lista..."/></SelectTrigger>
-                                        <SelectContent>
-                                            {sellerUsers.map(s => <SelectItem key={s.id} value={s.full_name || s.email}>{s.full_name || s.email}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
+
+                             {/* SELECCION DE VENDEDOR (DESPLEGABLE SIEMPRE) */}
+                            <div className="space-y-1">
+                                <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><User size={12}/> Vendedor Responsable</Label>
+                                <Select value={manualLoadData.specificSeller} onValueChange={(v) => setManualLoadData({...manualLoadData, specificSeller: v})}>
+                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Elegir..."/></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="Oficina" className="font-bold text-blue-700 bg-blue-50/50 mb-1"><Store size={14} className="inline mr-2"/>Oficina</SelectItem>
+                                        <SelectItem value="Iara" className="font-bold text-purple-700 bg-purple-50/50 mb-1">iara</SelectItem>
+                                        <SelectItem value="Otros" className="font-bold text-slate-700 bg-slate-50/50 mb-1">Otros</SelectItem>
+                                        <div className="h-px bg-slate-200 my-1"></div>
+                                        {sellerUsers.map(s => <SelectItem key={s.id} value={s.full_name || s.email}>{s.full_name || s.email}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                     </div>
                     <DialogFooter className="p-6 bg-slate-50 border-t border-slate-100">
                         <Button variant="ghost" onClick={() => setIsManualLoadOpen(false)} className="text-slate-500">Cancelar</Button>
-                        <Button className="bg-[#1e3a8a] hover:bg-blue-900 text-white w-32 font-bold shadow-md" onClick={handleCreateManualSale}>Cargar Venta</Button>
+                        <Button className="bg-[#1e3a8a] hover:bg-blue-900 text-white w-32 font-bold shadow-md transition-colors" onClick={handleCreateManualSale}>
+                            {manualLoadData.type === 'alta' ? 'Cargar Venta' : 'Cargar Pass'}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

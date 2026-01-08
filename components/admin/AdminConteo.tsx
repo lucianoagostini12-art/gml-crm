@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Calculator,
   Filter,
+  DollarSign,
   RefreshCw,
   CheckCircle2,
   TrendingUp,
@@ -131,7 +132,10 @@ export function AdminConteo() {
     // ✅ HELPER: Regla de Negocio (AMPF = 1, Resto = Cápitas)
     const calculatePoints = (items: any[]) => {
         return items.reduce((acc, item) => {
-            const isAMPF = item.prepaga && item.prepaga.includes("AMPF")
+            // Protección contra nulos en prepaga
+            const pName = (item.prepaga || "").toLowerCase()
+            const isAMPF = pName.includes("ampf")
+            // Si es AMPF suma 1, si no suma cápitas (o 1 por defecto)
             const points = isAMPF ? 1 : (Number(item.capitas) || 1)
             return acc + points
         }, 0)
@@ -157,7 +161,7 @@ export function AdminConteo() {
 
       const efficiency = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
 
-      const passCount = agentLeads.filter((l: any) => norm(l.status) === "pass").length // Pass sigue por unidad
+      const passCount = agentLeads.filter((l: any) => norm(l.status) === "pass").length // Pass sigue por unidad (no cápita)
 
       const recentMs = now.getTime() - 600000 // 10 min
       const status = agentLeads.some((l: any) => {

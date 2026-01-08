@@ -52,14 +52,14 @@ const isLeadOverdue = (lastUpdateStr: string, status: string) => {
 function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
     
-    // CORRECCIÓN: Estilo seguro para evitar conflictos de tipos
+    // ✅ CORRECCIÓN 1: Tipado seguro para estilos inline
     const style: React.CSSProperties = { 
         transform: CSS.Transform.toString(transform), 
         transition, 
         opacity: isDragging ? 0.3 : 1,
-        // @ts-ignore - scale es válido en React pero a veces TS se queja
+        // @ts-ignore
         scale: isDragging ? 1.05 : 1,
-        touchAction: 'none' // Importante para móviles
+        touchAction: 'none'
     }
     
     const isUrgent = lead.scheduled_for && new Date(lead.scheduled_for) <= new Date()
@@ -211,7 +211,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             })
             .subscribe()
         
-        // CORRECCIÓN: Inicialización segura del audio solo en cliente
+        // ✅ CORRECCIÓN 2: Chequeo seguro de window para evitar errores SSR
         if (typeof window !== 'undefined') { 
             audioRef.current = new Audio(ALARM_SOUND); 
             audioRef.current.loop = true; 
@@ -323,7 +323,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     const sortLeads = (columnId: string) => leads.filter(l => l.status === columnId).sort(sortLeadsLogic)
 
-    // CORRECCIÓN: Render seguro del overlay
+    // ✅ CORRECCIÓN 3: Buscamos el lead activo de forma segura
     const activeLeadForOverlay = activeId ? leads.find(l => l.id === activeId) : null;
 
     return (
@@ -347,7 +347,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </div>
                 {activeId && (<div className="fixed bottom-10 left-0 right-0 flex justify-center gap-12 z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-10 px-4"><DropZone id="zone-perdido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-red-200 shadow-2xl"><ArchiveX className="h-10 w-10 text-red-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-red-600">Perdido</span></DropZone><DropZone id="zone-vendido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-emerald-200 shadow-2xl"><Trophy className="h-10 w-10 text-emerald-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-emerald-600">¡Venta Lograda! 🚀</span></DropZone></div>)}
                 
-                {/* CORRECCIÓN: Verificamos que activeLeadForOverlay exista antes de renderizar */}
+                {/* ✅ CORRECCIÓN 3 (CONTINUACIÓN): Renderizamos SOLO si existe */}
                 <DragOverlay>
                     {activeId && activeLeadForOverlay ? (
                         <div className="cursor-grabbing rotate-3 scale-105 transition-transform duration-200 shadow-2xl opacity-90">

@@ -10,10 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull } from "lucide-react"
+import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 import {
   Dialog,
@@ -47,6 +48,8 @@ type Lead = {
   last_update?: string | null
   loss_reason?: string | null
   calls?: number
+  prepaga?: string | null // ✅ Agregado para detectar colores
+  chat?: any[] // ✅ Agregado para el chat
 }
 
 const normPhone = (v?: string | null) => (v || "").replace(/\D/g, "")
@@ -61,6 +64,36 @@ const leadKey = (l: Lead) => {
   return null
 }
 
+// --- 1) TUS COLORES DE PREPAGAS ---
+const getPrepagaBadgeColor = (prepaga?: string | null) => {
+    if (!prepaga) return "bg-slate-100 text-slate-600 border-slate-200"
+    
+    const p = prepaga
+
+    if (p.includes("Prevención") || p.includes("Prevencion")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+    if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+    if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+    if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+    if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+    if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+    
+    return "bg-slate-100 text-slate-800 border-slate-200"
+}
+
+// --- 2) CÁLCULO DE TIEMPO TRANSCURRIDO ---
+const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHrs = Math.floor(diffMins / 60)
+    
+    if (diffMins < 1) return "Ahora"
+    if (diffMins < 60) return `${diffMins} min`
+    if (diffHrs < 24) return `${diffHrs} hs`
+    return `${Math.floor(diffHrs / 24)} d`
+}
+
 export function AdminLeadFactory() {
   const supabase = createClient()
   const [loading, setLoading] = useState(false)
@@ -70,16 +103,16 @@ export function AdminLeadFactory() {
   const [redistributionList, setRedistributionList] = useState<Lead[]>([])
   const [drawerLeads, setDrawerLeads] = useState<Lead[]>([])
 
+  // LISTA DE VENDEDORES (REAL DESDE DB)
+  const [agentsList, setAgentsList] = useState<string[]>([])
+
   // SELECCIÓN
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
   const [targetAgent, setTargetAgent] = useState("")
   
   // AUTOMATIZACIÓN (ROUND ROBIN)
   const [autoAssignEnabled, setAutoAssignEnabled] = useState(false)
-  const [nextAgentIdx, setNextAgentIdx] = useState(0) // Índice del vendedor al que le toca
-
-  // LISTA DE VENDEDORES (Idealmente vendría de la tabla profiles)
-  const AGENTS = ["Maca", "Gonza", "Sofi", "Lucas", "Brenda", "Cami"]
+  const [nextAgentIdx, setNextAgentIdx] = useState(0)
 
   // FILTROS REDISTRIBUCIÓN
   const [sourceAgent, setSourceAgent] = useState("")
@@ -89,96 +122,102 @@ export function AdminLeadFactory() {
 
   // ESTADOS CEMENTERIO (ESTADÍSTICAS)
   const [graveyardStats, setGraveyardStats] = useState({
-    fantasmas: 0,
-    precio: 0,
-    interes: 0,
-    quemados: 0,
-    zombies: 0, // ✅ AGREGADO: Contador para zombies
-    basural: 0,
+    fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, basural: 0,
   })
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null)
 
-  // DEDUPE MAP: lead_id -> originalLead
+  // DEDUPE MAP
   const [dupMap, setDupMap] = useState<Record<string, Lead>>({})
   const [dupLoading, setDupLoading] = useState(false)
 
-  // MODAL
+  // MODAL DUPLICADOS
   const [dupModalOpen, setDupModalOpen] = useState(false)
   const [dupLead, setDupLead] = useState<Lead | null>(null)
   const [origLead, setOrigLead] = useState<Lead | null>(null)
+
+  // 🚀 MODAL TRIAJE / VER CHAT (NUEVO)
+  const [triageModalOpen, setTriageModalOpen] = useState(false)
+  const [leadToTriage, setLeadToTriage] = useState<Lead | null>(null)
 
   // CARGA INICIAL
   useEffect(() => {
     fetchInbox()
     fetchGraveyardStats()
+    fetchRealAgents() // ✅ CARGA REAL
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ✅ 1. TRAER SOLO SELLERS REALES
+  const fetchRealAgents = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*') 
+        .eq('role', 'seller') // ✅ FILTRO POR ROL
+
+      if (data && data.length > 0) {
+          const realAgents = data.map((p: any) => p.username || p.full_name || p.nombre || p.name || p.email).filter(Boolean)
+          setAgentsList(realAgents)
+      } else {
+          console.error("No se encontraron sellers en la base.", error)
+          setAgentsList([]) 
+      }
+  }
 
   // --- 🤖 MOTOR DE ASIGNACIÓN AUTOMÁTICA (ROUND ROBIN) ---
   useEffect(() => {
     let timeout: NodeJS.Timeout
 
     const processAutoAssign = async () => {
-        // Solo corre si está activado, hay leads libres y no estamos cargando
-        if (autoAssignEnabled && unassignedLeads.length > 0 && !loading) {
+        if (autoAssignEnabled && unassignedLeads.length > 0 && !loading && agentsList.length > 0 && agentsList[0] !== "Sin Vendedores") {
             
-            const leadToAssign = unassignedLeads[0] // Tomamos el primero de la pila
-            const agentToAssign = AGENTS[nextAgentIdx] // El vendedor de turno
+            const leadToAssign = unassignedLeads[0]
+            const agentToAssign = agentsList[nextAgentIdx] // ✅ Usamos la lista dinámica
 
-            // 1. Actualización Optimista (Visual inmediata)
             const remainingLeads = unassignedLeads.slice(1)
             setUnassignedLeads(remainingLeads)
             
-            // 2. Rotar el turno para el siguiente
-            setNextAgentIdx((prev) => (prev + 1) % AGENTS.length)
+            setNextAgentIdx((prev) => (prev + 1) % agentsList.length)
 
-            // 3. Guardar en Supabase
-            // Nota: No esperamos el await para no bloquear la UI, se hace en background
             await supabase.from('leads').update({
                 agent_name: agentToAssign,
-                status: 'nuevo', // Aseguramos que entre como nuevo
+                status: 'nuevo',
                 last_update: new Date().toISOString()
             }).eq('id', leadToAssign.id)
-
-            // Si quedan leads, el useEffect se volverá a disparar automáticamente 
-            // porque 'unassignedLeads' cambió de tamaño.
         }
     }
 
     if (autoAssignEnabled && unassignedLeads.length > 0) {
-        // Pequeño delay de 1.5s para que se vea el proceso y no sature la base
         timeout = setTimeout(processAutoAssign, 1500)
     }
 
     return () => clearTimeout(timeout)
-  }, [autoAssignEnabled, unassignedLeads, nextAgentIdx, loading])
+  }, [autoAssignEnabled, unassignedLeads, nextAgentIdx, loading, agentsList])
 
 
-  // --- LÓGICA DE CONGELAMIENTO (NUEVA) ---
+  // --- LÓGICA DE CONGELAMIENTO (INTACTA) ---
   const checkFreezeStatus = (lead: Lead, drawerType: string) => {
       if (!lead.last_update) return { isFrozen: false, remainingDays: 0 }
-      
       const lostDate = new Date(lead.last_update)
       const now = new Date()
-      // Diferencia en días
       const daysPassed = Math.floor((now.getTime() - lostDate.getTime()) / (1000 * 60 * 60 * 24))
       const requiredDays = FREEZE_CONFIG[drawerType] || 0
-      
       if (daysPassed < requiredDays) {
           return { isFrozen: true, remainingDays: requiredDays - daysPassed }
       }
       return { isFrozen: false, remainingDays: 0 }
   }
 
-  // --- 1. BANDEJA DE ENTRADA (SIN DUEÑO) + DETECCIÓN DUPLICADOS ---
+  // --- 1. BANDEJA DE ENTRADA (SIN DUEÑO) ---
   const fetchInbox = async () => {
     setLoading(true)
     setDupLoading(true)
 
+    // ✅ FIX CRÍTICO: Excluimos 'perdido' para que al descartar desaparezca
     const { data, error } = await supabase
       .from("leads")
       .select("*")
       .or("agent_name.is.null,agent_name.eq.Sin Asignar")
+      .neq('status', 'perdido') // 🔥 ESTO HACE LA MAGIA: Si está perdido, NO lo muestra en bandeja
       .order("created_at", { ascending: false })
 
     if (error) {
@@ -193,7 +232,7 @@ export function AdminLeadFactory() {
     const inbox = (data || []) as Lead[]
     setUnassignedLeads(inbox)
 
-    // armamos listas para lookup de "originales"
+    // LÓGICA DEDUPE (INTACTA)
     const phones = Array.from(
       new Set(
         inbox
@@ -203,7 +242,6 @@ export function AdminLeadFactory() {
     )
     const emails = Array.from(new Set(inbox.map((l) => normEmail(l.email)).filter(Boolean)))
 
-    // Si no hay identificadores, no hay dedupe
     if (phones.length === 0 && emails.length === 0) {
       setDupMap({})
       setLoading(false)
@@ -211,34 +249,18 @@ export function AdminLeadFactory() {
       return
     }
 
-    // Traemos candidatos "originales" (ya asignados)
     const candidates: Lead[] = []
 
     if (phones.length > 0) {
-      const { data: pData, error: pErr } = await supabase
-        .from("leads")
-        .select("id,created_at,name,phone,phone_norm,email,source,status,agent_name,last_update,loss_reason")
-        .in("phone_norm", phones as any)
-        .not("agent_name", "is", null)
-        .neq("agent_name", "Sin Asignar")
-
-      if (pErr) console.error(pErr)
+      const { data: pData } = await supabase.from("leads").select("*").in("phone_norm", phones as any).not("agent_name", "is", null).neq("agent_name", "Sin Asignar")
       if (pData) candidates.push(...(pData as Lead[]))
     }
 
     if (emails.length > 0) {
-      const { data: eData, error: eErr } = await supabase
-        .from("leads")
-        .select("id,created_at,name,phone,phone_norm,email,source,status,agent_name,last_update,loss_reason")
-        .in("email", emails as any)
-        .not("agent_name", "is", null)
-        .neq("agent_name", "Sin Asignar")
-
-      if (eErr) console.error(eErr)
+      const { data: eData } = await supabase.from("leads").select("*").in("email", emails as any).not("agent_name", "is", null).neq("agent_name", "Sin Asignar")
       if (eData) candidates.push(...(eData as Lead[]))
     }
 
-    // elegimos "original" como el más viejo por key
     const byKey: Record<string, Lead> = {}
     for (const c of candidates) {
       const k = leadKey(c)
@@ -252,7 +274,6 @@ export function AdminLeadFactory() {
       }
     }
 
-    // mapeamos cada lead de bandeja a su original (si existe)
     const mapByLeadId: Record<string, Lead> = {}
     for (const l of inbox) {
       const k = leadKey(l)
@@ -266,7 +287,7 @@ export function AdminLeadFactory() {
     setDupLoading(false)
   }
 
-  // --- 2. REDISTRIBUCIÓN (BUSCAR LEADS DE OTROS) ---
+  // --- 2. REDISTRIBUCIÓN ---
   const fetchRedistributionData = async () => {
     if (!sourceAgent) return
     setLoading(true)
@@ -282,9 +303,8 @@ export function AdminLeadFactory() {
     setLoading(false)
   }
 
-  // --- 3. CEMENTERIO (ESTADÍSTICAS REALES) ---
+  // --- 3. CEMENTERIO ---
   const fetchGraveyardStats = async () => {
-    // Buscamos leads 'perdidos' o asignados a 'Zombie 🧟'
     const { data, error } = await supabase
       .from("leads")
       .select("agent_name, loss_reason, status")
@@ -298,7 +318,6 @@ export function AdminLeadFactory() {
         const agent = l.agent_name || ""
         const reason = l.loss_reason?.toLowerCase() || ""
         
-        // ✅ PRIORIDAD: Si es Zombie/Recupero, va al cajón Zombie
         if (agent === "Zombie 🧟" || agent === "Recupero") {
             stats.zombies++
         } 
@@ -313,7 +332,6 @@ export function AdminLeadFactory() {
   }
 
   const fetchDrawerLeads = async (category: string) => {
-    // ✅ NUEVO CAJÓN ZOMBIE: Busca por agente, no por status
     if (category === "zombies") {
         const { data, error } = await supabase
             .from("leads")
@@ -326,7 +344,6 @@ export function AdminLeadFactory() {
         return
     }
 
-    // CAJONES CLÁSICOS (Status = Perdido)
     let reasonFilter = ""
     let query = supabase.from("leads").select("*").eq("status", "perdido").limit(100)
 
@@ -350,7 +367,7 @@ export function AdminLeadFactory() {
     if (data) setDrawerLeads(data as Lead[])
   }
 
-  // --- ACCIONES DE ASIGNACIÓN (UPDATE REAL) ---
+  // --- ACCIONES DE ASIGNACIÓN ---
   const executeAssign = async (origin: "inbox" | "redistribucion" | "cementerio") => {
     if (selectedLeads.length === 0 || !targetAgent) return alert("Seleccioná leads y un destino.")
 
@@ -374,7 +391,7 @@ export function AdminLeadFactory() {
     if (origin === "cementerio") {
       updates.status = "nuevo"
       updates.loss_reason = null
-      updates.warning_sent = false // Limpiamos alertas de zombie si las tenía
+      updates.warning_sent = false
       updates.warning_date = null
       updates.calls = 0 
     }
@@ -397,6 +414,39 @@ export function AdminLeadFactory() {
     }
 
     setLoading(false)
+  }
+
+  // --- 🚀 ACCIONES DE TRIAJE (ALINEADAS CON VENDEDORES) ---
+  const handleMoveToGraveyard = async (leadId: string, reason: string) => {
+      setLoading(true)
+      let updates: any = { status: 'perdido', last_update: new Date().toISOString(), loss_reason: reason }
+      
+      // Caso especial Zombie
+      if(reason === 'Zombie') {
+          updates.agent_name = 'Zombie 🧟'
+          // No cambiamos loss_reason, queda marcado como zombie por el agente
+      }
+
+      await supabase.from('leads').update(updates).eq('id', leadId)
+      
+      setTriageModalOpen(false)
+      setLoading(false)
+      fetchInbox()
+      fetchGraveyardStats()
+  }
+
+  const handleAssignFromTriage = async (leadId: string) => {
+      if(!targetAgent) return alert("Seleccioná un vendedor primero")
+      setLoading(true)
+      await supabase.from('leads').update({
+          agent_name: targetAgent,
+          status: 'nuevo',
+          last_update: new Date().toISOString()
+      }).eq('id', leadId)
+      
+      setTriageModalOpen(false)
+      setLoading(false)
+      fetchInbox()
   }
 
   // --- MODAL DUPLICADOS ---
@@ -482,7 +532,6 @@ export function AdminLeadFactory() {
   // --- HELPERS UI ---
   const handleSelectAll = (list: Lead[], checked: boolean) => {
     if(activeDrawer) {
-        // Bloquear selección de congelados
         const available = list.filter(l => !checkFreezeStatus(l, activeDrawer).isFrozen)
         if (checked) setSelectedLeads(available.map((l) => l.id))
         else setSelectedLeads([])
@@ -532,7 +581,8 @@ export function AdminLeadFactory() {
             </Label>
             <span className="text-[10px] text-slate-500">
               {autoAssignEnabled ? (
-                  <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500"/> Repartiendo a: {AGENTS[nextAgentIdx]}</span>
+                  // ✅ Muestra el usuario REAL
+                  <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500"/> Repartiendo a: {agentsList[nextAgentIdx]}</span>
               ) : "Los leads esperan en Bandeja."}
             </span>
           </div>
@@ -568,12 +618,13 @@ export function AdminLeadFactory() {
             <CardHeader className="pb-3 border-b bg-slate-50 flex flex-row justify-between items-center">
               <CardTitle>Leads Frescos (Sin Dueño)</CardTitle>
               <div className="flex gap-2">
+                {/* ✅ SELECTOR DINÁMICO */}
                 <Select value={targetAgent} onValueChange={setTargetAgent}>
                   <SelectTrigger className="w-[180px] bg-white">
                     <SelectValue placeholder="Asignar a..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {AGENTS.map((a) => (
+                    {agentsList.map((a) => (
                       <SelectItem key={a} value={a}>
                         {a}
                       </SelectItem>
@@ -599,8 +650,8 @@ export function AdminLeadFactory() {
                     </TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Nombre</TableHead>
-                    <TableHead>Fuente</TableHead>
-                    <TableHead>Duplicado</TableHead>
+                    <TableHead>Datos (Interés + Fuente)</TableHead>
+                    <TableHead>Acción</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -615,25 +666,52 @@ export function AdminLeadFactory() {
                     unassignedLeads.map((l) => {
                       const original = dupMap[l.id]
                       return (
-                        <TableRow key={l.id}>
-                          <TableCell>
+                        <TableRow key={l.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setLeadToTriage(l); setTriageModalOpen(true) }}>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <Checkbox
                               checked={selectedLeads.includes(l.id)}
                               onCheckedChange={(c) => handleSelectOne(l.id, c as boolean)}
                             />
                           </TableCell>
 
-                          <TableCell>{new Date(l.created_at).toLocaleDateString()}</TableCell>
-                          <TableCell className="font-bold">{l.name}</TableCell>
+                          {/* ✅ 2) FECHA MEJORADA */}
                           <TableCell>
-                            <Badge variant="outline">{l.source || "N/A"}</Badge>
+                            <div className="flex flex-col">
+                                <span className="font-bold text-slate-700">
+                                    {new Date(l.created_at).toLocaleString('es-AR', {
+                                        day: '2-digit', month: '2-digit', year: 'numeric',
+                                        hour: '2-digit', minute: '2-digit'
+                                    })}
+                                </span>
+                                <span className="text-[10px] text-blue-500 font-medium flex items-center gap-1">
+                                    <Clock size={10}/> {formatTimeAgo(l.created_at)}
+                                </span>
+                            </div>
+                          </TableCell>
+                          
+                          <TableCell className="font-bold text-base">{l.name}</TableCell>
+                          
+                          {/* ✅ 1) COLORES Y FUENTE */}
+                          <TableCell>
+                             <div className="flex flex-col gap-1 items-start">
+                                {l.prepaga ? (
+                                    <Badge variant="outline" className={getPrepagaBadgeColor(l.prepaga)}>
+                                        {l.prepaga}
+                                    </Badge>
+                                ) : (
+                                    <span className="text-[10px] text-slate-300">--</span>
+                                )}
+                                <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                                    <Tag size={10}/> {l.source || "N/A"}
+                                </div>
+                            </div>
                           </TableCell>
 
                           <TableCell>
                             {original ? (
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                                 <Badge className="bg-red-100 text-red-700 border border-red-200" variant="outline">
-                                  ♻️ Ya asignado a {original.agent_name || "alguien"}
+                                  ♻️ Tiene {original.agent_name}
                                 </Badge>
 
                                 <Button
@@ -647,9 +725,9 @@ export function AdminLeadFactory() {
                                 </Button>
                               </div>
                             ) : (
-                              <Badge variant="outline" className="text-slate-400">
-                                OK
-                              </Badge>
+                              <Button size="sm" variant="ghost" className="text-blue-600 hover:bg-blue-50">
+                                <Eye className="h-4 w-4 mr-2"/> Analizar
+                              </Button>
                             )}
                           </TableCell>
                         </TableRow>
@@ -683,8 +761,9 @@ export function AdminLeadFactory() {
                     <SelectTrigger>
                       <SelectValue placeholder="Elegir..." />
                     </SelectTrigger>
+                    {/* ✅ SELECTOR DINÁMICO */}
                     <SelectContent>
-                      {AGENTS.map((a) => (
+                      {agentsList.map((a) => (
                         <SelectItem key={a} value={a}>
                           {a}
                         </SelectItem>
@@ -737,8 +816,9 @@ export function AdminLeadFactory() {
                     <SelectTrigger className="w-[150px]">
                       <SelectValue placeholder="Destino" />
                     </SelectTrigger>
+                    {/* ✅ SELECTOR DINÁMICO (FILTRADO) */}
                     <SelectContent>
-                      {AGENTS.filter((a) => a !== sourceAgent).map((a) => (
+                      {agentsList.filter((a) => a !== sourceAgent).map((a) => (
                         <SelectItem key={a} value={a}>
                           {a}
                         </SelectItem>
@@ -900,8 +980,9 @@ export function AdminLeadFactory() {
                     <SelectTrigger className="w-[150px]">
                       <SelectValue placeholder="Elegir..." />
                     </SelectTrigger>
+                    {/* ✅ SELECTOR DINÁMICO */}
                     <SelectContent>
-                      {AGENTS.map((a) => (
+                      {agentsList.map((a) => (
                         <SelectItem key={a} value={a}>
                           {a}
                         </SelectItem>
@@ -945,7 +1026,7 @@ export function AdminLeadFactory() {
                         const { isFrozen, remainingDays } = checkFreezeStatus(l, activeDrawer || "")
                         
                         return (
-                          <TableRow key={l.id} className={isFrozen ? "bg-slate-50 opacity-60" : ""}>
+                          <TableRow key={l.id} className={checkFreezeStatus(l, activeDrawer || "").isFrozen ? "opacity-60" : ""}>
                             <TableCell>
                               {isFrozen ? (
                                 <Lock className="h-4 w-4 text-slate-300" />
@@ -988,6 +1069,100 @@ export function AdminLeadFactory() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* --- 🚀 MODAL TRIAJE / CHAT (NUEVO + ANCHO + MOTIVOS VENDEDOR) --- */}
+      <Dialog open={triageModalOpen} onOpenChange={setTriageModalOpen}>
+        <DialogContent className="max-w-[95vw] w-full h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+                🕵️ Triaje de Lead: <span className="text-blue-600">{leadToTriage?.name}</span>
+                {leadToTriage?.prepaga && <Badge className={getPrepagaBadgeColor(leadToTriage.prepaga)}>{leadToTriage.prepaga}</Badge>}
+            </DialogTitle>
+            <DialogDescription>Revisá el chat y decidí el destino del lead.</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 overflow-hidden">
+            {/* COLUMNA IZQUIERDA: DATOS */}
+            <div className="bg-slate-50 p-4 rounded-xl border space-y-4 h-full overflow-y-auto">
+                <div>
+                    <Label className="text-xs text-slate-500 uppercase">Teléfono</Label>
+                    <div className="font-mono text-lg font-bold">{leadToTriage?.phone}</div>
+                </div>
+                <div>
+                    <Label className="text-xs text-slate-500 uppercase">Origen</Label>
+                    <div className="font-bold">{leadToTriage?.source}</div>
+                </div>
+                <div>
+                    <Label className="text-xs text-slate-500 uppercase">Ingreso</Label>
+                    <div className="text-sm">{leadToTriage?.created_at && new Date(leadToTriage.created_at).toLocaleString()}</div>
+                </div>
+                
+                <div className="pt-6 border-t">
+                    <Label className="text-xs text-slate-500 uppercase mb-2 block">Asignar Manualmente</Label>
+                    <div className="flex gap-2">
+                        <Select value={targetAgent} onValueChange={setTargetAgent}>
+                            <SelectTrigger><SelectValue placeholder="Vendedor..." /></SelectTrigger>
+                            <SelectContent>
+                                {agentsList.map((a) => (<SelectItem key={a} value={a}>{a}</SelectItem>))}
+                            </SelectContent>
+                        </Select>
+                        <Button size="icon" onClick={() => leadToTriage && handleAssignFromTriage(leadToTriage.id)} disabled={!targetAgent} className="bg-blue-600"><Zap className="h-4 w-4"/></Button>
+                    </div>
+                </div>
+            </div>
+
+            {/* COLUMNA CENTRAL: CHAT */}
+            <div className="md:col-span-2 bg-white border rounded-xl flex flex-col h-full overflow-hidden shadow-sm">
+                <div className="bg-slate-100 p-3 border-b flex items-center gap-2">
+                    <MessageCircle className="h-4 w-4 text-slate-500"/> <span className="font-bold text-sm text-slate-700">Historial de Chat</span>
+                </div>
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                    <ScrollArea className="flex-1 p-4 bg-slate-50/50">
+                        <div className="space-y-4 pb-4">
+                            {leadToTriage?.chat && Array.isArray(leadToTriage.chat) && leadToTriage.chat.length > 0 ? (
+                                leadToTriage.chat.map((msg: any, i: number) => (
+                                    <div key={i} className={`flex ${msg.isMe || msg.user === 'Bot' ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.isMe || msg.user === 'Bot' ? 'bg-blue-100 text-blue-900 rounded-tr-none' : 'bg-white border text-slate-800 rounded-tl-none shadow-sm'}`}>
+                                            <p>{msg.text}</p>
+                                            <span className="text-[10px] opacity-50 block text-right mt-1">{msg.time}</span>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center py-10 text-slate-400 italic">
+                                    No hay historial de chat disponible.
+                                    <br/><span className="text-xs">Este lead entró sin conversación previa o antes de la integración.</span>
+                                </div>
+                            )}
+                        </div>
+                    </ScrollArea>
+                </div>
+                
+                {/* BOTONERA DE CEMENTERIO (MOTIVOS VENDEDOR UNIFICADOS) */}
+                <div className="p-3 bg-white border-t grid grid-cols-3 gap-2 shrink-0">
+                    <Button variant="outline" className="text-xs border-green-200 hover:bg-green-50 text-green-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'precio')}>
+                        <DollarSign className="h-4 w-4 mb-1"/> Precio / Muy caro
+                    </Button>
+                    <Button variant="outline" className="text-xs border-blue-200 hover:bg-blue-50 text-blue-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'no_contesta')}>
+                        <XCircle className="h-4 w-4 mb-1"/> No contesta
+                    </Button>
+                    <Button variant="outline" className="text-xs border-orange-200 hover:bg-orange-50 text-orange-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'competencia')}>
+                        <ShieldAlert className="h-4 w-4 mb-1"/> Competencia
+                    </Button>
+                    <Button variant="outline" className="text-xs border-purple-200 hover:bg-purple-50 text-purple-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'requisitos')}>
+                        <Activity className="h-4 w-4 mb-1"/> Requisitos / Salud
+                    </Button>
+                    <Button variant="outline" className="text-xs border-red-200 hover:bg-red-50 text-red-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'error')}>
+                        <Trash2 className="h-4 w-4 mb-1"/> Error / No solicitó
+                    </Button>
+                    <Button variant="outline" className="text-xs border-slate-200 hover:bg-slate-50 text-slate-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'otros')}>
+                        <HelpCircle className="h-4 w-4 mb-1"/> Otros
+                    </Button>
+                </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* MODAL DUPLICADOS */}
       <Dialog open={dupModalOpen} onOpenChange={setDupModalOpen}>

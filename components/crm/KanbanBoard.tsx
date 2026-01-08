@@ -52,22 +52,19 @@ const isLeadOverdue = (lastUpdateStr: string, status: string) => {
 function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
     
-    // ✅ CORRECCIÓN DE BUILD: 'scale' no es válido en CSSProperties estándar de React/TS. 
-    // Lo movemos dentro de 'transform' para evitar el error de compilación.
+    // CORRECCIÓN: Style compatible con TS
     const style: React.CSSProperties = { 
         transform: CSS.Transform.toString(transform), 
         transition, 
         opacity: isDragging ? 0.3 : 1,
-        touchAction: 'none' // Importante para móviles
-    }
-
-    // Aplicamos la escala visualmente manipulando el transform string
-    if (isDragging && style.transform) {
-        style.transform += " scale(1.05)";
-    } else if (isDragging) {
-        style.transform = "scale(1.05)";
+        touchAction: 'none'
     }
     
+    // Aplicamos escala en el transform string manualmente para evitar error de tipo 'scale'
+    if (isDragging && style.transform) {
+        style.transform += " scale(1.05)";
+    }
+
     const isUrgent = lead.scheduled_for && new Date(lead.scheduled_for) <= new Date()
     const isOverdue = isLeadOverdue(lead.lastUpdate, lead.status)
     const isZombie = (lead as any).warning_sent === true
@@ -217,7 +214,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             })
             .subscribe()
         
-        // ✅ CORRECCIÓN DE BUILD: Chequeo seguro de window para evitar errores SSR durante el build
         if (typeof window !== 'undefined') { 
             audioRef.current = new Audio(ALARM_SOUND); 
             audioRef.current.loop = true; 
@@ -291,7 +287,12 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (!showConfirmCall) return;
         const leadId = showConfirmCall.id;
         stopAudio(); 
-        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: null } : l))
+        
+        // --- AQUÍ ESTABA EL ERROR ---
+        // 'scheduled_for' es string | undefined, no acepta null.
+        // Cambiamos null por undefined para el estado local.
+        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: undefined } : l))
+        
         setShowConfirmCall(null);
         setAlarmLead(null); 
         await supabase.from('leads').update({ scheduled_for: null, last_update: new Date().toISOString() }).eq('id', leadId)
@@ -329,8 +330,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     const sortLeads = (columnId: string) => leads.filter(l => l.status === columnId).sort(sortLeadsLogic)
 
-    // ✅ CORRECCIÓN DE BUILD: Búsqueda segura del lead activo.
-    // Esto evita el error de "undefined" durante el drag si el estado cambia.
+    // Render seguro
     const activeLeadForOverlay = activeId ? leads.find(l => l.id === activeId) : null;
 
     return (
@@ -354,7 +354,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </div>
                 {activeId && (<div className="fixed bottom-10 left-0 right-0 flex justify-center gap-12 z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-10 px-4"><DropZone id="zone-perdido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-red-200 shadow-2xl"><ArchiveX className="h-10 w-10 text-red-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-red-600">Perdido</span></DropZone><DropZone id="zone-vendido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-emerald-200 shadow-2xl"><Trophy className="h-10 w-10 text-emerald-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-emerald-600">¡Venta Lograda! 🚀</span></DropZone></div>)}
                 
-                {/* ✅ CORRECCIÓN DE BUILD: Renderizado condicional seguro */}
                 <DragOverlay>
                     {activeId && activeLeadForOverlay ? (
                         <div className="cursor-grabbing rotate-3 scale-105 transition-transform duration-200 shadow-2xl opacity-90">

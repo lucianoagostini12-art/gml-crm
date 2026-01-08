@@ -1,14 +1,14 @@
 import { createClient } from "@/lib/supabase"
 import { NextResponse } from "next/server"
 
-// 🔐 TU CONTRASEÑA DE SEGURIDAD (API KEY)
+// 🔐 TU CONTRASEÑA DE SEGURIDAD
 const API_SECRET = "gml_crm_secret_key_2024" 
 
 export async function POST(request: Request) {
     const supabase = createClient()
     
     try {
-        // 1. Verificación de Seguridad
+        // 1. VERIFICACIÓN DE SEGURIDAD
         const url = new URL(request.url)
         const apiKey = url.searchParams.get("key") 
 
@@ -16,83 +16,137 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "Acceso denegado" }, { status: 401 })
         }
 
-        // 2. Leer datos entrantes
+        // 2. LEER DATOS Y EVITAR ERRORES DE TEST DE WATI
         const body = await request.json()
-        console.log("📥 Webhook Recibido:", body)
+        console.log("📥 Webhook Recibido:", JSON.stringify(body))
 
-        // 🚨 DETECCIÓN DE TEST DE WATI (Para que no de error)
-        // WATI manda "senderPhone" cuando apretás el botón de test.
         if (body.waId === 'senderPhone' || body.info === 'test_notification') {
-             console.log("🧪 Test de conexión WATI recibido. Respondiendo OK.")
-             return NextResponse.json({ message: "Test recibido correctamente" }, { status: 200 })
+             return NextResponse.json({ message: "Test WATI recibido OK" }, { status: 200 })
         }
 
-        // 3. Detectar origen y normalizar datos
+        // 3. 🧠 INTELIGENCIA: RECUPERAR EL MENSAJE REAL (TEXTO O BOTÓN)
+        let finalMessage = body.text || ""
+        
+        // Si es respuesta de botón interactivo
+        if (body.interactiveButtonReply && body.interactiveButtonReply.title) {
+            finalMessage = `[Botón]: ${body.interactiveButtonReply.title}`
+        } 
+        // Si es respuesta de lista
+        else if (body.listReply && body.listReply.title) {
+            finalMessage = `[Lista]: ${body.listReply.title}`
+        }
+
+        // 4. DATOS BÁSICOS
         let phone = ""
         let name = "Desconocido"
-        let message = ""
-        let source = "Web/Externo"
-
+        
+        // WATI
         if (body.waId) {
-            // Es WATI Real
-            phone = String(body.waId).replace(/\D/g, "") // Solo números
+            phone = String(body.waId).replace(/\D/g, "")
             name = body.senderName || "Cliente WhatsApp"
-            message = body.text || "" 
-            source = "WATI / Bot"
         } 
+        // WEB
         else {
-            // Es Web
             phone = (body.phone || body.telefono || "").replace(/\D/g, "")
             name = body.name || body.nombre || "Cliente Web"
-            message = body.message || body.mensaje || body.notes || "Consulta Web"
-            source = body.source || "Web Principal"
+            finalMessage = body.message || body.mensaje || finalMessage || "Consulta Web"
         }
 
-        // ⚠️ CAMBIO CLAVE: Si no hay teléfono, devolvemos 200 (OK) igual.
-        // Esto evita que WATI deshabilite el webhook si llega basura.
         if (!phone) {
-            console.log("⚠️ Webhook ignorado (Sin teléfono válido).")
             return NextResponse.json({ message: "Ignored: No valid phone" }, { status: 200 })
         }
 
-        // 4. LÓGICA ANTI-DUPLICADOS
+        // 5. 🕵️ DETECTIVE DE ORIGEN Y PREPAGA
+        let detectedSource = body.source || "WATI / Bot" 
+        let detectedPrepaga = null
+
+        // A) ¿Viene de Meta Ads (CTWA)?
+        if (body.sourceId || body.sourceUrl || body.referral) {
+            detectedSource = "Meta Ads"
+        }
+
+        // B) Palabras Clave (Google Ads / Botones)
+        const msgLower = finalMessage.toLowerCase()
+
+        // --- REGLAS DEFINITIVAS ---
+        if (msgLower.includes("doctored")) {
+            detectedSource = "Google Ads"
+            detectedPrepaga = "DoctoRed"
+        } 
+        else if (msgLower.includes("prevencion") || msgLower.includes("prevención")) {
+            detectedSource = "Google Ads"
+            // IMPORTANTE: Lo guardamos como 'Prevencion' para que coincida con tu sistema (ops-types.ts)
+            detectedPrepaga = "Prevencion" 
+        } 
+        else if (msgLower.includes("sancor")) {
+            detectedSource = "Google Ads"
+            detectedPrepaga = "Sancor"
+        } 
+        else if (msgLower.includes("galeno")) {
+            detectedSource = "Google Ads"
+            detectedPrepaga = "Galeno"
+        } 
+        else if (msgLower.includes("swiss")) {
+            detectedSource = "Google Ads"
+            detectedPrepaga = "Swiss Medical"
+        } 
+        else if (msgLower.includes("osde")) {
+            detectedSource = "Google Ads"
+            detectedPrepaga = "Osde"
+        } 
+        else if (msgLower.includes("avalian")) {
+            detectedSource = "Google Ads"
+            detectedPrepaga = "Avalian"
+        }
+
+
+        // 6. BUSCAR SI YA EXISTE (LÓGICA ANTI-DUPLICADOS)
         const { data: existingLead } = await supabase
             .from('leads')
-            .select('id, chat, name, notes')
+            .select('id, chat, name, notes, prepaga, source')
             .eq('phone', phone)
             .maybeSingle()
 
         const now = new Date().toISOString()
         const timeString = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 
+        // CASO A: YA EXISTE -> ACTUALIZAMOS CHAT Y COMPLETAMOS DATOS FALTANTES
         if (existingLead) {
-            // ACTUALIZAR CHAT EXISTENTE
+            let currentChat = existingLead.chat
+            if (typeof currentChat === 'string') try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
+            if (!Array.isArray(currentChat)) currentChat = []
+
             const newChatMsg = {
                 user: "Cliente",
-                text: message,
+                text: finalMessage,
                 time: timeString,
                 isMe: false
             }
-            
-            let currentChat = existingLead.chat
-            if (typeof currentChat === 'string') {
-                try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
-            }
-            if (!Array.isArray(currentChat)) currentChat = []
-
             const updatedChat = [...currentChat, newChatMsg]
 
-            await supabase.from('leads').update({ 
+            const updates: any = { 
                 chat: updatedChat,
                 last_update: now
-            }).eq('id', existingLead.id)
+            }
+
+            // Solo completamos si faltaba el dato
+            if (!existingLead.prepaga && detectedPrepaga) {
+                updates.prepaga = detectedPrepaga
+            }
+            if ((!existingLead.source || existingLead.source === "WATI / Bot") && detectedSource !== "WATI / Bot") {
+                updates.source = detectedSource
+            }
+
+            await supabase.from('leads').update(updates).eq('id', existingLead.id)
 
             return NextResponse.json({ success: true, action: "updated" }, { status: 200 })
-        } else {
-            // CREAR NUEVO LEAD
+        } 
+        
+        // CASO B: NUEVO LEAD -> CREAMOS CON TODO
+        else {
             const initialChat = [{
                 user: "Cliente",
-                text: message,
+                text: finalMessage,
                 time: timeString,
                 isMe: false
             }]
@@ -100,11 +154,12 @@ export async function POST(request: Request) {
             const newLeadData = {
                 name: name,
                 phone: phone,
-                source: source,
+                source: detectedSource, 
                 status: 'nuevo',
                 agent_name: null,
                 chat: initialChat,
-                notes: `Ingreso automático vía ${source}. Primer mensaje: "${message}"`,
+                notes: `Ingreso automático. Mensaje: "${finalMessage}"`,
+                prepaga: detectedPrepaga,
                 created_at: now,
                 last_update: now
             }
@@ -113,7 +168,6 @@ export async function POST(request: Request) {
 
             if (error) {
                 console.error("Error DB:", error)
-                // Si falla la base de datos, ahí sí tiramos error 500 para saberlo.
                 return NextResponse.json({ error: error.message }, { status: 500 })
             }
 

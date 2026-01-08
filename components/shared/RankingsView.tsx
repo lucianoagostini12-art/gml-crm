@@ -29,12 +29,10 @@ export function RankingsView() {
             fromDate = new Date(now.getFullYear(), 0, 1)
         }
 
-        const successStatuses = ['ingresado', 'vendido', 'cumplidas', 'legajo', 'medicas', 'precarga']
-        
-        // 1. Traemos las ventas
+        // 1. Traemos las ventas (Agregamos 'prepaga' a la consulta)
         const { data: leadsData, error } = await supabase
             .from("leads")
-            .select("agent_name, capitas, created_at, status")
+            .select("agent_name, capitas, created_at, status, prepaga")
             .gte("created_at", fromDate.toISOString())
 
         if (error) {
@@ -60,7 +58,8 @@ export function RankingsView() {
         const map: Record<string, any> = {}
 
         if (leadsData) {
-            leadsData.filter((l: any) => successStatuses.includes(l.status)).forEach((l: any) => {
+            // ✅ FILTRO 1: Solo contamos las ventas CUMPLIDAS
+            leadsData.filter((l: any) => l.status === 'cumplidas').forEach((l: any) => {
                 const name = l.agent_name || "Sin Nombre"
                 if (!map[name]) {
                     map[name] = {
@@ -70,7 +69,12 @@ export function RankingsView() {
                         streak: 0,
                     }
                 }
-                map[name].sales += Number(l.capitas) || 1
+
+                // ✅ FILTRO 2: Regla AMPF (Cuenta como 1) vs Resto (Cuenta por cápitas)
+                const isAMPF = l.prepaga && l.prepaga.includes("AMPF")
+                const points = isAMPF ? 1 : (Number(l.capitas) || 1)
+
+                map[name].sales += points
             })
 
             // Convertimos a array + ordenamos
@@ -119,7 +123,7 @@ export function RankingsView() {
                     Salón de la Fama
                 </h2>
                 <p className="text-slate-500 font-medium">
-                    Ranking {period === "month" ? "Mensual" : "Anual"} de Cápitas
+                    Ranking {period === "month" ? "Mensual" : "Anual"} de Cápitas (Solo Cumplidas)
                 </p>
 
                 <div className="flex justify-center gap-2 mt-4 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg w-fit mx-auto">
@@ -148,8 +152,8 @@ export function RankingsView() {
 
             {!loading && rankings.length === 0 && (
                 <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    <p className="text-slate-400 font-medium">Aún no hay ventas registradas en este período.</p>
-                    <p className="text-xs text-slate-400 mt-1">¡Sé el primero en aparecer acá!</p>
+                    <p className="text-slate-400 font-medium">Aún no hay ventas CUMPLIDAS en este período.</p>
+                    <p className="text-xs text-slate-400 mt-1">¡Sé el primero en cerrar una venta!</p>
                 </div>
             )}
 

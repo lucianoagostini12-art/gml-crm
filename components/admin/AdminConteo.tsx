@@ -9,8 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Calculator,
   Filter,
-  DollarSign,
-  Crosshair,
   RefreshCw,
   CheckCircle2,
   TrendingUp,
@@ -130,21 +128,36 @@ export function AdminConteo() {
     let totalSalesGlobal = 0
     let totalFulfilledGlobal = 0
 
+    // ✅ HELPER: Regla de Negocio (AMPF = 1, Resto = Cápitas)
+    const calculatePoints = (items: any[]) => {
+        return items.reduce((acc, item) => {
+            const isAMPF = item.prepaga && item.prepaga.includes("AMPF")
+            const points = isAMPF ? 1 : (Number(item.capitas) || 1)
+            return acc + points
+        }, 0)
+    }
+
     const processedAgents = agentNames.map((name) => {
       const agentLeads = safeLeads.filter((l: any) => norm(l.agent_name) === norm(name))
 
       // FILTRO: Solo lo que se considera venta
       const salesLeads = agentLeads.filter((l: any) => SALE_STATUSES.includes(norm(l.status)))
 
-      // Contadores
-      const daily = salesLeads.filter((l: any) => new Date(l.created_at).toDateString() === now.toDateString()).length
-      const weekly = salesLeads.filter((l: any) => new Date(l.created_at) >= weekStart).length
+      // Contadores (Calculados por PUNTOS/CAPITAS)
+      const dailyLeads = salesLeads.filter((l: any) => new Date(l.created_at).toDateString() === now.toDateString())
+      const daily = calculatePoints(dailyLeads)
+
+      const weeklyLeads = salesLeads.filter((l: any) => new Date(l.created_at) >= weekStart)
+      const weekly = calculatePoints(weeklyLeads)
       
-      const monthly = salesLeads.length
-      const fulfilled = agentLeads.filter((l: any) => norm(l.status) === "cumplidas").length
+      const monthly = calculatePoints(salesLeads)
+
+      const fulfilledLeads = agentLeads.filter((l: any) => norm(l.status) === "cumplidas")
+      const fulfilled = calculatePoints(fulfilledLeads)
+
       const efficiency = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
 
-      const passCount = agentLeads.filter((l: any) => norm(l.status) === "pass").length
+      const passCount = agentLeads.filter((l: any) => norm(l.status) === "pass").length // Pass sigue por unidad
 
       const recentMs = now.getTime() - 600000 // 10 min
       const status = agentLeads.some((l: any) => {
@@ -168,23 +181,26 @@ export function AdminConteo() {
         ratio: `1:${monthly > 0 ? Math.round(100 / monthly) : 0}`,
         status,
         lastAction: "Hoy",
-        // CORRECCIÓN: Usamos 'prepaga' explícitamente en lugar de 'operator'
+        // Desglose por prepaga (Calculado por PUNTOS)
         breakdown: [...new Set(salesLeads.map((l: any) => l.prepaga))] 
           .filter(Boolean)
           .map((prepName: any) => ({
-            name: prepName, // Ahora mostrará la prepaga
-            sold: salesLeads.filter((l: any) => l.prepaga === prepName).length,
-            fulfilled: salesLeads.filter((l: any) => l.prepaga === prepName && norm(l.status) === "cumplidas").length,
+            name: prepName, 
+            sold: calculatePoints(salesLeads.filter((l: any) => l.prepaga === prepName)),
+            fulfilled: calculatePoints(salesLeads.filter((l: any) => l.prepaga === prepName && norm(l.status) === "cumplidas")),
           })),
       }
     })
 
-    // 5. Estadísticas Globales de Prepaga (CORREGIDO TAMBIÉN AQUÍ)
+    // 5. Estadísticas Globales de Prepaga
     const prepagas = [...new Set(safeLeads.map((l: any) => l.prepaga))].filter(Boolean)
     const pStats = prepagas.map((p: any) => {
       const pLeads = safeLeads.filter((l: any) => l.prepaga === p)
-      const sold = pLeads.length
-      const fulfilled = pLeads.filter((l: any) => norm(l.status) === "cumplidas").length
+      
+      const sold = calculatePoints(pLeads)
+      const pFulfilledLeads = pLeads.filter((l: any) => norm(l.status) === "cumplidas")
+      const fulfilled = calculatePoints(pFulfilledLeads)
+
       return {
         name: p,
         totalSold: sold,
@@ -198,9 +214,9 @@ export function AdminConteo() {
     setPrepagaStats(pStats)
 
     // --- CÁLCULO DE TOTALES (CONECTADO A FACTURACIÓN OPS) ---
-    const fulfilledLeads = safeLeads.filter((l: any) => norm(l.status) === "cumplidas")
+    const fulfilledLeadsAll = safeLeads.filter((l: any) => norm(l.status) === "cumplidas")
     
-    const totalRevenue = fulfilledLeads.reduce((acc: number, curr: any) => {
+    const totalRevenue = fulfilledLeadsAll.reduce((acc: number, curr: any) => {
         const billingVal = Number(curr.billing_price_override)
         const salesVal = Number(curr.price) || Number(curr.full_price)
         const finalVal = !isNaN(billingVal) && billingVal !== 0 ? billingVal : (salesVal || 0)

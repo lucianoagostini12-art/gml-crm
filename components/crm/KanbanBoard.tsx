@@ -362,6 +362,10 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                     notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes
                 };
 
+                // ✅ AGREGADO: Permitir pasar TYPE y SUB_STATE si existen (Fix de Logos)
+                if (leadData.type) payload.type = leadData.type;
+                if (leadData.sub_state) payload.sub_state = leadData.sub_state;
+
                 // Campos opcionales (solo si tienen valor)
                 if (leadData.afiliado_number) payload.afiliado_number = leadData.afiliado_number;
                 if (leadData.cuit) payload.cuit = leadData.cuit;

@@ -86,6 +86,11 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
 
   const cleanDate = (val: any) => (val && val !== "") ? val : null;
 
+  // ✅ Limpia texto para evitar conflicto con el separador de notas '|' del OpsModal
+  const cleanTextForNotes = (val: string) => {
+    if (!val) return "";
+    return val.replace(/\|/g, "-"); // Reemplaza pipes por guiones
+  }
 
   // --- CONFIRMACIÓN PASS ---
   const handleConfirmPass = () => {
@@ -93,8 +98,11 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       return alert("Por favor, completá Nombre y DNI como mínimo.")
     }
     
+    // Limpiamos la observación para que no rompa el visor
+    const obsLimpia = cleanTextForNotes(passData.observations);
+
     const dbData = {
-      type: 'pass',
+      type: 'pass', // ✅ ESTO YA ESTABA BIEN
       status: 'ingresado', 
       sub_state: 'auditoria_pass',
       last_update: new Date().toISOString(),
@@ -105,9 +113,8 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
       prepaga: cleanStr(passData.prepaga),
       plan: cleanStr(passData.plan),
       
-      notes: passData.observations ? `[PASS - OBS]: ${passData.observations}` : null,
+      notes: obsLimpia ? `[PASS - OBS]: ${obsLimpia}` : null,
 
-      // ✅ ARCHIVOS ACTIVOS (Guardamos metadata en JSONB)
       files: passData.files.map(f => ({ name: f.name, size: f.size, type: f.type }))
     };
 
@@ -123,8 +130,12 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
         onOpenChange={handleOpenChange} 
         onConfirm={(wizardData: any) => {
           
+          // Limpiamos la observación del paso 7
+          const obsVentaLimpia = cleanTextForNotes(wizardData.obs_venta);
+          
           // CONSTRUCCIÓN DEL OBJETO FINAL
           const dbData = {
+            type: 'alta', // ✅ AGREGADO: Importante para distinguir logo VERDE
             status: 'ingresado', 
             sub_state: 'ingresado',
             last_update: new Date().toISOString(),
@@ -142,6 +153,10 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             address_zip: cleanStr(wizardData.cp),
             province: cleanStr(wizardData.provincia),
             
+            // Mapeo de campos Paso 7
+            prepaga: cleanStr(wizardData.prepaga),
+            plan: cleanStr(wizardData.plan),
+            
             // Datos de Venta
             affiliation_type: cleanStr(wizardData.tipoGrupo), 
             
@@ -155,7 +170,8 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             labor_condition: cleanStr(wizardData.condicion), 
             employer_cuit: cleanDni(wizardData.cuitEmpleador), 
             
-            notes: `Clave Fiscal: ${wizardData.claveFiscal} | Cat: ${wizardData.catMonotributo} | Banco: ${wizardData.bancoEmisor}` + (wizardData.notes ? `\n\n[OBS]: ${wizardData.notes}` : ''),
+            notes: `Clave Fiscal: ${wizardData.claveFiscal} - Cat: ${wizardData.catMonotributo} - Banco: ${wizardData.bancoEmisor}` + 
+                   (obsVentaLimpia ? `\n\n[OBS VENTA]: ${obsVentaLimpia}` : ''),
 
             payment_method: cleanStr(wizardData.tipoPago), 
 
@@ -169,7 +185,6 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm }: WonLeadDialogPr
             descuento: cleanNum(wizardData.descuento),
             total_a_pagar: cleanNum(wizardData.total_a_pagar),
 
-            // ✅ ARCHIVOS ACTIVOS (Guardamos metadata en JSONB)
             files: (wizardData.archivos || []).map((f: any) => ({ name: f.name, size: f.size, type: f.type }))
           }
 

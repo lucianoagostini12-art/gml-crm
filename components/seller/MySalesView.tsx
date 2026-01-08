@@ -14,7 +14,8 @@ import {
   DollarSign, XCircle, AlertTriangle,
   Clock, MessageSquare, Send, User, MapPin, Paperclip,
   CheckCheck, UploadCloud, Calendar as CalendarIcon,
-  FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock, Trash2, FileText, ChevronLeft, ChevronRight, Users
+  FileUp, RefreshCw, CheckCircle2, ShieldCheck, Lock, Trash2, FileText, ChevronLeft, ChevronRight, Users,
+  UserPlus, ArrowRightLeft // ✅ NUEVOS IMPORTES
 } from "lucide-react"
 
 // ✅ Storage config
@@ -348,54 +349,82 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
           const lastMsg = latestMsgMap[sale.id]
           const hasNewMessage = lastMsg && lastMsg.sender !== userName
 
+          // ✅ LÓGICA ROBUSTA PARA DETECTAR PASS (Igual que en OpsList/Modal)
+          const isPass = sale.type === 'pass' || sale.sub_state === 'auditoria_pass' || sale.source === 'pass'
+          
+          // Color de borde (Prioridad: Rojo rechazo > Violeta Pass > Verde Alta)
+          const borderColorClass = isRejected ? "border-l-red-500" : (isPass ? "border-l-purple-500" : "border-l-blue-500")
+
           return (
             <Card
               key={sale.id}
               onClick={() => setSelectedSale(sale)}
-              className={`cursor-pointer hover:shadow-xl hover:translate-x-1 transition-all border-l-[6px] relative group ${isRejected ? "border-l-red-500 bg-red-50/10" : "border-l-blue-500"} shadow-sm`}
+              className={`cursor-pointer hover:shadow-xl hover:translate-x-1 transition-all border-l-[6px] relative group ${borderColorClass} ${isRejected ? "bg-red-50/10" : ""} shadow-sm`}
             >
-              <CardContent className="p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-1">
-                      <h4 className="font-bold text-lg text-slate-800 truncate">{sale.name || "Sin Nombre"}</h4>
-                      
-                      {/* BADGE PREPAGA MEJORADO */}
-                      <Badge variant="outline" className={`text-[9px] font-bold h-5 px-2 border ${getPrepagaBadge(sale.prepaga)}`}>
-                          {sale.prepaga}
-                      </Badge>
-
-                      {hasNewMessage && (
-                          <Badge className="bg-orange-500 text-white border-0 animate-pulse text-[9px] h-5 px-2">
-                              <MessageSquare size={10} className="mr-1" fill="currentColor"/> 1
-                          </Badge>
-                      )}
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1">
-                      <CalendarIcon size={12} /> {new Date(sale.created_at).toLocaleDateString()}
-                    </span>
-                    <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
-                        Plan: <span className="font-bold text-slate-700">{sale.plan}</span>
-                    </span>
-                    
-                    {/* INFO ADICIONAL: CAPITAS */}
-                    {sale.capitas > 0 && (
-                        <span className="flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 ml-2" title="Cantidad de personas en el plan">
-                            <Users size={10}/> {sale.capitas} Cápita{sale.capitas > 1 ? 's' : ''}
-                        </span>
-                    )}
-
-                    {sale.sub_state && (
-                      <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase ml-auto sm:ml-0">
-                        {sale.sub_state}
-                      </span>
-                    )}
-                  </div>
-                </div>
+              {/* ✅ DISEÑO PREMIUM (Opción 1): Flex con Icono a la izquierda */}
+              <CardContent className="p-4 flex items-center gap-4">
                 
-                <div className={`px-4 py-2 rounded-lg border flex items-center gap-2 text-[10px] font-black uppercase tracking-wider shadow-sm whitespace-nowrap shrink-0 ${adminStatus.color}`}>
-                  {adminStatus.icon} {adminStatus.label}
+                {/* 1. BLOQUE DE COLOR CON ÍCONO (Tipo OpsList) */}
+                <div className={`h-12 w-12 rounded-xl flex items-center justify-center font-black shadow-sm shrink-0 ${isPass ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
+                    {isPass ? <ArrowRightLeft size={20} /> : <UserPlus size={20} />}
+                </div>
+
+                <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      
+                      {/* 2. AVATAR + NOMBRE + BADGES */}
+                      <div className="flex items-center gap-3 mb-1">
+                          {/* Avatar del cliente */}
+                          <Avatar className="h-8 w-8 border border-slate-200">
+                              <AvatarFallback className="font-bold text-xs text-slate-600 bg-slate-100">
+                                  {sale.name?.substring(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                          </Avatar>
+
+                          <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-bold text-lg text-slate-800 truncate leading-none">{sale.name || "Sin Nombre"}</h4>
+                                {/* 3. DNI ESTILO CÓDIGO */}
+                                <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-[10px] font-bold text-slate-500">
+                                    {sale.dni || "S/DNI"}
+                                </span>
+                              </div>
+                              
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="outline" className={`text-[9px] font-bold h-4 px-1.5 border ${getPrepagaBadge(sale.prepaga)}`}>
+                                    {sale.prepaga}
+                                </Badge>
+                                {hasNewMessage && (
+                                    <Badge className="bg-orange-500 text-white border-0 animate-pulse text-[9px] h-4 px-1.5">
+                                        <MessageSquare size={10} className="mr-1" fill="currentColor"/> 1
+                                    </Badge>
+                                )}
+                              </div>
+                          </div>
+                      </div>
+                      
+                      {/* Sub-info */}
+                      <div className="flex items-center gap-3 ml-11">
+                        <span className="text-xs font-bold text-slate-400 flex items-center gap-1">
+                          <CalendarIcon size={12} /> {new Date(sale.created_at).toLocaleDateString()}
+                        </span>
+                        
+                        <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
+                            Plan: <span className="font-bold text-slate-700">{sale.plan}</span>
+                        </span>
+                        
+                        {sale.sub_state && (
+                          <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase hidden sm:inline-block">
+                            {sale.sub_state}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Badge de Estado Administrativo */}
+                    <div className={`px-4 py-2 rounded-lg border flex items-center gap-2 text-[10px] font-black uppercase tracking-wider shadow-sm whitespace-nowrap shrink-0 ${adminStatus.color}`}>
+                      {adminStatus.icon} {adminStatus.label}
+                    </div>
                 </div>
               </CardContent>
             </Card>

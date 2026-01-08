@@ -68,6 +68,9 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
                 // Obtenemos los colores del estado principal (Igual que en OpsModal)
                 const statusStyle = getStatusColor(op.status);
 
+                // ✅ LOGICA ROBUSTA PARA DETECTAR PASS
+                const isPass = op.type === 'pass' || op.subState === 'auditoria_pass' || op.source === 'pass';
+
                 return (
                     <div 
                         key={op.id} 
@@ -76,8 +79,9 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
                     >
                         {/* 1. DATOS PRINCIPALES */}
                         <div className="flex items-center gap-4 w-[40%]">
-                            <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-black text-white shadow-sm shrink-0 ${op.type === 'alta' ? 'bg-green-500' : 'bg-purple-600'}`}>
-                                {op.type === 'alta' ? <UserPlus size={18} /> : <ArrowRightLeft size={18} />}
+                            {/* ✅ ICONO DINÁMICO: PASS vs ALTA (Estilo unificado con Modal) */}
+                            <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-black shadow-sm shrink-0 ${isPass ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
+                                {isPass ? <ArrowRightLeft size={18} /> : <UserPlus size={18} />}
                             </div>
                             <div className="overflow-hidden min-w-0">
                                 <h3 className="font-black text-slate-800 text-base leading-tight truncate">{op.clientName}</h3>

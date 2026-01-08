@@ -21,6 +21,7 @@ type LeadRow = {
   price: number | null
   status: string | null
   created_at: string
+  capitas: number | null // ✅ AGREGADO: Para cálculo correcto
 }
 
 type CommissionSettings = {
@@ -48,7 +49,7 @@ const DEFAULT_SETTINGS: CommissionSettings = {
 
   special_unit_value: 30000,
   special_pct: 0.1,
-  special_operator_keywords: ["A1", "500", "Sancor"], // Palabras clave para detectar ventas especiales
+  special_operator_keywords: ["A1", "500", "Sancor"],
 
   tier1_qty: 6,
   tier1_pct: 0.15,
@@ -142,48 +143,28 @@ export function AdminCommissions() {
     } catch {}
   }
 
-  // ✅ 3. Trae Vendedores Reales (Profiles + Commission Staff)
+  // ✅ 3. Trae Vendedores Reales (Profiles) - CONECTADO A WORK_HOURS REAL
   const fetchSellers = async () => {
-    // A. Traemos perfiles con rol seller
-    const { data: profs, error } = await supabase.from("profiles").select("id, full_name, role").eq("role", "seller")
+    // Traemos perfiles con rol seller Y sus horas cargadas
+    const { data: profs, error } = await supabase.from("profiles").select("id, full_name, role, work_hours").eq("role", "seller")
     if (error) {
       setSellers([])
       return
     }
 
-    const base = (profs || [])
-      .map((p: any) => ({
-        id: String(p.id),
-        name: String(p.full_name ?? "").trim(),
-      }))
-      .filter((p: any) => p.id && p.name)
+    const merged: Seller[] = (profs || [])
+      .map((p: any) => {
+        // Detectamos horas: Si el string contiene "8", son 8hs. Si no, default 5hs.
+        const hStr = String(p.work_hours || "5")
+        const hours = hStr.includes("8") ? 8 : 5
 
-    if (base.length === 0) {
-      setSellers([])
-      return
-    }
-
-    // B. Cruzamos con tabla de horas (commission_staff)
-    const ids = base.map((b: any) => b.id)
-    const { data: staffRows } = await supabase.from("commission_staff").select("id, hours, is_active").in("id", ids)
-
-    const hoursMap = new Map<string, { hours: number; is_active: boolean }>()
-    ;(staffRows || []).forEach((r: any) => {
-      hoursMap.set(String(r.id), { hours: Number(r.hours ?? 5), is_active: Boolean(r.is_active ?? true) })
-    })
-
-    const merged: Seller[] = base
-      .map((b: any) => {
-        const st = hoursMap.get(b.id)
         return {
-          id: b.id,
-          name: b.name,
-          hours: st?.hours ?? 5, // Default 5 horas si no está configurado
-          _active: st?.is_active ?? true,
-        } as any
+          id: String(p.id),
+          name: String(p.full_name ?? "").trim(),
+          hours: hours,
+        }
       })
-      .filter((s: any) => s._active)
-      .map(({ _active, ...rest }: any) => rest)
+      .filter((p) => p.id && p.name)
       .sort((a, b) => a.name.localeCompare(b.name, "es"))
 
     setSellers(merged)
@@ -196,7 +177,7 @@ export function AdminCommissions() {
 
     const { data, error } = await supabase
       .from("leads")
-      .select("agent_name, prepaga, plan, price, status, created_at") // Corregido: traemos prepaga y plan
+      .select("agent_name, prepaga, plan, price, status, created_at, capitas")
       .gte("created_at", startDate)
       .lte("created_at", endDate)
 
@@ -206,7 +187,6 @@ export function AdminCommissions() {
     }
 
     const safe = Array.isArray(data) ? (data as LeadRow[]) : []
-    // Filtramos SOLO las que Ops marcó como cumplidas
     const onlyFulfilled = safe.filter((l) => norm(l.status) === "cumplidas")
     setLeads(onlyFulfilled)
   }
@@ -227,7 +207,7 @@ export function AdminCommissions() {
     const channel = supabase
       .channel("commissions_live")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => fetchLeads())
-      .on("postgres_changes", { event: "*", schema: "public", table: "commission_staff" }, () => fetchSellers())
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchSellers()) // Escucha cambios en perfiles
       .on("postgres_changes", { event: "*", schema: "public", table: "commission_settings" }, () => fetchSettings())
       .subscribe()
 
@@ -243,33 +223,43 @@ export function AdminCommissions() {
 
     const agentLeads = leads.filter((l) => norm(l.agent_name) === norm(seller.name))
 
-    // Detección de Especiales: Buscamos en Prepaga o Plan (más seguro que operator)
-    const special = agentLeads.filter((l) => {
-      const textToCheck = norm(l.prepaga) + " " + norm(l.plan)
-      return keywords.some((k) => k && textToCheck.includes(k))
-    }).length
+    // Detección de Especiales (Unidades separadas)
+    const specialLeads = agentLeads.filter((l) => {
+        const textToCheck = norm(l.prepaga) + " " + norm(l.plan)
+        return keywords.some((k) => k && textToCheck.includes(k))
+    })
+    
+    // Detección de Ventas de Escala (Generales)
+    const scaleLeads = agentLeads.filter((l) => {
+        const textToCheck = norm(l.prepaga) + " " + norm(l.plan)
+        return !keywords.some((k) => k && textToCheck.includes(k))
+    })
 
-    const scaleQty = agentLeads.length - special
+    const specialQty = specialLeads.length
+    
+    // ✅ CÁLCULO DE PUNTOS DE ESCALA (Regla AMPF = 1, Resto = Cápitas)
+    const scalePoints = scaleLeads.reduce((acc, lead) => {
+        const isAMPF = lead.prepaga && lead.prepaga.toLowerCase().includes("ampf")
+        const points = isAMPF ? 1 : (Number(lead.capitas) || 1)
+        return acc + points
+    }, 0)
 
     let commissionTotal = 0
     const breakdown: string[] = []
 
-    // 1. Cálculo Especiales
-    const specialRevenue = special * settings.special_unit_value * settings.special_pct
-    if (special > 0) {
+    // 1. Cálculo Especiales (Pago fijo unitario)
+    const specialRevenue = specialQty * settings.special_unit_value * settings.special_pct
+    if (specialQty > 0) {
       commissionTotal += specialRevenue
-      breakdown.push(`Esp. (${settings.special_operator_keywords.join("/")}) : ${special} vtas = $${Math.round(specialRevenue).toLocaleString("es-AR")}`)
-    } else {
-      // Opcional: mostrar 0 si quieres que sepan que no hubo especiales
-      // breakdown.push(`Esp.: 0`) 
+      breakdown.push(`Esp. (${settings.special_operator_keywords.join("/")}) : ${specialQty} unid. = $${Math.round(specialRevenue).toLocaleString("es-AR")}`)
     }
 
-    // 2. Cálculo Escala (Absorción)
+    // 2. Cálculo Escala (Absorción basada en PUNTOS)
     const absorbed = seller.hours === 5 ? settings.absorbed_5h : settings.absorbed_8h
     let scaleRevenue = 0
 
-    if (scaleQty > absorbed) {
-      let remaining = scaleQty - absorbed
+    if (scalePoints > absorbed) {
+      let remaining = scalePoints - absorbed
 
       // Tier 1
       const t1 = Math.min(remaining, settings.tier1_qty)
@@ -296,15 +286,15 @@ export function AdminCommissions() {
       }
 
       commissionTotal += scaleRevenue
-      breakdown.push(`Escala: ${scaleQty} vtas = $${Math.round(scaleRevenue).toLocaleString("es-AR")}`)
+      breakdown.push(`Escala: ${scalePoints} pts = $${Math.round(scaleRevenue).toLocaleString("es-AR")}`)
     } else {
-      breakdown.push(`Escala: ${scaleQty} vtas (Absorbidas por base ${absorbed})`)
+      breakdown.push(`Escala: ${scalePoints} pts (Absorbidos por base ${absorbed})`)
     }
 
     return {
       total: Math.round(commissionTotal),
       details: breakdown,
-      salesQty: agentLeads.length,
+      salesQty: scalePoints + specialQty, // Muestra Total de Puntos para coherencia
     }
   }
 
@@ -315,7 +305,7 @@ export function AdminCommissions() {
           <h2 className="text-3xl font-black text-slate-800 flex items-center gap-2">
             <Calculator className="h-8 w-8 text-green-600" /> Liquidación Real
           </h2>
-          <p className="text-slate-500">Comisiones basadas en ventas cumplidas.</p>
+          <p className="text-slate-500">Comisiones basadas en ventas cumplidas (Puntaje x Cápita).</p>
         </div>
 
         <div className="flex gap-2 items-center">
@@ -364,7 +354,7 @@ export function AdminCommissions() {
               <TableRow>
                 <TableHead className="pl-6">Agente</TableHead>
                 <TableHead className="text-center">Jornada</TableHead>
-                <TableHead className="text-center">Ventas Cumplidas</TableHead>
+                <TableHead className="text-center">Puntos / Cápitas</TableHead>
                 <TableHead>Desglose de Escala</TableHead>
                 <TableHead className="text-right text-green-700 font-bold bg-green-50/50 pr-6">A Pagar</TableHead>
               </TableRow>

@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Users, Eye, Mail, Activity, Megaphone, X, Clock, Pencil, Save, UserCog, Send, MessageSquare } from "lucide-react"
+import { Users, Eye, Activity, Megaphone, X, Clock, Pencil, Save, UserCog, Send, MessageSquare, DollarSign, FileText, User } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle, DialogFooter, DialogHeader, DialogDescription } from "@/components/ui/dialog"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -14,8 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { formatDistanceToNow } from "date-fns"
-import { es } from "date-fns/locale"
+import { Separator } from "@/components/ui/separator"
 
 // --- COLUMNAS DEL VENDEDOR (IGUAL QUE EN KANBANBOARD) ---
 const SELLER_COLUMNS = [
@@ -413,7 +412,7 @@ export function AdminTeam() {
                 </DialogContent>
             </Dialog>
 
-            {/* FICHA LEAD (CHAT UNIFICADO) */}
+            {/* FICHA LEAD (CHAT UNIFICADO + DETALLE PREMIUM) */}
             <Sheet open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
                 <SheetContent className="sm:max-w-[500px] flex flex-col p-0">
                     {selectedLead && (
@@ -424,12 +423,102 @@ export function AdminTeam() {
                                     <SheetDescription className="flex gap-2"><Badge variant="outline">{selectedLead.source || 'Sin origen'}</Badge><Badge>{selectedLead.status}</Badge></SheetDescription>
                                 </SheetHeader>
                             </div>
-                            <Tabs defaultValue="chat" className="flex-1 flex flex-col">
-                                <TabsList className="w-full rounded-none border-b bg-white"><TabsTrigger value="info" className="flex-1">Datos</TabsTrigger><TabsTrigger value="chat" className="flex-1">Chat Supervisión</TabsTrigger></TabsList>
-                                <TabsContent value="info" className="flex-1 p-6 space-y-4">
-                                    <div className="bg-white p-3 rounded border"><p className="text-xs font-bold text-slate-400 uppercase">Teléfono</p><p className="font-mono text-lg">{selectedLead.phone || '-'}</p></div>
-                                    <div className="bg-white p-3 rounded border"><p className="text-xs font-bold text-slate-400 uppercase">Notas</p><p className="text-sm italic">{selectedLead.notes || 'Sin notas'}</p></div>
+                            <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden">
+                                <TabsList className="w-full rounded-none border-b bg-white"><TabsTrigger value="info" className="flex-1">Ficha Técnica</TabsTrigger><TabsTrigger value="chat" className="flex-1">Chat Supervisión</TabsTrigger></TabsList>
+                                
+                                {/* 🟢 NUEVO CONTENIDO DETALLADO */}
+                                <TabsContent value="info" className="flex-1 p-0 h-full overflow-hidden">
+                                    <ScrollArea className="h-full">
+                                        <div className="p-6 space-y-6">
+                                            {/* SECCIÓN 1: COTIZACIÓN */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                                    <DollarSign className="h-4 w-4" /> Detalle de Cotización
+                                                </h4>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Prepaga</p>
+                                                        <p className="font-bold text-slate-800">{selectedLead.prepaga || '—'}</p>
+                                                    </div>
+                                                    <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Plan</p>
+                                                        <p className="font-bold text-slate-800">{selectedLead.plan || '—'}</p>
+                                                    </div>
+                                                    <div className="bg-green-50 p-3 rounded-xl border border-green-100 shadow-sm col-span-2">
+                                                        <p className="text-[10px] font-bold text-green-600 uppercase">Precio Cotizado</p>
+                                                        <p className="text-2xl font-black text-green-700 tracking-tight">
+                                                            $ {selectedLead.quoted_price || selectedLead.price || '0'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <Separator />
+
+                                            {/* SECCIÓN 2: DATOS DEL CLIENTE */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                                    <User className="h-4 w-4" /> Datos Personales
+                                                </h4>
+                                                <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                                                    <div className="p-3 border-b border-slate-50 flex justify-between">
+                                                        <span className="text-xs text-slate-500">DNI / CUIT</span>
+                                                        <span className="text-xs font-bold font-mono">{selectedLead.dni || selectedLead.cuit || '—'}</span>
+                                                    </div>
+                                                    <div className="p-3 border-b border-slate-50 flex justify-between">
+                                                        <span className="text-xs text-slate-500">Email</span>
+                                                        <span className="text-xs font-bold">{selectedLead.email || '—'}</span>
+                                                    </div>
+                                                    <div className="p-3 border-b border-slate-50 flex justify-between">
+                                                        <span className="text-xs text-slate-500">Teléfono</span>
+                                                        <span className="text-xs font-bold font-mono">{selectedLead.phone || '—'}</span>
+                                                    </div>
+                                                    <div className="p-3 flex justify-between">
+                                                        <span className="text-xs text-slate-500">Edad / Nac.</span>
+                                                        <span className="text-xs font-bold">{selectedLead.dob || '—'}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* SECCIÓN 3: GRUPO FAMILIAR (Si tiene) */}
+                                            {(selectedLead.family_members?.length > 0 || selectedLead.hijos?.length > 0) && (
+                                                <>
+                                                    <Separator />
+                                                    <div className="space-y-3">
+                                                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                                            <Users className="h-4 w-4" /> Grupo Familiar
+                                                        </h4>
+                                                        <div className="bg-white rounded-xl border border-slate-100 p-1">
+                                                            <table className="w-full text-xs">
+                                                                <tbody>
+                                                                    {(selectedLead.family_members || selectedLead.hijos).map((f: any, idx: number) => (
+                                                                        <tr key={idx} className="border-b border-slate-50 last:border-0">
+                                                                            <td className="p-2 font-bold text-slate-700">{f.name || f.nombre}</td>
+                                                                            <td className="p-2 text-right font-mono text-slate-500">{f.dni || f.edad}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            <Separator />
+
+                                            {/* SECCIÓN 4: NOTAS */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                                    <FileText className="h-4 w-4" /> Notas del Vendedor
+                                                </h4>
+                                                <div className="bg-yellow-50/50 p-4 rounded-xl border border-yellow-100 text-sm text-slate-600 italic leading-relaxed">
+                                                    {selectedLead.notes ? `"${selectedLead.notes}"` : "Sin observaciones registradas."}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </ScrollArea>
                                 </TabsContent>
+
                                 <TabsContent value="chat" className="flex-1 flex flex-col p-0 h-full">
                                     <ScrollArea className="flex-1 p-4 bg-slate-50">
                                         <div className="space-y-4">

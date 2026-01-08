@@ -202,11 +202,11 @@ export function OpsModal({
         const { data } = await supabase.from('lead_status_history').select('*').eq('lead_id', op.id).order('changed_at', { ascending: true })
         if(data) setRealHistory(data)
     }
+    // ✅ CORRECCIÓN 1: Traer TODOS los vendedores desde 'profiles', no desde 'leads'
     const fetchSellers = async () => {
-        const { data } = await supabase.from('leads').select('agent_name').not('agent_name', 'is', null)
+        const { data } = await supabase.from('profiles').select('full_name')
         if (data) {
-            const unique = Array.from(new Set(data.map(i => i.agent_name))).map(name => ({ full_name: name }))
-            setSellersList(unique)
+            setSellersList(data)
         }
     }
 
@@ -432,9 +432,18 @@ export function OpsModal({
                     {/* CABECERA */}
                     <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between shrink-0">
                         <div className="flex items-center gap-6">
-                            <div className={`h-16 w-16 rounded-2xl flex items-center justify-center shadow-md ${localOp.source==='alta' || localOp.type==='alta' ?'bg-green-100 text-green-600':'bg-purple-600 text-white'}`}>
-                                {localOp.source==='alta' || localOp.type==='alta' ? <UserPlus size={32}/> : <ArrowRightLeft size={32}/>}
+                            
+                            {/* ✅ CORRECCIÓN 2: LÓGICA DE ÍCONO BLINDADA: Mira type, sub_state y source */}
+                            <div className={`h-16 w-16 rounded-2xl flex items-center justify-center shadow-md ${
+                                (localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass' || localOp.source === 'pass') 
+                                ? 'bg-purple-100 text-purple-600' 
+                                : 'bg-green-100 text-green-600'
+                            }`}>
+                                {(localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass' || localOp.source === 'pass') 
+                                ? <ArrowRightLeft size={32}/> 
+                                : <UserPlus size={32}/>}
                             </div>
+
                             <div className="space-y-1">
                                 <div className="flex items-center gap-3">
                                     <DialogTitle className="text-3xl font-black text-slate-800 leading-none">{localOp.name || "Sin Nombre"}</DialogTitle>

@@ -57,17 +57,7 @@ type Operation = {
     cbu_tarjeta?: string
     metodoPago?: string
     cuitEmpleador?: string
-}
-
-// --- CONFIGURACIÓN ESTÁTICA ---
-const SELLERS_DB: Record<string, { shift: '5hs' | '8hs', photo: string }> = {
-    "Maca": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Maca" },
-    "Agus": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Agus" },
-    "Lu T": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=LuT" },
-    "Eve": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Eve" },
-    "Iara": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Iara" },
-    "Abru": { shift: '5hs', photo: "https://i.pravatar.cc/150?u=Abru" },
-    "Ornella Muchiutti": { shift: '8hs', photo: "https://i.pravatar.cc/150?u=Orne" }
+    capitas?: number 
 }
 
 // --- REGLAS INICIALES ---
@@ -146,8 +136,30 @@ export function OpsBilling() {
     const [filters, setFilters] = useState({ seller: 'all', prepaga: 'all' })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
+
+    // ✅ NUEVO: MAPA DE VENDEDORES (Para horas y fotos)
+    const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
     
     // --- FETCH ---
+    const fetchSellers = async () => {
+        const { data: profiles } = await supabase.from('profiles').select('full_name, work_hours, avatar_url, email').eq('role', 'seller')
+        if (profiles) {
+            const map: Record<string, any> = {}
+            profiles.forEach((p: any) => {
+                if (!p.full_name) return
+                // Detectar horario: Si dice "8", es 8hs. Si no, 5hs.
+                const hStr = String(p.work_hours || "5")
+                const shift = hStr.includes("8") ? '8hs' : '5hs'
+                
+                map[p.full_name] = {
+                    shift,
+                    photo: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
+                }
+            })
+            setSellersMap(map)
+        }
+    }
+
     const fetchData = async () => {
         setLoading(true)
         const { data: opsData } = await supabase.from('leads').select('*').eq('status', 'cumplidas').order('last_update', { ascending: false })
@@ -188,7 +200,8 @@ export function OpsBilling() {
                 chat: [],
                 reminders: [],
                 history: [],
-                adminNotes: d.admin_notes || []
+                adminNotes: d.admin_notes || [],
+                capitas: d.capitas ? Number(d.capitas) : 1
             }))
             setOperations(mapped)
         }
@@ -208,9 +221,11 @@ export function OpsBilling() {
 
     useEffect(() => {
         fetchData()
+        fetchSellers() // ✅ Cargamos vendedores al inicio
         const channel = supabase.channel('billing_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: 'status=eq.cumplidas' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchSellers()) // Si cambia horario, refrescar
             .subscribe()
         return () => { supabase.removeChannel(channel) }
     }, [])
@@ -344,7 +359,9 @@ export function OpsBilling() {
 
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
-            const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
+            
+            // ✅ USAMOS EL MAPA DINÁMICO, NO LA CONSTANTE HARDCODEADA
+            const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${sellerName}` }
             const shiftRules = commissionRules.scales[sellerInfo.shift] 
             
             let specialCommission = 0
@@ -361,7 +378,12 @@ export function OpsBilling() {
             })
 
             standardOps.sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
-            const totalStandardCount = standardOps.length
+            
+            const totalStandardCount = standardOps.reduce((acc, op) => {
+                const isAMPF = op.prepaga?.toUpperCase().includes("AMPF")
+                return acc + (isAMPF ? 1 : (op.capitas || 1))
+            }, 0)
+
             const absorbableLimit = shiftRules.absorbable
             const isThresholdMet = totalStandardCount > absorbableLimit
             let scalePercentage = 0
@@ -371,7 +393,7 @@ export function OpsBilling() {
                 const tier = shiftRules.tiers.find(t => totalStandardCount >= t.min && totalStandardCount <= t.max)
                 const finalTier = tier || shiftRules.tiers[shiftRules.tiers.length - 1]
                 scalePercentage = finalTier.pct
-                payableCount = standardOps.slice(absorbableLimit).length
+                payableCount = standardOps.slice(absorbableLimit).length // Esto es solo visual aproximado, lo que importa es el valor $
                 const totalLiquidatedStandard = standardOps.slice(absorbableLimit).reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedStandard * scalePercentage
                 const totalLiquidatedSpecial = specialOps.reduce((acc, op) => acc + calculate(op).val, 0)
@@ -384,7 +406,7 @@ export function OpsBilling() {
             })
         })
         return result.sort((a, b) => b.total - a.total)
-    }, [approvedOps, commissionRules, calcRules])
+    }, [approvedOps, commissionRules, calcRules, sellersMap]) // ✅ Agregamos sellersMap a dependencias
 
     const handlePriceChange = (id: string, v: string) => updateOpBilling(id, { billing_price_override: parseFloat(v) })
     const handlePortfolioChange = (id: string, v: string) => updateOpBilling(id, { billing_portfolio_override: parseFloat(v) })
@@ -414,7 +436,7 @@ export function OpsBilling() {
     const getSellerOpsDetail = (sellerName: string | null) => {
         if (!sellerName) return []
         const ops = approvedOps.filter((op: any) => op.seller === sellerName)
-        const sellerInfo = SELLERS_DB[sellerName] || { shift: '5hs', photo: '' }
+        const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: '' } // ✅ Usamos mapa
         const threshold = commissionRules.scales[sellerInfo.shift].absorbable
         const standardOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""

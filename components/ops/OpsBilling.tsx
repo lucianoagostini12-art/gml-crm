@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, Loader2, ChevronLeft, ChevronRight, Info, Eye, BarChart3 } from "lucide-react"
+import { DollarSign, Save, Lock, AlertTriangle, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, BarChart3 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
@@ -127,7 +127,8 @@ export function OpsBilling() {
     
     // Modals
     const [selectedOp, setSelectedOp] = useState<any>(null) // Para OpsModal
-    const [deferOpId, setDeferOpId] = useState<string | null>(null)
+    const [deferOpId, setDeferOpId] = useState<string | null>(null) // ID para mover al PROXIMO mes
+    const [retroOpId, setRetroOpId] = useState<string | null>(null) // ID para mover al ANTERIOR mes
     const [manualPortfolio, setManualPortfolio] = useState<any[]>([]) 
     
     const [isAddingClient, setIsAddingClient] = useState(false)
@@ -137,7 +138,7 @@ export function OpsBilling() {
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
 
-    // ✅ NUEVO: MAPA DE VENDEDORES (Para horas y fotos)
+    // ✅ MAPA DE VENDEDORES (Para horas y fotos)
     const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
     
     // --- FETCH ---
@@ -284,11 +285,13 @@ export function OpsBilling() {
         return new Date(y, m - 1, 1).toLocaleString('es-ES', { month: 'long', year: 'numeric' })
     }
 
-    // --- FILTRADO DE DATOS ---
+    // --- FILTRADO DE DATOS (LA LÓGICA CLAVE ESTÁ ACÁ) ---
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
+            
+            // LÓGICA: Si existe billing_period, usa eso. Si no, usa la fecha de creación.
             const targetMonth = op.billing_period || defaultMonth
             
             if (targetMonth !== selectedMonth) return false
@@ -317,7 +320,7 @@ export function OpsBilling() {
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
 
-    // --- HISTORIAL (AGREGADO NUEVAMENTE) ---
+    // --- HISTORIAL ---
     const historyData = useMemo(() => {
         const aggregated: Record<string, number> = {}
         operations.forEach(op => {
@@ -360,7 +363,7 @@ export function OpsBilling() {
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
             
-            // ✅ USAMOS EL MAPA DINÁMICO, NO LA CONSTANTE HARDCODEADA
+            // ✅ USAMOS EL MAPA DINÁMICO
             const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${sellerName}` }
             const shiftRules = commissionRules.scales[sellerInfo.shift] 
             
@@ -406,12 +409,34 @@ export function OpsBilling() {
             })
         })
         return result.sort((a, b) => b.total - a.total)
-    }, [approvedOps, commissionRules, calcRules, sellersMap]) // ✅ Agregamos sellersMap a dependencias
+    }, [approvedOps, commissionRules, calcRules, sellersMap])
 
     const handlePriceChange = (id: string, v: string) => updateOpBilling(id, { billing_price_override: parseFloat(v) })
     const handlePortfolioChange = (id: string, v: string) => updateOpBilling(id, { billing_portfolio_override: parseFloat(v) })
-    const confirmDefer = () => { if(deferOpId){ const [y,m]=selectedMonth.split('-').map(Number); const nextM=m===12?1:m+1; const nextY=m===12?y+1:y; updateOpBilling(deferOpId, { billing_period: `${nextY}-${String(nextM).padStart(2,'0')}` }); setDeferOpId(null) }}
-    const revertDefer = (id: string) => updateOpBilling(id, { billing_period: null })
+    
+    // ✅ MOVER A PRÓXIMO MES
+    const confirmDefer = () => { 
+        if(deferOpId){ 
+            const [y,m]=selectedMonth.split('-').map(Number); 
+            const nextM=m===12?1:m+1; 
+            const nextY=m===12?y+1:y; 
+            updateOpBilling(deferOpId, { billing_period: `${nextY}-${String(nextM).padStart(2,'0')}` }); 
+            setDeferOpId(null) 
+        } 
+    }
+    
+    // ✅ MOVER A MES ANTERIOR
+    const confirmRetro = () => { 
+        if(retroOpId){ 
+            const [y,m]=selectedMonth.split('-').map(Number); 
+            // Si es Enero (1), pasamos a Diciembre (12) del año anterior (y-1)
+            const prevM=m===1?12:m-1; 
+            const prevY=m===1?y-1:y; 
+            updateOpBilling(retroOpId, { billing_period: `${prevY}-${String(prevM).padStart(2,'0')}` }); 
+            setRetroOpId(null) 
+        } 
+    }
+
     const approveOp = (id: string) => updateOpBilling(id, { billing_approved: true })
     const unapproveOp = (id: string) => updateOpBilling(id, { billing_approved: false })
     
@@ -436,7 +461,7 @@ export function OpsBilling() {
     const getSellerOpsDetail = (sellerName: string | null) => {
         if (!sellerName) return []
         const ops = approvedOps.filter((op: any) => op.seller === sellerName)
-        const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: '' } // ✅ Usamos mapa
+        const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: '' }
         const threshold = commissionRules.scales[sellerInfo.shift].absorbable
         const standardOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""
@@ -552,7 +577,7 @@ export function OpsBilling() {
                                 <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[220px]">Cliente / Origen</TableHead><TableHead>Vendedor</TableHead><TableHead>Prepaga / Plan</TableHead><TableHead className="text-right">Valores Base</TableHead><TableHead className="w-[180px]">Cálculo</TableHead><TableHead className="text-right font-bold text-slate-700">Estimado</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
                                 <TableBody>{pendingOps.length === 0 ? (<TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {formatMonth(selectedMonth)}.</TableCell></TableRow>) : pendingOps.map((op: any) => {
                                     const calc = calculate(op)
-                                    const isDeferred = op.entryDate.substring(0, 7) !== selectedMonth
+                                    // Eliminamos isDeferred para no ocultar botones. Siempre se muestran.
                                     return (
                                         <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
                                             <TableCell><div className="font-bold text-slate-800">{op.clientName}</div><div className="text-[11px] font-mono text-slate-400">{op.dni}</div><div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div></TableCell>
@@ -564,7 +589,22 @@ export function OpsBilling() {
                                             <TableCell className="text-right text-xs font-mono text-slate-500"><div>FP: ${parseInt(op.fullPrice || "0").toLocaleString()}</div></TableCell>
                                             <TableCell><div className="text-[10px] bg-slate-100 p-1 rounded font-mono text-slate-500 truncate" title={calc.formula}>{calc.formula}</div></TableCell>
                                             <TableCell className="text-right font-bold text-slate-800 text-sm">${calc.val.toLocaleString()}</TableCell>
-                                            <TableCell className="text-right" onClick={e => e.stopPropagation()}><div className="flex justify-end gap-2">{isDeferred ? (<Button size="sm" variant="ghost" className="h-8 text-blue-600 hover:bg-blue-50" onClick={() => revertDefer(op.id)}><Undo2 size={14} className="mr-1"/> Traer</Button>) : (<Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700" onClick={() => setDeferOpId(op.id)}><Calendar size={14} className="mr-1"/> Diferir</Button>)}<Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>Aprobar <ArrowRight size={14} className="ml-1"/></Button></div></TableCell>
+                                            <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                                                <div className="flex justify-end gap-2">
+                                                    
+                                                    {/* ✅ BOTÓN: IR ATRÁS */}
+                                                    <Button size="sm" variant="secondary" className="h-8 text-slate-600" onClick={() => setRetroOpId(op.id)}>
+                                                        <ArrowLeft size={14} className="mr-1"/> Ant.
+                                                    </Button>
+
+                                                    {/* ✅ BOTÓN: IR ADELANTE */}
+                                                    <Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50" onClick={() => setDeferOpId(op.id)}>
+                                                        Próx. <ArrowRight size={14} className="ml-1"/>
+                                                    </Button>
+
+                                                    <Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>Aprobar</Button>
+                                                </div>
+                                            </TableCell>
                                         </TableRow>
                                     )
                                 })}</TableBody>
@@ -754,7 +794,11 @@ export function OpsBilling() {
                 </DialogContent>
             </Dialog>
 
-            <AlertDialog open={!!deferOpId} onOpenChange={() => setDeferOpId(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Diferir al próximo mes?</AlertDialogTitle><AlertDialogDescription>La venta pasará al período siguiente.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmDefer}>Confirmar</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+            {/* ✅ ALERTA DE DIFERIR (PRÓXIMO MES) */}
+            <AlertDialog open={!!deferOpId} onOpenChange={() => setDeferOpId(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Mover al PRÓXIMO mes?</AlertDialogTitle><AlertDialogDescription>La venta pasará al período siguiente del actual.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmDefer}>Confirmar</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+            
+            {/* ✅ ALERTA DE RETROCESO (MES ANTERIOR) */}
+            <AlertDialog open={!!retroOpId} onOpenChange={() => setRetroOpId(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Mover al mes ANTERIOR?</AlertDialogTitle><AlertDialogDescription>La venta pasará al período anterior del actual.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmRetro}>Confirmar</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
             
             <Dialog open={showHistory} onOpenChange={setShowHistory}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Historial Anual</DialogTitle></DialogHeader><div className="py-4"><Table><TableHeader><TableRow><TableHead>Mes</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-[50%]">Gráfico</TableHead></TableRow></TableHeader><TableBody>{historyData.map((data) => { const max=Math.max(...historyData.map(d=>d.total)); const w=max>0?(data.total/max)*100:0; return (<TableRow key={data.month}><TableCell className="capitalize font-bold">{formatMonth(data.month)}</TableCell><TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell><TableCell><div className="h-4 bg-slate-100 rounded-full w-full overflow-hidden"><div className="h-full bg-green-500" style={{width:`${w}%`}}></div></div></TableCell></TableRow>)})}</TableBody></Table></div></DialogContent></Dialog>
             

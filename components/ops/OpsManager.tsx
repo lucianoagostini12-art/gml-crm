@@ -165,6 +165,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             'cumplidas', 'rechazado', 'vendido'
         ];
 
+        // ✅ SELECT EXPLÍCITO PARA ASEGURAR QUE billing_period VENGA SIEMPRE
         const { data, error } = await supabase
             .from('leads')
             .select('*')
@@ -209,6 +210,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     seller: op.agent_name || "Desconocido",
                     operator: op.operator, 
                     entryDate: new Date(op.created_at).toISOString().split('T')[0],
+                    created_at: op.created_at, // ✅ AGREGADO: Para backup de fecha en Dashboard
                     lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
                     type: op.type || "alta",
                     phone: op.phone || "",
@@ -235,7 +237,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     aportes: op.aportes,
                     descuento: op.descuento,
                     billing_approved: op.billing_approved,
-                    billing_period: op.billing_period,
+                    billing_period: op.billing_period, // ✅ CAMPO CLAVE
                     billing_price_override: op.billing_price_override,
                     billing_portfolio_override: op.billing_portfolio_override
                 }
@@ -252,16 +254,23 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchOperations()
         fetchNotifications() 
         
-        // --- REALTIME ---
-        const channel = supabase.channel('ops-realtime')
+        // --- REALTIME (VERSIÓN ROBUSTA) ---
+        // Escucha CUALQUIER cambio en leads para mantener sync total entre Billing y Dashboard
+        const channel = supabase.channel('ops-realtime-manager')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 const newData = payload.new as any
-                if (newData && ['ingresado','vendido','precarga','medicas','legajo','demoras','cumplidas','rechazado'].includes(newData.status)) {
-                    if(payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) {
-                        setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
-                    }
-                    fetchOperations() 
+                const oldData = payload.old as any
+
+                // 🔔 NOTIFICACIÓN DE VENTA NUEVA (INSERT o UPDATE de estado)
+                if (
+                    (payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) ||
+                    (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData.status !== newData.status)
+                ) {
+                    setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
                 }
+                
+                // SIEMPRE recargar datos si hay cambios en la tabla leads, para garantizar sync con OpsBilling
+                fetchOperations() 
             })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
                 if (payload.new.user_name === userName || role === 'admin_god') {
@@ -292,7 +301,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
-        if (viewMode === 'mine' && op.operator !== userName) return false
+        
+        // ✅ MODIFICACIÓN CLAVE: FILTRO "MIS CASOS" (Excluye cumplidas y rechazados)
+        if (viewMode === 'mine') {
+            if (op.operator !== userName) return false
+            if (['cumplidas', 'rechazado'].includes(op.status)) return false // <- Aquí está la magia
+        }
+
         if (viewMode === 'pool' && (op.operator || ['cumplidas','rechazado'].includes(op.status))) return false
         
         if (filterStatus !== 'all' && op.status !== filterStatus) return false

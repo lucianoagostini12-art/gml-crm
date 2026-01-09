@@ -364,7 +364,7 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
                                         value={formData.obs_venta}
                                         onChange={(e) => updateForm('obs_venta', e.target.value)}
                                     />
-                                    <p className="text-[10px] text-slate-400">* Esto aparecerá en las notas de OpsModal.</p>
+                                    <p className="text-[10px] text-slate-400">* Esto aparecerá en las notas de ADM.</p>
                                 </div>
                             </div>
                         </div>

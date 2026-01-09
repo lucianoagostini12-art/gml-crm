@@ -16,9 +16,10 @@ import {
   Phone, UploadCloud, MessageSquare, Calendar as CalendarIcon, 
   FileUp, MessageCircle, UserPlus, ArrowRightLeft, Plus, ImageIcon, 
   Users, CheckSquare, Save, Clock, FileText, DollarSign, Wallet, Percent,
-  Eye, Download, X, AlertTriangle, Send, UserCog, CalendarDays, Loader2, Check, Trash2
+  Eye, Download, X, AlertTriangle, Send, UserCog, CalendarDays, Loader2, 
+  Check, Trash2, Megaphone, Key 
 } from "lucide-react"
-import { OpStatus, getStatusColor, getSubStateStyle } from "./data"
+import { getStatusColor, getSubStateStyle } from "./data"
 
 // --- COMPONENTES UI INTERNOS ---
 
@@ -62,7 +63,6 @@ function EditableField({ label, value, onBlur, onChange, icon, color, prefix, su
     )
 }
 
-// Modificado: Agregado botón de eliminar
 function FileCard({ file, onPreview, onDownload, onDelete }: any) {
     const isImg = file.type === 'IMG' || (file.name && file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i))
     const size = file.metadata?.size ? `${(file.metadata.size / 1024 / 1024).toFixed(2)} MB` : "Doc"
@@ -85,7 +85,6 @@ function FileCard({ file, onPreview, onDownload, onDelete }: any) {
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-green-600 hover:bg-green-50" onClick={() => onDownload(file)} title="Descargar">
                     <Download size={16}/>
                 </Button>
-                {/* Nuevo Botón Eliminar */}
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(file)} title="Eliminar">
                     <Trash2 size={16}/>
                 </Button>
@@ -161,10 +160,11 @@ export function OpsModal({
         'rechazado': 'RECHAZADO'
     }
 
-    // --- CARGA INICIAL ---
+    // --- CARGA INICIAL (PURGA DE ESTADO) ---
     useEffect(() => {
         if(isOpen && op?.id) {
-            fetchFullData()
+            setLocalOp(null) // Purga inmediata para evitar datos viejos
+            fetchFullData(op.id)
             
             const channel = supabase.channel('ops_chat_room')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages', filter: `lead_id=eq.${op.id}` }, (payload) => {
@@ -174,35 +174,35 @@ export function OpsModal({
 
             return () => { supabase.removeChannel(channel) }
         }
-    }, [isOpen, op?.id])
+    }, [isOpen, op?.id]) 
 
-    const fetchFullData = async () => {
-        const { data: leadData } = await supabase.from('leads').select('*').eq('id', op.id).single()
+    const fetchFullData = async (leadId: string) => {
+        const { data: leadData } = await supabase.from('leads').select('*').eq('id', leadId).single()
+        
         if (leadData) {
-            setLocalOp(leadData)
+            setLocalOp(leadData) 
         } else {
             setLocalOp(op)
         }
 
-        fetchRealDocs()
-        fetchRealChat()
-        fetchRealHistory()
+        fetchRealDocs(leadId)
+        fetchRealChat(leadId)
+        fetchRealHistory(leadId)
         fetchSellers()
     }
 
-    const fetchRealDocs = async () => {
-        const { data } = await supabase.from('lead_documents').select('*').eq('lead_id', op.id).order('uploaded_at', { ascending: false })
+    const fetchRealDocs = async (leadId: string) => {
+        const { data } = await supabase.from('lead_documents').select('*').eq('lead_id', leadId).order('uploaded_at', { ascending: false })
         if(data) setRealDocs(data)
     }
-    const fetchRealChat = async () => {
-        const { data } = await supabase.from('lead_messages').select('*').eq('lead_id', op.id).order('created_at', { ascending: true })
+    const fetchRealChat = async (leadId: string) => {
+        const { data } = await supabase.from('lead_messages').select('*').eq('lead_id', leadId).order('created_at', { ascending: true })
         if(data) setRealChat(data)
     }
-    const fetchRealHistory = async () => {
-        const { data } = await supabase.from('lead_status_history').select('*').eq('lead_id', op.id).order('changed_at', { ascending: true })
+    const fetchRealHistory = async (leadId: string) => {
+        const { data } = await supabase.from('lead_status_history').select('*').eq('lead_id', leadId).order('changed_at', { ascending: true })
         if(data) setRealHistory(data)
     }
-    // ✅ CORRECCIÓN 1: Traer TODOS los vendedores desde 'profiles', no desde 'leads'
     const fetchSellers = async () => {
         const { data } = await supabase.from('profiles').select('full_name')
         if (data) {
@@ -225,6 +225,45 @@ export function OpsModal({
         }
         
         setTimeout(() => setIsSaving(false), 500)
+    }
+
+    // ✅ FIX DEFINITIVO: CAMBIAR TIPO ALTA <-> PASS VISUALMENTE
+    const toggleSaleType = async () => {
+        if (!localOp) return
+        
+        // 1. Detectamos qué es ahora
+        const isCurrentlyPass = localOp.type === 'pass' || localOp.source === 'pass' || localOp.sub_state === 'auditoria_pass'
+        
+        // 2. Definimos lo opuesto
+        const nextType = isCurrentlyPass ? 'alta' : 'pass'
+        
+        // 3. ¡IMPORTANTE! Si volvemos a ALTA, limpiamos el source 'pass' para que no quede violeta
+        let nextSource = localOp.source
+        if (nextType === 'pass') {
+            nextSource = 'pass' // Si vamos a pass, forzamos source pass
+        } else if (localOp.source === 'pass') {
+            nextSource = 'Base de Datos' // Si era pass y volvemos a alta, ponemos un neutro
+        }
+
+        // 4. Creamos el objeto nuevo COMPLETO para no usar datos viejos
+        const updatedOp = {
+            ...localOp,
+            type: nextType,
+            source: nextSource
+        }
+
+        // 5. Actualizamos visualmente YA
+        setLocalOp(updatedOp)
+        onUpdateOp(updatedOp)
+
+        // 6. Guardamos en DB
+        setIsSaving(true)
+        await supabase.from('leads').update({ 
+            type: nextType,
+            source: nextSource
+        }).eq('id', localOp.id)
+        
+        setTimeout(() => setIsSaving(false), 300)
     }
 
     // --- NAVEGACIÓN ESTADOS ---
@@ -284,26 +323,22 @@ export function OpsModal({
         document.body.removeChild(a)
     }
 
-    // Solución Punto 2: Eliminar archivo
     const handleDeleteFile = async (file: any) => {
         if(!confirm("¿Estás seguro de eliminar este archivo? No se puede deshacer.")) return
 
-        // 1. Borrar de Storage
         const { error: storageErr } = await supabase.storage.from('lead-documents').remove([file.file_path])
         if (storageErr) {
             alert("Error al borrar del almacenamiento")
             return
         }
 
-        // 2. Borrar de la tabla
         const { error: dbErr } = await supabase.from('lead_documents').delete().eq('id', file.id)
         if (dbErr) {
             alert("Error al borrar registro de base de datos")
             return
         }
 
-        // 3. Actualizar UI
-        fetchRealDocs()
+        fetchRealDocs(localOp.id)
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -328,7 +363,7 @@ export function OpsModal({
                 })
                 if (insErr) throw insErr
             }
-            await fetchRealDocs()
+            await fetchRealDocs(localOp.id)
         } catch (error: any) {
             alert(`Error: ${error.message}`)
         } finally {
@@ -388,12 +423,21 @@ export function OpsModal({
         if(data?.publicUrl) setPreviewFile({ ...file, url: data.publicUrl })
     }
 
-    // --- RENDERS ---
-    if (!localOp) return null
+   if (!localOp) return (
+        <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="h-[90vh] flex items-center justify-center">
+                {/* ✅ SOLUCIÓN: Agregamos el Título oculto para accesibilidad */}
+                <DialogTitle className="sr-only">Cargando...</DialogTitle>
+                
+                <Loader2 className="animate-spin h-10 w-10 text-blue-500" />
+            </DialogContent>
+        </Dialog>
+    )
 
     const prepagasList = globalConfig?.prepagas || []
     const availablePlans = prepagasList.find((p: any) => p.name === (localOp.prepaga || "Otra"))?.plans || []
     const subStatesList = globalConfig?.subStates?.[localOp.status] || []
+    const originsList = globalConfig?.origins || []
 
     const nextStateLabel = getNextState() ? STATE_LABELS[getNextState()!] : 'FINALIZAR'
     const prevStateLabel = getPrevState() ? STATE_LABELS[getPrevState()!] : 'ANTERIOR'
@@ -401,11 +445,7 @@ export function OpsModal({
     const today = new Date().toISOString().split('T')[0]
     const sortedReminders = [...(localOp.reminders || [])].sort((a: any, b: any) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime())
     const todayReminders = sortedReminders.filter((r: any) => r.date === today)
-    const hasEvent = (day: number) => {
-        const checkDate = new Date(); checkDate.setDate(day);
-        const dateStr = checkDate.toISOString().split('T')[0];
-        return localOp.reminders?.some((r: any) => r.date === dateStr);
-    }
+    
     const getReminderColor = (type: string) => {
         switch(type) {
             case 'call': return 'border-l-blue-500 bg-blue-50/30'
@@ -421,6 +461,9 @@ export function OpsModal({
         }
     }
 
+    // Identificar si es PASS o ALTA para colorear
+    const isPass = localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass' || localOp.source === 'pass'
+
     return (
         <>
             <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -433,15 +476,13 @@ export function OpsModal({
                     <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between shrink-0">
                         <div className="flex items-center gap-6">
                             
-                            {/* ✅ CORRECCIÓN 2: LÓGICA DE ÍCONO BLINDADA: Mira type, sub_state y source */}
-                            <div className={`h-16 w-16 rounded-2xl flex items-center justify-center shadow-md ${
-                                (localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass' || localOp.source === 'pass') 
-                                ? 'bg-purple-100 text-purple-600' 
-                                : 'bg-green-100 text-green-600'
-                            }`}>
-                                {(localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass' || localOp.source === 'pass') 
-                                ? <ArrowRightLeft size={32}/> 
-                                : <UserPlus size={32}/>}
+                            {/* ✅ ICONO CLICKABLE PARA CAMBIAR TIPO ALTA <-> PASS */}
+                            <div 
+                                onClick={toggleSaleType}
+                                className={`h-16 w-16 rounded-2xl flex items-center justify-center shadow-md cursor-pointer hover:scale-105 transition-transform active:scale-95 ${
+                                isPass ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'
+                            }`} title="Click para cambiar tipo (Alta/Pass)">
+                                {isPass ? <ArrowRightLeft size={32}/> : <UserPlus size={32}/>}
                             </div>
 
                             <div className="space-y-1">
@@ -464,6 +505,12 @@ export function OpsModal({
                                     <Select value={localOp.plan} onValueChange={(val) => updateField('plan', val)}>
                                         <SelectTrigger className="h-8 text-xs font-bold bg-white border-slate-300 w-[120px] shadow-sm"><SelectValue placeholder="Plan"/></SelectTrigger>
                                         <SelectContent>{availablePlans.map((p:string)=><SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                                    </Select>
+
+                                    {/* Origen de Datos */}
+                                    <Select value={localOp.source} onValueChange={(val) => updateField('source', val)}>
+                                        <SelectTrigger className="h-8 text-xs bg-white border-slate-300 w-[140px] shadow-sm text-slate-500"><Megaphone size={12} className="mr-2"/> <SelectValue placeholder="Origen"/></SelectTrigger>
+                                        <SelectContent>{originsList.map((o:string)=><SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
                                     </Select>
 
                                     <Popover open={isSellerChangeOpen} onOpenChange={setIsSellerChangeOpen}>
@@ -589,7 +636,7 @@ export function OpsModal({
                                         </div>
                                         <div className="pt-3 border-t border-slate-200 space-y-2">
                                             {localOp.hijos && localOp.hijos.length > 0 ? localOp.hijos.map((h: any, i: number) => (
-                                                <div key={i} className="flex gap-2 items-center">
+                                                <div key={i} className="flex gap-2 items-center group">
                                                     <Input className="h-7 text-xs bg-white" placeholder="Nombre" value={h.nombre} 
                                                         onChange={(e) => { const newHijos = [...localOp.hijos]; newHijos[i].nombre = e.target.value; setLocalOp({...localOp, hijos: newHijos}) }}
                                                         onBlur={() => updateField('hijos', localOp.hijos)}
@@ -598,6 +645,15 @@ export function OpsModal({
                                                         onChange={(e) => { const newHijos = [...localOp.hijos]; newHijos[i].dni = e.target.value; setLocalOp({...localOp, hijos: newHijos}) }}
                                                         onBlur={() => updateField('hijos', localOp.hijos)}
                                                     />
+                                                    {/* Botón Eliminar Integrante */}
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-300 hover:text-red-600 hover:bg-red-50" 
+                                                        onClick={() => {
+                                                            const newHijos = localOp.hijos.filter((_:any, index: number) => index !== i);
+                                                            updateField('hijos', newHijos);
+                                                        }}
+                                                    >
+                                                        <Trash2 size={12}/>
+                                                    </Button>
                                                 </div>
                                             )) : <p className="text-xs text-slate-400 italic">Sin integrantes adicionales.</p>}
                                         </div>
@@ -619,26 +675,38 @@ export function OpsModal({
                                         </div>
 
                                         {localOp.condicion_laboral !== 'Voluntario' && (
-                                            <EditableField label="CUIT Empleador" value={localOp.cuit_empleador} onBlur={(v: string) => updateField('cuit_empleador', v)} />
+                                            <>
+                                                <EditableField label="CUIT Empleador" value={localOp.cuit_empleador} onBlur={(v: string) => updateField('cuit_empleador', v)} />
+                                                {/* ✅ Clave Fiscal */}
+                                                <EditableField label="Clave Fiscal" value={localOp.clave_fiscal} onBlur={(v: string) => updateField('clave_fiscal', v)} icon={<Key size={12}/>}/>
+                                            </>
                                         )}
                                         
                                         <div className="col-span-2 grid grid-cols-2 gap-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
-                                            <EditableField label="Método Pago" value={localOp.metodo_pago} onBlur={(v: string) => updateField('metodo_pago', v)} color="text-emerald-700 font-bold" />
-                                            <EditableField label="CBU/Tarjeta" value={localOp.cbu_tarjeta} onBlur={(v: string) => updateField('cbu_tarjeta', v)} />
+                                            {/* ✅ Selector de Método de Pago SIN EFECTIVO */}
+                                            <div className="flex flex-col gap-1 w-full">
+                                                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">Método de Pago</span>
+                                                <Select value={localOp.metodo_pago} onValueChange={(v) => updateField('metodo_pago', v)}>
+                                                    <SelectTrigger className="h-7 text-sm font-bold text-emerald-800 border-0 border-b rounded-none px-0 bg-transparent"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="CBU">CBU (Débito)</SelectItem>
+                                                        <SelectItem value="Tarjeta">Tarjeta Crédito</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            
+                                            <EditableField label="N° CBU / Tarjeta" value={localOp.cbu_tarjeta} onBlur={(v: string) => updateField('cbu_tarjeta', v)} />
                                         </div>
                                     </div>
                                 </section>
 
-                                {/* SECCION 4 VALORES ECONOMICOS (Modificado Punto 3) */}
                                 <section className="space-y-5 pb-10">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><DollarSign size={14}/> 4. Valores Económicos</h4>
                                     <div className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
-                                        {/* Modificación: Grid de 4 columnas para incluir "Total a Pagar" */}
                                         <div className="grid grid-cols-4 gap-4">
                                             <EditableField label="Full Price" value={localOp.full_price} onBlur={(v: string) => updateField('full_price', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
                                             <EditableField label="Aportes" value={localOp.aportes} onBlur={(v: string) => updateField('aportes', v)} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
                                             <EditableField label="Descuento" value={localOp.descuento} onBlur={(v: string) => updateField('descuento', v)} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
-                                            {/* Nuevo Campo */}
                                             <EditableField label="Total a Pagar" value={localOp.total_a_pagar} onBlur={(v: string) => updateField('total_a_pagar', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-900" />
                                         </div>
                                     </div>
@@ -662,7 +730,6 @@ export function OpsModal({
                                     <TabsContent value="chat" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 absolute inset-0">
                                         <ScrollArea className="flex-1 p-8 text-slate-900 bg-slate-50/50 min-h-0">
                                             <div className="space-y-4 mb-6">
-                                                {/* Solución Punto 1: Mostrar Agente en Historial */}
                                                 {realHistory.map((h: any, i: number) => (
                                                     <div key={i} className="flex gap-3 text-xs text-slate-500 items-center justify-center opacity-60">
                                                         <span>{new Date(h.changed_at).toLocaleDateString()}</span> • 
@@ -733,18 +800,15 @@ export function OpsModal({
                                         </div>
                                     </TabsContent>
 
-                                    {/* SECCION AGENDA (Modificado Punto 4) - Diseño Espacioso */}
                                     <TabsContent value="agenda" className="flex flex-col h-full m-0 p-0 overflow-hidden text-slate-900 absolute inset-0">
                                         <div className="flex flex-col h-full p-8 bg-slate-50/50">
                                             
-                                            {/* Parte Superior: Formulario Aireado */}
                                             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 shrink-0">
                                                 <h4 className="text-sm font-bold text-slate-600 uppercase mb-5 flex items-center gap-2 border-b pb-3">
                                                     <Plus size={16} className="text-blue-600"/> Nuevo Evento
                                                 </h4>
                                                 
                                                 <div className="flex flex-col gap-5">
-                                                    {/* Primera Fila: Tipo y Fecha */}
                                                     <div className="grid grid-cols-2 gap-6">
                                                         <div className="space-y-1.5">
                                                             <label className="text-xs font-bold text-slate-500 uppercase">Tipo de Evento</label>
@@ -766,7 +830,6 @@ export function OpsModal({
                                                         </div>
                                                     </div>
 
-                                                    {/* Segunda Fila: Detalle y Botón */}
                                                     <div className="grid grid-cols-[1fr_200px] gap-6 items-end">
                                                         <div className="space-y-1.5">
                                                             <label className="text-xs font-bold text-slate-500 uppercase">Nota / Detalle</label>
@@ -779,7 +842,6 @@ export function OpsModal({
                                                 </div>
                                             </div>
 
-                                            {/* Parte Inferior: Línea de Tiempo */}
                                             <div className="flex-1 overflow-y-auto pr-2">
                                                 <div className="flex items-center justify-between mb-4">
                                                     <h4 className="text-xs font-bold text-slate-400 uppercase">Próximos Eventos</h4>
@@ -882,6 +944,9 @@ export function OpsModal({
             {previewFile && (
                 <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
                     <DialogContent className="max-w-4xl bg-black border-slate-800 p-0 overflow-hidden flex flex-col justify-center items-center shadow-2xl">
+                        {/* ✅ FIX DE ACCESIBILIDAD PARA EL ERROR DE CONSOLA */}
+                        <DialogTitle className="sr-only">Vista Previa de Archivo</DialogTitle>
+                        
                         <div className="absolute top-4 right-4 z-50">
                             <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 rounded-full" onClick={() => setPreviewFile(null)}>
                                 <X size={24}/>

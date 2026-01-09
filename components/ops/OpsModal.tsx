@@ -575,19 +575,19 @@ export function OpsModal({
                         <ScrollArea style={{ width: '55%' }} className="border-r border-slate-100 bg-white shrink-0">
                             <div className="p-8 space-y-10">
                                 
-                                <section className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                           <section className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
                                     <EditableField 
                                         label="Fecha Ingreso" 
                                         type="date" 
                                         value={localOp.fecha_ingreso || localOp.created_at?.split('T')[0]} 
-                                        onBlur={(v: string) => updateField('fecha_ingreso', v)} 
+                                        onBlur={(v: string) => updateField('fecha_ingreso', v === "" ? null : v)} 
                                         icon={<CalendarDays size={14}/>}
                                     />
                                     <EditableField 
                                         label="Fecha Alta" 
                                         type="date" 
                                         value={localOp.fecha_alta} 
-                                        onBlur={(v: string) => updateField('fecha_alta', v)} 
+                                        onBlur={(v: string) => updateField('fecha_alta', v === "" ? null : v)} 
                                         icon={<CheckSquare size={14}/>}
                                         color="text-emerald-700 font-bold"
                                     />
@@ -595,10 +595,18 @@ export function OpsModal({
 
                                 <section className="space-y-5">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><User size={14}/> 1. Datos Titular</h4>
-                                    <div className="grid grid-cols-2 gap-x-8 gap-y-6">
+                                  <div className="grid grid-cols-2 gap-x-8 gap-y-6">
                                         <EditableField label="Nombre Completo" value={localOp.name} onBlur={(v: string) => updateField('name', v)} />
                                         <EditableField label="CUIL/CUIT" value={localOp.dni} onBlur={(v: string) => updateField('dni', v)} />
-                                        <EditableField label="Nacimiento" value={localOp.dob} onBlur={(v: string) => updateField('dob', v)} />
+                                        
+                                        {/* ✅ CORREGIDO: Agregado type="date" para evitar errores de formato */}
+                                        <EditableField 
+                                            label="Nacimiento" 
+                                            type="date" 
+                                            value={localOp.dob} 
+                                            onBlur={(v: string) => updateField('dob', v === "" ? null : v)} 
+                                        />
+                                        
                                         <EditableField label="Email" value={localOp.email} onBlur={(v: string) => updateField('email', v)} />
                                         <EditableField label="Teléfono" value={localOp.phone} onBlur={(v: string) => updateField('phone', v)} />
                                         

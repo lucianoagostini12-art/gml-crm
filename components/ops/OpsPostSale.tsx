@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator"
 import { OpsModal } from "./OpsModal"
 import { getStatusColor, getSubStateStyle } from "./data"
 
-// --- HELPERS COLORES POSTVENTA ---
+// --- HELPERS COLORES POSTVENTA (MEJORADOS CON DEFAULT) ---
 const getFinancialColor = (status: string) => {
     switch(status) {
         case 'SIN MORA': return "bg-green-100 text-green-700 ring-green-600/20"
@@ -27,7 +27,8 @@ const getFinancialColor = (status: string) => {
         case 'MORA 2': return "bg-orange-200 text-orange-800 ring-orange-700/20"
         case 'MORA 3': return "bg-red-100 text-red-700 ring-red-600/20"
         case 'IMPAGO': return "bg-red-600 text-white ring-red-600"
-        default: return "bg-slate-100 text-slate-700"
+        // Default para estados personalizados nuevos
+        default: return "bg-slate-100 text-slate-700 ring-slate-600/20"
     }
 }
 
@@ -36,7 +37,9 @@ const getActionColor = (status: string) => {
         case 'PRESENTACION': return "text-blue-600 border-blue-200 bg-blue-50"
         case 'CAMBIO DE PASS': return "text-purple-600 border-purple-200 bg-purple-50"
         case 'MENSAJE MORA': return "text-red-600 border-red-200 bg-red-50"
-        default: return "text-slate-500 border-slate-200 bg-white"
+        case 'OK': return "text-green-600 border-green-200 bg-green-50"
+        // Default para acciones personalizadas nuevas
+        default: return "text-slate-600 border-slate-200 bg-white"
     }
 }
 
@@ -53,7 +56,8 @@ const getPrepagaBadgeColor = (prepaga: string) => {
     return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
-export function OpsPostSale() {
+// ✅ Recibimos globalConfig como prop
+export function OpsPostSale({ globalConfig }: any) {
     const supabase = createClient()
     const [clients, setClients] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -65,12 +69,6 @@ export function OpsPostSale() {
     // --- ESTADO PARA ELIMINAR DE CARTERA ---
     const [clientToRemove, setClientToRemove] = useState<any>(null)
 
-    // --- CONFIG GLOBAL (Necesaria para el Modal) ---
-    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any}>({
-        prepagas: [], 
-        subStates: {}
-    })
-
     // --- FILTROS AVANZADOS ---
     const [filters, setFilters] = useState({
         seller: "all",
@@ -81,9 +79,13 @@ export function OpsPostSale() {
     })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     
+    // Obtener listas dinámicas o usar defaults si aún no cargaron
+    const financialOptions = globalConfig?.postventa?.financial_status || ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO']
+    const actionOptions = globalConfig?.postventa?.action_status || ['OK', 'PRESENTACION', 'CAMBIO DE PASS', 'MENSAJE MORA']
+
     // --- 1. CARGA DE DATOS ---
     const fetchPortfolio = async () => {
-        setLoading(true)
+        // No ponemos loading(true) aquí para evitar parpadeos si llamamos a esto en background
         const { data, error } = await supabase
             .from('leads')
             .select('*')
@@ -125,18 +127,9 @@ export function OpsPostSale() {
         setLoading(false)
     }
 
-    const fetchConfig = async () => {
-        const { data } = await supabase.from('system_config').select('*')
-        if (data) {
-            const p = data.find(c => c.key === 'prepagas_plans')?.value || []
-            const s = data.find(c => c.key === 'workflow_substates')?.value || {}
-            setGlobalConfig({ prepagas: p, subStates: s })
-        }
-    }
-
     useEffect(() => {
+        setLoading(true) // Solo loading en la primera carga
         fetchPortfolio()
-        fetchConfig()
     }, [])
 
     // --- ACTUALIZAR CLIENTE (Financiero/Acción) ---
@@ -272,7 +265,17 @@ export function OpsPostSale() {
                             <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2"><LayoutList size={16}/> Filtrar Cartera</h4>
                             <Separator/>
                             <div className="space-y-3">
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Estado Mora</label><Select value={filters.mora} onValueChange={v => setFilters({...filters, mora: v})}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="SIN MORA">Sin Mora</SelectItem><SelectItem value="PRE MORA">Pre Mora</SelectItem><SelectItem value="MORA 1">Mora 1</SelectItem><SelectItem value="MORA 2">Mora 2</SelectItem><SelectItem value="MORA 3">Mora 3</SelectItem><SelectItem value="IMPAGO">Impago</SelectItem></SelectContent></Select></div>
+                                {/* FILTRO DE MORA DINÁMICO */}
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Estado Mora</label>
+                                    <Select value={filters.mora} onValueChange={v => setFilters({...filters, mora: v})}>
+                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Todos</SelectItem>
+                                            {financialOptions.map((f: string) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                                 <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Vendedor</label><Select value={filters.seller} onValueChange={v => setFilters({...filters, seller: v})}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem>{uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
                             </div>
                             <Button className="w-full h-8 text-xs bg-slate-900 text-white" onClick={() => setIsFilterOpen(false)}>Aplicar</Button>
@@ -300,7 +303,7 @@ export function OpsPostSale() {
                                     </TableCell>
                                     <TableCell><div className="flex items-center gap-1 text-xs text-slate-600"><MapPin size={12} className="text-slate-400"/> {client.province}</div></TableCell>
                                     
-                                    {/* COLUMNA PLAN & FAMILIA CON POPOVER (SOLUCIÓN HOVERCARD) */}
+                                    {/* COLUMNA PLAN & FAMILIA CON POPOVER */}
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                         <div className="flex flex-col items-start gap-1">
                                             {/* Badge con Color Personalizado */}
@@ -343,17 +346,25 @@ export function OpsPostSale() {
                                     <TableCell><span className="text-xs font-medium text-slate-600">{client.seller}</span></TableCell>
                                     <TableCell><div className="flex flex-col gap-1 text-[10px] text-slate-400"><span>V: {client.saleDate}</span><span className="font-bold text-blue-600">A: {client.activationDate}</span></div></TableCell>
                                     
-                                    {/* DROPDOWNS CLICK STOP PROPAGATION */}
+                                    {/* ✅ DROPDOWNS DINÁMICOS CON DATOS DE SETTINGS */}
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                         <Select value={client.financialStatus} onValueChange={(val) => updateClientField(client.id, 'financialStatus', val)}>
                                             <SelectTrigger className={`h-7 text-[10px] font-bold border-0 ring-1 ring-inset ${getFinancialColor(client.financialStatus)}`}><SelectValue /></SelectTrigger>
-                                            <SelectContent><SelectItem value="SIN MORA">SIN MORA</SelectItem><SelectItem value="PRE MORA">PRE MORA</SelectItem><SelectItem value="MORA 1">MORA 1</SelectItem><SelectItem value="MORA 2">Mora 2</SelectItem><SelectItem value="MORA 3">Mora 3</SelectItem><SelectItem value="IMPAGO">IMPAGO</SelectItem></SelectContent>
+                                            <SelectContent>
+                                                {financialOptions.map((opt: string) => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
                                         </Select>
                                     </TableCell>
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                         <Select value={client.actionStatus} onValueChange={(val) => updateClientField(client.id, 'actionStatus', val)}>
                                             <SelectTrigger className={`h-7 text-[10px] font-medium border border-dashed ${getActionColor(client.actionStatus)}`}><SelectValue placeholder="-" /></SelectTrigger>
-                                            <SelectContent><SelectItem value="OK">Todo OK</SelectItem><SelectItem value="PRESENTACION">PRESENTACIÓN</SelectItem><SelectItem value="CAMBIO DE PASS">CAMBIO DE PASS</SelectItem><SelectItem value="MENSAJE MORA">MENSAJE MORA</SelectItem></SelectContent>
+                                            <SelectContent>
+                                                {actionOptions.map((opt: string) => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
                                         </Select>
                                     </TableCell>
                                     <TableCell onClick={(e) => e.stopPropagation()}>
@@ -366,12 +377,28 @@ export function OpsPostSale() {
                 </CardContent>
             </Card>
 
-            {/* --- MODAL COMPLETO --- */}
+            {/* --- MODAL COMPLETO (FIXED) --- */}
             <OpsModal 
                 op={selectedOp} 
                 isOpen={!!selectedOp} 
                 onClose={() => setSelectedOp(null)} 
-                onUpdateOp={() => fetchPortfolio()} 
+                
+                // ✅ ESTA ES LA MAGIA: Actualización Optimista
+                onUpdateOp={(updatedLead: any) => {
+                    // 1. Actualizamos la lista local inmediatamente (sin esperar a DB)
+                    setClients(prev => prev.map(c => {
+                        if (c.id === updatedLead.id) {
+                            return { ...c, ...updatedLead } // Mezclamos los datos nuevos
+                        }
+                        return c
+                    }))
+                    
+                    // 2. Si es el seleccionado, actualizarlo también para que no parpadee
+                    if (selectedOp && selectedOp.id === updatedLead.id) {
+                        setSelectedOp({ ...selectedOp, ...updatedLead })
+                    }
+                }} 
+                
                 currentUser={"Administración"} 
                 role={"admin_god"} 
                 onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} onSubStateChange={()=>{}} 

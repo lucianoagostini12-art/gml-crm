@@ -49,10 +49,15 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [profiles, setProfiles] = useState<any[]>([]) 
     
     // --- CONFIGURACIÓN GLOBAL ---
-    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any, origins: string[]}>({
+    // ✅ Agregamos postventa al estado inicial
+    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any, origins: string[], postventa: any}>({
         prepagas: [], 
         subStates: {},
-        origins: ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro'] // Defaults robustos
+        origins: ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro'],
+        postventa: {
+            financial_status: ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO'],
+            action_status: ['OK', 'PRESENTACION', 'CAMBIO DE PASS', 'MENSAJE MORA']
+        }
     })
 
     // --- PERMISOS DINÁMICOS ---
@@ -128,10 +133,19 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (data) {
             const p = data.find(c => c.key === 'prepagas_plans')?.value || []
             const s = data.find(c => c.key === 'workflow_substates')?.value || {}
-            // ✅ Intentamos cargar origenes personalizados, si no existen usamos los default
             const o = data.find(c => c.key === 'sales_origins')?.value || ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro']
+            const pv = data.find(c => c.key === 'postventa_config')?.value
             
-            setGlobalConfig({ prepagas: p, subStates: s, origins: o })
+            // ✅ Inyectamos la config de postventa si existe
+            setGlobalConfig({ 
+                prepagas: p, 
+                subStates: s, 
+                origins: o,
+                postventa: pv || {
+                    financial_status: ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO'],
+                    action_status: ['OK', 'PRESENTACION', 'CAMBIO DE PASS', 'MENSAJE MORA']
+                }
+            })
         }
     }
 
@@ -165,7 +179,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             'cumplidas', 'rechazado', 'vendido'
         ];
 
-        // ✅ SELECT EXPLÍCITO PARA ASEGURAR QUE billing_period VENGA SIEMPRE
         const { data, error } = await supabase
             .from('leads')
             .select('*')
@@ -198,7 +211,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     safeChat = [];
                 }
 
-                // Normalización de datos (Fallbacks visuales)
                 return {
                     id: op.id,
                     clientName: op.name || "Sin Nombre",
@@ -210,7 +222,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     seller: op.agent_name || "Desconocido",
                     operator: op.operator, 
                     entryDate: new Date(op.created_at).toISOString().split('T')[0],
-                    created_at: op.created_at, // ✅ AGREGADO: Para backup de fecha en Dashboard
+                    created_at: op.created_at,
                     lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
                     type: op.type || "alta",
                     phone: op.phone || "",
@@ -237,9 +249,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     aportes: op.aportes,
                     descuento: op.descuento,
                     billing_approved: op.billing_approved,
-                    billing_period: op.billing_period, // ✅ CAMPO CLAVE
+                    billing_period: op.billing_period,
                     billing_price_override: op.billing_price_override,
-                    billing_portfolio_override: op.billing_portfolio_override
+                    billing_portfolio_override: op.billing_portfolio_override,
+                    fecha_alta: op.fecha_alta,
+                    fecha_ingreso: op.fecha_ingreso
                 }
             })
             setOperations(mappedOps)
@@ -254,14 +268,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchOperations()
         fetchNotifications() 
         
-        // --- REALTIME (VERSIÓN ROBUSTA) ---
-        // Escucha CUALQUIER cambio en leads para mantener sync total entre Billing y Dashboard
         const channel = supabase.channel('ops-realtime-manager')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 const newData = payload.new as any
                 const oldData = payload.old as any
 
-                // 🔔 NOTIFICACIÓN DE VENTA NUEVA (INSERT o UPDATE de estado)
                 if (
                     (payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) ||
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData.status !== newData.status)
@@ -269,7 +280,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
                 }
                 
-                // SIEMPRE recargar datos si hay cambios en la tabla leads, para garantizar sync con OpsBilling
                 fetchOperations() 
             })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
@@ -302,10 +312,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
         
-        // ✅ MODIFICACIÓN CLAVE: FILTRO "MIS CASOS" (Excluye cumplidas y rechazados)
         if (viewMode === 'mine') {
             if (op.operator !== userName) return false
-            if (['cumplidas', 'rechazado'].includes(op.status)) return false // <- Aquí está la magia
+            if (['cumplidas', 'rechazado'].includes(op.status)) return false 
         }
 
         if (viewMode === 'pool' && (op.operator || ['cumplidas','rechazado'].includes(op.status))) return false
@@ -320,64 +329,47 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000) }
 
-    // --- UPDATE SUPABASE (EL GUARDIÁN DE CAMBIOS - SOLUCIÓN DEFINITIVA) ---
     const updateOpInDb = async (id: string, updates: any) => {
         const currentOp = operations.find(o => o.id === id)
         if (!currentOp) return
 
-        // 1. Normalizar UI (para actualización visual inmediata)
         const uiUpdates = { ...updates }
         if (updates.sub_state !== undefined) uiUpdates.subState = updates.sub_state
         if (updates.agent_name !== undefined) uiUpdates.seller = updates.agent_name
         if (updates.name !== undefined) uiUpdates.clientName = updates.name
         
-        // 2. Actualización Visual
         setOperations(prev => prev.map(o => o.id === id ? { ...o, ...uiUpdates } : o))
         
-        // 3. Preparar Payload DB: VALIDACIÓN ESTRICTA
         const dbUpdates: any = {}
-        
-        // Función Helper: Deep Equality simple para arrays/objetos
         const isDiff = (valA: any, valB: any) => JSON.stringify(valA) !== JSON.stringify(valB)
 
-        // Estado
         if (uiUpdates.status && uiUpdates.status !== currentOp.status) dbUpdates.status = uiUpdates.status
         
-        // Subestado
         const newSub = uiUpdates.subState !== undefined ? uiUpdates.subState : uiUpdates.sub_state
         if (newSub !== undefined && newSub !== currentOp.subState) dbUpdates.sub_state = newSub
 
-        // --- FILTROS DE SEGURIDAD (ANTI-FK ERROR y TEXTO FANTASMA) ---
-
-        // Vendedor
         const newSeller = uiUpdates.seller || uiUpdates.agent_name
         if (newSeller && newSeller !== currentOp.seller && !["Desconocido", "Sin Asignar"].includes(newSeller)) {
             dbUpdates.agent_name = newSeller
         }
 
-        // Nombre
         const newName = uiUpdates.clientName || uiUpdates.name
         if (newName && newName !== currentOp.clientName && newName !== "Sin Nombre") {
             dbUpdates.name = newName
         }
 
-        // Prepaga
         if (uiUpdates.prepaga && uiUpdates.prepaga !== currentOp.prepaga && !["Sin Asignar", "Desconocido"].includes(uiUpdates.prepaga)) {
             dbUpdates.prepaga = uiUpdates.prepaga
         }
 
-        // Plan
         if (uiUpdates.plan && uiUpdates.plan !== currentOp.plan && !["-", "Sin Asignar"].includes(uiUpdates.plan)) {
             dbUpdates.plan = uiUpdates.plan
         }
 
-        // --- ARRAYS Y OBJETOS (SOLUCIÓN JSON STRINGIFY) ---
-        // Evitamos enviar arrays si el contenido es idéntico, para no disparar updates innecesarios
         if (uiUpdates.reminders !== undefined && isDiff(uiUpdates.reminders, currentOp.reminders)) dbUpdates.reminders = uiUpdates.reminders
         if (uiUpdates.hijos !== undefined && isDiff(uiUpdates.hijos, currentOp.hijos)) dbUpdates.family_members = uiUpdates.hijos
         if (uiUpdates.adminNotes !== undefined && isDiff(uiUpdates.adminNotes, currentOp.adminNotes)) dbUpdates.admin_notes = uiUpdates.adminNotes
 
-        // --- OTROS CAMPOS SIMPLES ---
         if (uiUpdates.operator !== undefined && uiUpdates.operator !== currentOp.operator) dbUpdates.operator = uiUpdates.operator 
         if (uiUpdates.dni !== undefined && uiUpdates.dni !== currentOp.dni && uiUpdates.dni !== "S/D") dbUpdates.dni = uiUpdates.dni
         if (uiUpdates.email !== undefined && uiUpdates.email !== currentOp.email) dbUpdates.email = uiUpdates.email
@@ -391,7 +383,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (uiUpdates.aportes !== undefined && uiUpdates.aportes !== currentOp.aportes) dbUpdates.aportes = uiUpdates.aportes
         if (uiUpdates.descuento !== undefined && uiUpdates.descuento !== currentOp.descuento) dbUpdates.descuento = uiUpdates.descuento
 
-        // 4. SI NO HAY NADA REALMENTE NUEVO, NO HACER NADA
+        if (uiUpdates.fecha_alta !== undefined) dbUpdates.fecha_alta = uiUpdates.fecha_alta
+        if (uiUpdates.fecha_ingreso !== undefined) dbUpdates.fecha_ingreso = uiUpdates.fecha_ingreso
+
         if (Object.keys(dbUpdates).length === 0) return
 
         dbUpdates.last_update = new Date().toISOString()
@@ -514,11 +508,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             prepaga: manualLoadData.prepaga || "Generica",
             status: "ingresado", 
             sub_state: "Carga Manual", 
-            agent_name: manualLoadData.specificSeller || "Admin", // ✅ SIEMPRE USA EL VENDEDOR ELEGIDO
+            agent_name: manualLoadData.specificSeller || "Admin", 
             created_at: new Date().toISOString(), 
             last_update: new Date().toISOString(), 
-            type: manualLoadData.type, // ✅ 'alta' o 'pass'
-            source: manualLoadData.source || "Manual Admin" // ✅ ORIGEN DEL DATO
+            type: manualLoadData.type, 
+            source: manualLoadData.source || "Manual Admin" 
         })
 
         if (!error) {
@@ -648,7 +642,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 
                                 {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
                                 {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
-                                {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale />}
+                                
+                                {/* ✅ PASAMOS LA CONFIGURACIÓN GLOBAL A POSTVENTA */}
+                                {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale globalConfig={globalConfig} />}
+                                
                                 {viewMode === 'settings' && (role === 'admin_god' || permissions.editSettings) && <OpsSettings />}
                                 
                                 {viewMode === 'agenda' && <OpsAgenda operations={operations} generalTasks={generalTasks} setGeneralTasks={setGeneralTasks} onSelectOp={setSelectedOp} updateOp={updateOp} userName={userName} role={role} />}

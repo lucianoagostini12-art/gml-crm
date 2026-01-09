@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw, ShieldAlert, Crown, Briefcase, Headset, Snowflake, Flame, Eye, EyeOff } from "lucide-react"
+import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw, ShieldAlert, Crown, Briefcase, Headset, Snowflake, Flame, Eye, EyeOff, LayoutList } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch" 
 import { Separator } from "@/components/ui/separator"
@@ -28,7 +28,7 @@ const STAGES = [
 export function OpsSettings() {
     const supabase = createClient()
     const [loading, setLoading] = useState(false)
-    const [activeTab, setActiveTab] = useState<'business' | 'users' | 'workflows' | 'permissions'>('business')
+    const [activeTab, setActiveTab] = useState<'business' | 'users' | 'workflows' | 'postventa' | 'permissions'>('business')
 
     // 1. COMERCIAL (Desde DB)
     const [prepagas, setPrepagas] = useState<any[]>([])
@@ -54,7 +54,7 @@ export function OpsSettings() {
     const [subStatesByStage, setSubStatesByStage] = useState<Record<string, string[]>>({})
     const [newSubState, setNewSubState] = useState("")
 
-    // Estado Configuración Cementerio (Freeze Times) - NUEVO EN OPS
+    // Estado Configuración Cementerio (Freeze Times)
     const [freezeConfig, setFreezeConfig] = useState({
         fantasmas: 30,
         precio: 60,
@@ -63,7 +63,16 @@ export function OpsSettings() {
         basural: 365
     })
 
-    // 4. PERMISOS (Desde DB)
+    // 4. POSTVENTA (NUEVO - CON VALORES POR DEFECTO)
+    // ✅ Inicializamos con los valores que ya usas para que figuren al cargar
+    const [postventaConfig, setPostventaConfig] = useState({
+        financial_status: ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO'],
+        action_status: ['OK', 'PRESENTACION', 'CAMBIO DE PASS', 'MENSAJE MORA']
+    })
+    const [newFinancialStatus, setNewFinancialStatus] = useState("")
+    const [newActionStatus, setNewActionStatus] = useState("")
+
+    // 5. PERMISOS (Desde DB)
     const [permissions, setPermissions] = useState({
         exportData: true, editSettings: false, deleteSales: false, assignCases: true,
         accessMetrics: false, accessBilling: false, accessPostSale: true, 
@@ -84,12 +93,15 @@ export function OpsSettings() {
             const s = data.find(c => c.key === 'workflow_substates')?.value
             const perm = data.find(c => c.key === 'ops_permissions')?.value
             const gz = data.find(c => c.key === 'graveyard_config')?.value
+            const pv = data.find(c => c.key === 'postventa_config')?.value
 
             if (p) setPrepagas(p)
             if (o) setOrigins(o)
             if (s) setSubStatesByStage(s)
             if (perm) setPermissions(perm)
             if (gz) setFreezeConfig(gz)
+            // Si existe config en DB la usamos, si no, mantenemos los defaults del useState
+            if (pv) setPostventaConfig(pv)
         }
         setLoading(false)
     }
@@ -115,7 +127,8 @@ export function OpsSettings() {
         await supabase.from('system_config').upsert({ key: 'sales_origins', value: origins })
         await supabase.from('system_config').upsert({ key: 'workflow_substates', value: subStatesByStage })
         await supabase.from('system_config').upsert({ key: 'ops_permissions', value: permissions })
-        await supabase.from('system_config').upsert({ key: 'graveyard_config', value: freezeConfig }) // Guardar config cementerio
+        await supabase.from('system_config').upsert({ key: 'graveyard_config', value: freezeConfig })
+        await supabase.from('system_config').upsert({ key: 'postventa_config', value: postventaConfig }) // ✅ Guardamos Postventa
         
         setLoading(false)
         alert("✅ Configuración guardada y aplicada al sistema.")
@@ -130,7 +143,7 @@ export function OpsSettings() {
     const addOrigin = () => { if(newOrigin && !origins.includes(newOrigin)) { setOrigins([...origins, newOrigin]); setNewOrigin("") } }
     const deleteOrigin = (name: string) => setOrigins(origins.filter(o => o !== name))
     
-    // --- HANDLERS USUARIOS (CORREGIDO PUNTO 14) ---
+    // --- HANDLERS USUARIOS ---
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (file) {
@@ -146,13 +159,12 @@ export function OpsSettings() {
         setLoading(true)
         
         try {
-            // USAMOS LA FUNCIÓN SQL QUE CREAMOS
             const { data, error } = await supabase.rpc('create_new_user', {
                 email: newUser.email,
                 password: newUser.password,
                 full_name: newUser.name,
                 role: newUser.role,
-                work_hours: 5 // Default
+                work_hours: 5
             })
 
             if (error) throw error
@@ -178,6 +190,27 @@ export function OpsSettings() {
     // --- HANDLERS WORKFLOWS ---
     const addSubState = () => { if(newSubState && selectedStage) { setSubStatesByStage({ ...subStatesByStage, [selectedStage]: [...(subStatesByStage[selectedStage] || []), newSubState] }); setNewSubState("") } }
     const deleteSubState = (val: string) => { setSubStatesByStage({ ...subStatesByStage, [selectedStage]: subStatesByStage[selectedStage].filter(s => s !== val) }) }
+
+    // --- HANDLERS POSTVENTA (NUEVO) ---
+    const addFinancialStatus = () => { 
+        if(newFinancialStatus && !postventaConfig.financial_status.includes(newFinancialStatus)) { 
+            setPostventaConfig({ ...postventaConfig, financial_status: [...(postventaConfig.financial_status || []), newFinancialStatus] })
+            setNewFinancialStatus("") 
+        } 
+    }
+    const deleteFinancialStatus = (status: string) => {
+        setPostventaConfig({ ...postventaConfig, financial_status: postventaConfig.financial_status.filter(s => s !== status) })
+    }
+
+    const addActionStatus = () => { 
+        if(newActionStatus && !postventaConfig.action_status.includes(newActionStatus)) { 
+            setPostventaConfig({ ...postventaConfig, action_status: [...(postventaConfig.action_status || []), newActionStatus] })
+            setNewActionStatus("") 
+        } 
+    }
+    const deleteActionStatus = (status: string) => {
+        setPostventaConfig({ ...postventaConfig, action_status: postventaConfig.action_status.filter(s => s !== status) })
+    }
 
     // --- HANDLERS PERMISOS ---
     const togglePermission = (key: keyof typeof permissions) => { 
@@ -220,7 +253,11 @@ export function OpsSettings() {
                         <Users size={18}/> Usuarios
                     </button>
                     <button onClick={() => setActiveTab('workflows')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold ${activeTab === 'workflows' ? 'bg-white shadow-md text-blue-600 ring-1 ring-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}>
-                        <GitPullRequest size={18}/> Procesos & Estados
+                        <GitPullRequest size={18}/> Procesos
+                    </button>
+                    {/* ✅ NUEVO TAB POSTVENTA */}
+                    <button onClick={() => setActiveTab('postventa')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold ${activeTab === 'postventa' ? 'bg-white shadow-md text-blue-600 ring-1 ring-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}>
+                        <LayoutList size={18}/> Postventa
                     </button>
                     <button onClick={() => setActiveTab('permissions')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold ${activeTab === 'permissions' ? 'bg-white shadow-md text-blue-600 ring-1 ring-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}>
                         <Lock size={18}/> Permisos
@@ -395,10 +432,10 @@ export function OpsSettings() {
                         </div>
                     )}
 
-                    {/* --- TAB WORKFLOWS (CON CEMENTERIO) --- */}
+                    {/* --- TAB WORKFLOWS --- */}
                     {activeTab === 'workflows' && (
                         <div className="space-y-6">
-                             {/* CONFIGURACIÓN CEMENTERIO (NUEVO) */}
+                             {/* CONFIGURACIÓN CEMENTERIO */}
                              <Card className="border-l-4 border-l-blue-500 shadow-sm">
                                 <CardHeader>
                                     <CardTitle className="flex items-center gap-2"><Snowflake className="h-5 w-5 text-blue-500"/> Configuración de Cementerio</CardTitle>
@@ -487,7 +524,58 @@ export function OpsSettings() {
                         </div>
                     )}
 
-                    {/* --- TAB PERMISOS (Aquí se configuran los permisos para Admin Común) --- */}
+                    {/* --- TAB POSTVENTA (NUEVO) --- */}
+                    {activeTab === 'postventa' && (
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* CARD ESTADOS FINANCIEROS */}
+                                <Card className="border-slate-200 shadow-sm border-l-4 border-l-yellow-500">
+                                    <CardHeader>
+                                        <CardTitle className="text-yellow-700">Estados Mora</CardTitle>
+                                        <CardDescription>Opciones para la columna "Estado Financiero".</CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="flex gap-2 mb-4">
+                                            <Input className="bg-white" placeholder="Ej: Mora 4..." value={newFinancialStatus} onChange={e=>setNewFinancialStatus(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addFinancialStatus()}/>
+                                            <Button onClick={addFinancialStatus} variant="secondary" className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200">Agregar</Button>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 min-h-[50px]">
+                                            {(postventaConfig.financial_status || []).map(status => (
+                                                <Badge key={status} variant="secondary" className="px-3 py-1 bg-yellow-50 text-yellow-800 border-yellow-200 hover:bg-red-100 hover:text-red-700 cursor-pointer group" onClick={() => deleteFinancialStatus(status)}>
+                                                    {status} <X size={10} className="ml-1 opacity-50 group-hover:opacity-100"/>
+                                                </Badge>
+                                            ))}
+                                            {(!postventaConfig.financial_status || postventaConfig.financial_status.length === 0) && <span className="text-xs text-slate-400 italic">Sin estados definidos.</span>}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                {/* CARD ACCIONES DISPONIBLES */}
+                                <Card className="border-slate-200 shadow-sm border-l-4 border-l-blue-500">
+                                    <CardHeader>
+                                        <CardTitle className="text-blue-700">Acciones Disponibles</CardTitle>
+                                        <CardDescription>Opciones para la columna "Acción".</CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="flex gap-2 mb-4">
+                                            <Input className="bg-white" placeholder="Ej: Carta Documento..." value={newActionStatus} onChange={e=>setNewActionStatus(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addActionStatus()}/>
+                                            <Button onClick={addActionStatus} variant="secondary" className="bg-blue-100 text-blue-700 hover:bg-blue-200">Agregar</Button>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 min-h-[50px]">
+                                            {(postventaConfig.action_status || []).map(status => (
+                                                <Badge key={status} variant="secondary" className="px-3 py-1 bg-blue-50 text-blue-800 border-blue-200 hover:bg-red-100 hover:text-red-700 cursor-pointer group" onClick={() => deleteActionStatus(status)}>
+                                                    {status} <X size={10} className="ml-1 opacity-50 group-hover:opacity-100"/>
+                                                </Badge>
+                                            ))}
+                                            {(!postventaConfig.action_status || postventaConfig.action_status.length === 0) && <span className="text-xs text-slate-400 italic">Sin acciones definidas.</span>}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* --- TAB PERMISOS --- */}
                     {activeTab === 'permissions' && (
                         <div className="space-y-6">
                             <Card className="border-slate-200 shadow-sm border-l-4 border-l-pink-500">

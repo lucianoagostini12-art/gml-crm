@@ -170,6 +170,36 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
+    // ✅ NUEVO: MANEJADOR DE CLIC EN NOTIFICACIÓN
+    const handleNotificationClick = async (n: any) => {
+        // 1. Marcar como leída localmente y en DB
+        if (!n.read) {
+            setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, read: true } : item))
+            await supabase.from('notifications').update({ read: true }).eq('id', n.id)
+        }
+        
+        // 2. Si tiene un ID de venta vinculado, abrir el modal
+        if (n.lead_id) {
+            // Buscamos si la operación ya está cargada en la vista actual
+            let targetOp = operations.find(o => o.id === n.lead_id)
+            
+            // Si no está (ej: está en una etapa que no estamos viendo), hacemos fetch rápido
+            if (!targetOp) {
+                const { data } = await supabase.from('leads').select('*').eq('id', n.lead_id).single()
+                if (data) {
+                    // Creamos un objeto mínimo compatible con Operation para abrir el modal
+                    // OpsModal hará el fetch completo de datos igual
+                    targetOp = { ...data, id: data.id, clientName: data.name, status: data.status } as any
+                }
+            }
+
+            if (targetOp) {
+                setSelectedOp(targetOp)
+                setIsBellOpen(false) // Cerramos el popover
+            }
+        }
+    }
+
     // === FETCH OPERATIONS ===
     const fetchOperations = async () => {
         setIsLoading(true)
@@ -273,6 +303,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 const newData = payload.new as any
                 const oldData = payload.old as any
 
+                // 🔔 NOTIFICACIÓN DE VENTA NUEVA (INSERT o UPDATE de estado)
                 if (
                     (payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) ||
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData.status !== newData.status)
@@ -608,7 +639,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 <div className="max-h-[300px] overflow-y-auto">
                                     {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
                                         notifications.map((n) => (
-                                            <div key={n.id} className={`p-3 border-b hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}>
+                                            <div 
+                                                key={n.id} 
+                                                onClick={() => handleNotificationClick(n)} // ✅ CLICK PARA LEER Y ABRIR
+                                                className={`p-3 border-b hover:bg-slate-50 transition-colors cursor-pointer ${!n.read ? 'bg-blue-50/50' : ''}`}
+                                            >
                                                 <div className="flex items-start gap-3">
                                                     <div className={`mt-1 h-2 w-2 rounded-full ${!n.read ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
                                                     <div>
@@ -631,8 +666,15 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 </header>
 
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                    {viewMode === 'kanban' ? (
-                        <div className="w-full h-full bg-slate-100 p-4 overflow-hidden"><OpsKanban operations={filteredOps} onSelectOp={handleCardClick} /></div>
+                   {viewMode === 'kanban' ? (
+                        <div className="w-full h-full bg-slate-100 p-4 overflow-hidden">
+                            <OpsKanban 
+                                operations={filteredOps} 
+                                profiles={profiles} // ✅ Pasamos los perfiles para las fotos
+                                onSelectOp={handleCardClick} 
+                                onStatusChange={(id: string, newStatus: string) => updateOpInDb(id, { status: newStatus })} // ✅ Función para guardar el Drag & Drop
+                            />
+                        </div>
                     ) : (
                         <ScrollArea className="flex-1 h-full">
                             <div className="p-6">

@@ -163,7 +163,7 @@ export function OpsModal({
     // --- CARGA INICIAL (PURGA DE ESTADO) ---
     useEffect(() => {
         if(isOpen && op?.id) {
-            setLocalOp(null) // Purga inmediata para evitar datos viejos
+            setLocalOp(null) // Purga inmediata
             fetchFullData(op.id)
             
             const channel = supabase.channel('ops_chat_room')
@@ -210,6 +210,20 @@ export function OpsModal({
         }
     }
 
+    // --- HELPER DE NOTIFICACIÓN ---
+    const sendNotification = async (targetUser: string, title: string, body: string, type: 'info'|'alert'|'success') => {
+        if (!targetUser || targetUser === "Sin Asignar" || targetUser === currentUser) return
+        
+        await supabase.from('notifications').insert({
+            user_name: targetUser,
+            title,
+            body,
+            type,
+            read: false,
+            lead_id: localOp.id // Vinculamos la notificación a esta operación
+        })
+    }
+
     // --- MOTOR DE GUARDADO INTELIGENTE ---
     const updateField = async (field: string, value: any) => {
         if (!localOp) return
@@ -227,42 +241,25 @@ export function OpsModal({
         setTimeout(() => setIsSaving(false), 500)
     }
 
-    // ✅ FIX DEFINITIVO: CAMBIAR TIPO ALTA <-> PASS VISUALMENTE
+    // ✅ FUNCIÓN PARA CAMBIAR ENTRE ALTA Y PASS AL CLICKEAR ICONO
     const toggleSaleType = async () => {
         if (!localOp) return
-        
-        // 1. Detectamos qué es ahora
         const isCurrentlyPass = localOp.type === 'pass' || localOp.source === 'pass' || localOp.sub_state === 'auditoria_pass'
-        
-        // 2. Definimos lo opuesto
         const nextType = isCurrentlyPass ? 'alta' : 'pass'
         
-        // 3. ¡IMPORTANTE! Si volvemos a ALTA, limpiamos el source 'pass' para que no quede violeta
         let nextSource = localOp.source
         if (nextType === 'pass') {
-            nextSource = 'pass' // Si vamos a pass, forzamos source pass
+            nextSource = 'pass' 
         } else if (localOp.source === 'pass') {
-            nextSource = 'Base de Datos' // Si era pass y volvemos a alta, ponemos un neutro
+            nextSource = 'Base de Datos' 
         }
 
-        // 4. Creamos el objeto nuevo COMPLETO para no usar datos viejos
-        const updatedOp = {
-            ...localOp,
-            type: nextType,
-            source: nextSource
-        }
-
-        // 5. Actualizamos visualmente YA
+        const updatedOp = { ...localOp, type: nextType, source: nextSource }
         setLocalOp(updatedOp)
         onUpdateOp(updatedOp)
-
-        // 6. Guardamos en DB
         setIsSaving(true)
-        await supabase.from('leads').update({ 
-            type: nextType,
-            source: nextSource
-        }).eq('id', localOp.id)
         
+        await supabase.from('leads').update({ type: nextType, source: nextSource }).eq('id', localOp.id)
         setTimeout(() => setIsSaving(false), 300)
     }
 
@@ -292,6 +289,11 @@ export function OpsModal({
             await updateField('sub_state', null)
             await updateField('status', next)
             requestAdvance()
+            
+            // Notificación de éxito si llega al final
+            if (next === 'cumplidas') {
+                sendNotification(localOp.agent_name, "🎉 Venta Cumplida", `La venta de ${localOp.name} fue aprobada.`, "success")
+            }
         }
     }
 
@@ -307,6 +309,7 @@ export function OpsModal({
     const handleSellerChange = async () => {
         if(!newSeller) return
         await updateField('agent_name', newSeller)
+        sendNotification(newSeller, "👤 Nueva Asignación", `Te asignaron la venta de ${localOp.name}`, "info")
         setIsSellerChangeOpen(false)
     }
 
@@ -364,6 +367,12 @@ export function OpsModal({
                 if (insErr) throw insErr
             }
             await fetchRealDocs(localOp.id)
+            
+            // Notificar al operador si quien sube es otro (ej: vendedor)
+            if (localOp.operator && localOp.operator !== currentUser) {
+                sendNotification(localOp.operator, "📎 Documentación Nueva", `${currentUser} subió archivos a ${localOp.name}`, "info")
+            }
+
         } catch (error: any) {
             alert(`Error: ${error.message}`)
         } finally {
@@ -374,16 +383,25 @@ export function OpsModal({
 
     const sendChatMessage = async () => {
         if(!chatInput.trim()) return
+        
+        // Determinar rol destino
+        let targetRole = 'seller'
+        if (role === 'seller') targetRole = 'ops'
+
         const msg = {
             lead_id: op.id,
             sender: currentUser || "Administración",
             text: chatInput,
-            target_role: 'seller',
+            target_role: targetRole,
             created_at: new Date().toISOString()
         }
         setRealChat(prev => [...prev, msg])
         setChatInput("")
         await supabase.from('lead_messages').insert(msg)
+
+        // Notificar al destinatario
+        const dest = role === 'seller' ? (localOp.operator || "Admins") : localOp.agent_name
+        sendNotification(dest, "💬 Nuevo Mensaje", `Mensaje de ${currentUser} en ${localOp.name}`, "info")
     }
 
     const handleSubmitCorrection = async () => {
@@ -402,6 +420,9 @@ export function OpsModal({
         setRealChat(prev => [...prev, msg])
         await supabase.from('lead_messages').insert(msg)
 
+        // Notificación PRIORITARIA de Rechazo
+        sendNotification(localOp.agent_name, "⚠️ Venta Rechazada", `Motivo: ${correctionReason}. Revisar urgente.`, "alert")
+
         setCorrectionReason("")
         setCorrectionComment("")
         setIsCorrectionOpen(false)
@@ -415,6 +436,12 @@ export function OpsModal({
         const currentNotes = localOp.notes || ""
         const updatedNotes = currentNotes ? `${currentNotes}|||${noteEntry}` : noteEntry
         await updateField('notes', updatedNotes)
+        
+        // Notificar al operador asignado si no soy yo
+        if (localOp.operator && localOp.operator !== currentUser) {
+            sendNotification(localOp.operator, "📝 Nota Interna", `${currentUser} agregó una nota en ${localOp.name}`, "info")
+        }
+
         setNewNoteInput("")
     }
 
@@ -423,12 +450,10 @@ export function OpsModal({
         if(data?.publicUrl) setPreviewFile({ ...file, url: data.publicUrl })
     }
 
-   if (!localOp) return (
+    if (!localOp) return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="h-[90vh] flex items-center justify-center">
-                {/* ✅ SOLUCIÓN: Agregamos el Título oculto para accesibilidad */}
                 <DialogTitle className="sr-only">Cargando...</DialogTitle>
-                
                 <Loader2 className="animate-spin h-10 w-10 text-blue-500" />
             </DialogContent>
         </Dialog>
@@ -575,7 +600,7 @@ export function OpsModal({
                         <ScrollArea style={{ width: '55%' }} className="border-r border-slate-100 bg-white shrink-0">
                             <div className="p-8 space-y-10">
                                 
-                           <section className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                <section className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
                                     <EditableField 
                                         label="Fecha Ingreso" 
                                         type="date" 
@@ -595,11 +620,10 @@ export function OpsModal({
 
                                 <section className="space-y-5">
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><User size={14}/> 1. Datos Titular</h4>
-                                  <div className="grid grid-cols-2 gap-x-8 gap-y-6">
+                                    <div className="grid grid-cols-2 gap-x-8 gap-y-6">
                                         <EditableField label="Nombre Completo" value={localOp.name} onBlur={(v: string) => updateField('name', v)} />
                                         <EditableField label="CUIL/CUIT" value={localOp.dni} onBlur={(v: string) => updateField('dni', v)} />
                                         
-                                        {/* ✅ CORREGIDO: Agregado type="date" para evitar errores de formato */}
                                         <EditableField 
                                             label="Nacimiento" 
                                             type="date" 
@@ -952,9 +976,6 @@ export function OpsModal({
             {previewFile && (
                 <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
                     <DialogContent className="max-w-4xl bg-black border-slate-800 p-0 overflow-hidden flex flex-col justify-center items-center shadow-2xl">
-                        {/* ✅ FIX DE ACCESIBILIDAD PARA EL ERROR DE CONSOLA */}
-                        <DialogTitle className="sr-only">Vista Previa de Archivo</DialogTitle>
-                        
                         <div className="absolute top-4 right-4 z-50">
                             <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 rounded-full" onClick={() => setPreviewFile(null)}>
                                 <X size={24}/>

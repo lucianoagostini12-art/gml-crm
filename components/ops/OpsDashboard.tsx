@@ -62,46 +62,43 @@ export function OpsDashboard({ operations, activeFilter, setActiveFilter }: any)
     const changeMonth = (delta: number) => {
         const [y, m] = selectedMonth.split('-').map(Number)
         // Ojo con el mes 0 en Date (Enero es 0, Diciembre es 11)
-        // Aquí restamos 1 para instanciar Date, sumamos delta, y volvemos a sumar 1 para el string
         const date = new Date(y, m - 1 + delta, 1)
         const newMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
         setSelectedMonth(newMonth)
     }
 
     const formatMonth = (isoMonth: string) => {
-        // isoMonth viene como "2023-12"
         const [y, m] = isoMonth.split('-').map(Number)
-        // Usamos dia 2 para evitar problemas de timezone al inicio del mes
         return new Date(y, m - 1, 2).toLocaleString('es-ES', { month: 'long', year: 'numeric' })
     }
 
     // --- LÓGICA CORE: OBTENER EL MES REAL DE LA OPERACIÓN ---
     const getEffectiveMonth = (o: any) => {
-        // 1. Si tiene billing_period (porque la movimos manual), GANADOR ABSOLUTO.
         if (o.billing_period) return o.billing_period
-
-        // 2. Si no, usamos la fecha de creación original.
-        // TRUCO: Usamos string slicing en lugar de Date() para evitar errores de timezone (-3hs).
-        // Si created_at es "2023-12-01T02:00:00.000Z", el substring(0,7) da "2023-12". Perfecto.
         const dateStr = o.created_at || o.entryDate || ""
         if (dateStr && dateStr.length >= 7) {
             return dateStr.substring(0, 7)
         }
-        
-        // Fallback por si no hay fechas
         return "1999-01"
     }
 
-    const countStatus = (status: string) => {
+    // ✅ Helper para obtener operaciones filtradas (sin .length, devuelve el array)
+    const getFilteredOps = (status: string) => {
         return operations.filter((o: any) => {
-            // 1. Coincidencia de estado
             if (o.status?.toLowerCase() !== status) return false
-
-            // 2. Coincidencia de mes (usando la lógica segura)
             const opMonth = getEffectiveMonth(o)
             return opMonth === selectedMonth
-        }).length
+        })
     }
+
+    const countStatus = (status: string) => getFilteredOps(status).length
+
+    // ✅ CÁLCULO DESGLOSADO PARA CUMPLIDAS
+    const cumplidasOps = getFilteredOps('cumplidas')
+    const totalCumplidas = cumplidasOps.length
+    // Asumimos 'alta' si no es 'pass', para cubrir casos viejos sin type
+    const totalAltas = cumplidasOps.filter((o: any) => o.type !== 'pass').length
+    const totalPass = cumplidasOps.filter((o: any) => o.type === 'pass').length
 
     return (
         <div className="mb-6 flex flex-col items-center animate-in fade-in slide-in-from-top-4 w-full">
@@ -136,11 +133,27 @@ export function OpsDashboard({ operations, activeFilter, setActiveFilter }: any)
             </div>
             
             <div className="flex justify-center gap-8 w-full flex-wrap">
-                <div onClick={() => handleFilter('cumplidas')} style={{backgroundColor: '#10b981'}} className={`w-48 h-32 rounded-xl flex flex-col items-center justify-center text-white shrink-0 cursor-pointer hover:scale-105 transition-transform p-3 ${activeFilter==='cumplidas' ? 'ring-4 ring-green-200' : ''}`}>
-                    <div className="mb-2 transform scale-125 opacity-90 -mt-2"><CheckCircle2 className="h-8 w-8 text-white"/></div>
-                    <span className="text-5xl font-black tracking-tighter leading-none">{countStatus('cumplidas')}</span>
-                    <span className="text-xs font-bold uppercase opacity-90 mt-2 tracking-widest">Cumplidas</span>
+                
+                {/* ✅ TARJETA CUMPLIDAS PERSONALIZADA CON DESGLOSE */}
+                <div 
+                    onClick={() => handleFilter('cumplidas')} 
+                    style={{backgroundColor: '#10b981'}} 
+                    className={`w-48 h-32 rounded-xl flex flex-col items-center justify-center text-white shrink-0 cursor-pointer hover:scale-105 transition-transform p-3 ${activeFilter==='cumplidas' ? 'ring-4 ring-green-200' : ''}`}
+                >
+                    {/* Ajusté márgenes para que entre el desglose */}
+                    <div className="mb-1 transform scale-110 opacity-90 -mt-1"><CheckCircle2 className="h-7 w-7 text-white"/></div>
+                    
+                    <span className="text-5xl font-black tracking-tighter leading-none">{totalCumplidas}</span>
+                    <span className="text-xs font-bold uppercase opacity-90 mt-1 tracking-widest">Cumplidas</span>
+                    
+                    {/* Desglose chiquitito */}
+                    <div className="flex gap-2 mt-1 text-[9px] font-medium opacity-80 bg-green-700/30 px-3 py-0.5 rounded-full">
+                        <span>{totalAltas} Altas</span>
+                        <span className="opacity-50">|</span> 
+                        <span>{totalPass} Pass</span>
+                    </div>
                 </div>
+
                 <BigStatusCard label="Rechazados" count={countStatus('rechazado')} color="red" icon={<XCircle className="h-8 w-8 text-white"/>} onClick={() => handleFilter('rechazado')} active={activeFilter==='rechazado'} />
             </div>
         </div>

@@ -23,8 +23,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 // Importamos el Modal para ver detalles
 import { OpsModal } from "./OpsModal"
-// ✅ CORRECCIÓN 1: Importamos OpStatus para tipar correctamente
-import { getStatusColor, OpStatus } from "./data"
+// ✅ CORRECCIÓN: Agregado getSubStateStyle al import
+import { getStatusColor, getSubStateStyle, OpStatus } from "./data"
 
 // --- TIPOS DE EVENTOS ---
 type HistoryEvent = {
@@ -45,7 +45,7 @@ type HistoryEvent = {
         name: string
         dni: string
         phone: string
-        status: OpStatus // ✅ CORRECCIÓN 2: Tipado estricto
+        status: OpStatus 
         plan?: string
         prepaga?: string
     }

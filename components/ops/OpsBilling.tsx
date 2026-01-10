@@ -118,7 +118,7 @@ export function OpsBilling() {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
     const [isLocked, setIsLocked] = useState(false)
     
-    // ✅ NUEVO: ESTADO PARA EL OJO DE PRIVACIDAD
+    // ESTADO PARA EL OJO DE PRIVACIDAD
     const [showValues, setShowValues] = useState(true)
 
     // Config
@@ -141,7 +141,7 @@ export function OpsBilling() {
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
 
-    // ✅ MAPA DE VENDEDORES (Para horas y fotos)
+    // MAPA DE VENDEDORES (Para horas y fotos)
     const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
     
     // --- FETCH ---
@@ -151,7 +151,6 @@ export function OpsBilling() {
             const map: Record<string, any> = {}
             profiles.forEach((p: any) => {
                 if (!p.full_name) return
-                // Detectar horario: Si dice "8", es 8hs. Si no, 5hs.
                 const hStr = String(p.work_hours || "5")
                 const shift = hStr.includes("8") ? '8hs' : '5hs'
                 
@@ -225,23 +224,19 @@ export function OpsBilling() {
 
     useEffect(() => {
         fetchData()
-        fetchSellers() // ✅ Cargamos vendedores al inicio
+        fetchSellers() 
         const channel = supabase.channel('billing_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: 'status=eq.cumplidas' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchSellers()) // Si cambia horario, refrescar
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchSellers()) 
             .subscribe()
         return () => { supabase.removeChannel(channel) }
     }, [])
 
-    // ✅ HELPER: FORMATEO DE MONEDA CON PRIVACIDAD Y REDONDEO OPCIONAL
     const formatMoney = (val: number, round: boolean = false) => {
         if (!showValues) return "$ ****"
-        
-        // Si round es true, usamos Math.round y 0 decimales
         const valueToUse = round ? Math.round(val) : val
         const decimals = round ? 0 : 2
-
         return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(valueToUse)
     }
 
@@ -253,7 +248,6 @@ export function OpsBilling() {
     const calculate = (op: any) => {
         let val = 0, formula = ""
         if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
-            // ✅ CORRECCIÓN: Respetar decimales en override
             val = parseFloat(op.billing_price_override.toString())
             formula = "Manual (Editado)"
         } else {
@@ -286,11 +280,9 @@ export function OpsBilling() {
         } else {
              const full = parseFloat(op.fullPrice || "0"); const aportes = parseFloat(op.aportes || "0"); const desc = parseFloat(op.descuento || "0")
              const netPayable = Math.max(0, full - desc - aportes)
-             // ✅ CORRECCIÓN: Usamos toFixed(2) para mantener decimales en cálculo
              portfolioVal = Number((netPayable * calcRules.portfolioRate).toFixed(2))
         }
         
-        // ✅ CORRECCIÓN FINAL: Devolver con 2 decimales fijos, NO redondear a entero
         return { val: Number(val.toFixed(2)), formula, portfolio: Number(portfolioVal.toFixed(2)) }
     }
 
@@ -304,12 +296,10 @@ export function OpsBilling() {
         return new Date(y, m - 1, 1).toLocaleString('es-ES', { month: 'long', year: 'numeric' })
     }
 
-    // --- FILTRADO DE DATOS ---
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
-            
             const targetMonth = op.billing_period || defaultMonth
             
             if (targetMonth !== selectedMonth) return false
@@ -338,7 +328,6 @@ export function OpsBilling() {
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
 
-    // --- HISTORIAL ---
     const historyData = useMemo(() => {
         const aggregated: Record<string, number> = {}
         operations.forEach(op => {
@@ -352,7 +341,6 @@ export function OpsBilling() {
         return Object.entries(aggregated).sort((a, b) => a[0].localeCompare(b[0])).map(([month, total]) => ({ month, total })).slice(-12)
     }, [operations, calcRules]) 
 
-    // --- TOTALES ---
     const { totalNeto, totalIVA, breakdown } = useMemo(() => {
         let neto = 0, preve = 0, sumPreve = 0, sumXP = 0, sumAMPF = 0
         approvedOps.forEach(op => {
@@ -372,7 +360,6 @@ export function OpsBilling() {
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => acc + (parseFloat(item.calculated_liquidation || "0") * calcRules.portfolioRate), 0)
     const totalPortfolio = portfolioOps + portfolioManualTotal
 
-    // --- COMISIONES VENDEDORAS ---
     const sellersCommissions = useMemo(() => {
         const result: any[] = []
         const grouped: Record<string, Operation[]> = {}
@@ -380,7 +367,6 @@ export function OpsBilling() {
 
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
-            
             const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${sellerName}` }
             const shiftRules = commissionRules.scales[sellerInfo.shift] 
             
@@ -398,7 +384,6 @@ export function OpsBilling() {
             })
 
             standardOps.sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
-            
             const totalStandardCount = standardOps.reduce((acc, op) => {
                 const isAMPF = op.prepaga?.toUpperCase().includes("AMPF")
                 return acc + (isAMPF ? 1 : (op.capitas || 1))
@@ -431,7 +416,6 @@ export function OpsBilling() {
     const handlePriceChange = (id: string, v: string) => updateOpBilling(id, { billing_price_override: parseFloat(v) })
     const handlePortfolioChange = (id: string, v: string) => updateOpBilling(id, { billing_portfolio_override: parseFloat(v) })
     
-    // ✅ MOVER A PRÓXIMO MES
     const confirmDefer = () => { 
         if(deferOpId){ 
             const [y,m]=selectedMonth.split('-').map(Number); 
@@ -442,7 +426,6 @@ export function OpsBilling() {
         } 
     }
     
-    // ✅ MOVER A MES ANTERIOR
     const confirmRetro = () => { 
         if(retroOpId){ 
             const [y,m]=selectedMonth.split('-').map(Number); 
@@ -521,7 +504,7 @@ export function OpsBilling() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {/* ✅ BOTÓN DE PRIVACIDAD */}
+                    {/* BOTÓN DE PRIVACIDAD */}
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setShowValues(!showValues)} title={showValues ? "Ocultar Valores" : "Mostrar Valores"}>
                         {showValues ? <Eye size={16}/> : <EyeOff size={16}/>}
                     </Button>
@@ -531,7 +514,7 @@ export function OpsBilling() {
                 </div>
             </div>
 
-            {/* TOTALES - ✅ APLICADO ROUNDING A LOS VALORES GRANDES */}
+            {/* TOTALES */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
                 <Card className="bg-slate-900 border-0 text-white shadow-xl relative overflow-hidden">
                     <CardContent className="p-5 flex flex-col justify-between h-full z-10 relative">
@@ -595,12 +578,21 @@ export function OpsBilling() {
                         <div className="bg-orange-50/50 p-3 border-b border-orange-100 flex items-center gap-2 text-xs text-orange-800 font-medium"><AlertTriangle size={14}/> Estas ventas están en el período seleccionado pero aún no fueron aprobadas.</div>
                         <CardContent className="p-0 flex-1 overflow-auto">
                             <Table>
-                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[220px]">Cliente / Origen</TableHead><TableHead>Vendedor</TableHead><TableHead>Prepaga / Plan</TableHead><TableHead className="text-right">Valores Base</TableHead><TableHead className="w-[180px]">Cálculo</TableHead><TableHead className="text-right font-bold text-slate-700">Estimado</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
+                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[250px]">Cliente / Origen</TableHead><TableHead>Vendedor</TableHead><TableHead>Prepaga / Plan</TableHead><TableHead className="text-right">Valores Base</TableHead><TableHead className="w-[180px]">Cálculo</TableHead><TableHead className="text-right font-bold text-slate-700">Estimado</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
                                 <TableBody>{pendingOps.length === 0 ? (<TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {formatMonth(selectedMonth)}.</TableCell></TableRow>) : pendingOps.map((op: any) => {
                                     const calc = calculate(op)
                                     return (
                                         <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
-                                            <TableCell><div className="font-bold text-slate-800">{op.clientName}</div><div className="text-[11px] font-mono text-slate-400">{op.dni}</div><div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div></TableCell>
+                                            <TableCell>
+                                                <div className="font-bold text-slate-800">
+                                                    {op.clientName} 
+                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        {op.cuit || op.dni}
+                                                    </span>
+                                                </div>
+                                                <div className="text-[11px] font-mono text-slate-400">{op.dni}</div>
+                                                <div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div>
+                                            </TableCell>
                                             <TableCell><span className="text-xs font-medium text-slate-600">{op.seller}</span></TableCell>
                                             <TableCell>
                                                 <Badge variant="outline" className={`mb-1 border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
@@ -611,17 +603,12 @@ export function OpsBilling() {
                                             <TableCell className="text-right font-bold text-slate-800 text-sm">{formatMoney(calc.val)}</TableCell>
                                             <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                                                 <div className="flex justify-end gap-2">
-                                                    
-                                                    {/* ✅ BOTÓN: IR ATRÁS */}
                                                     <Button size="sm" variant="secondary" className="h-8 text-slate-600" onClick={() => setRetroOpId(op.id)}>
                                                         <ArrowLeft size={14} className="mr-1"/> Ant.
                                                     </Button>
-
-                                                    {/* ✅ BOTÓN: IR ADELANTE */}
                                                     <Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50" onClick={() => setDeferOpId(op.id)}>
                                                         Próx. <ArrowRight size={14} className="ml-1"/>
                                                     </Button>
-
                                                     <Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>Aprobar</Button>
                                                 </div>
                                             </TableCell>
@@ -657,7 +644,12 @@ export function OpsBilling() {
                                     return (
                                         <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
                                             <TableCell>
-                                                <div className="font-bold text-slate-800">{op.clientName}</div>
+                                                <div className="font-bold text-slate-800">
+                                                    {op.clientName}
+                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        {op.cuit || op.dni}
+                                                    </span>
+                                                </div>
                                                 <div className="flex items-center gap-2 text-xs text-slate-500">
                                                     <Badge variant="outline" className={`h-4 px-1 text-[9px] border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
                                                     <span>{op.plan}</span>
@@ -694,7 +686,12 @@ export function OpsBilling() {
                                         const liq = calculate(op)
                                         return (
                                             <TableRow key={op.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedOp(op)}>
-                                                <TableCell className="font-bold text-slate-700">{op.clientName}</TableCell>
+                                                <TableCell className="font-bold text-slate-700">
+                                                    {op.clientName}
+                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        {op.cuit || op.dni}
+                                                    </span>
+                                                </TableCell>
                                                 <TableCell><Badge variant="secondary" className="text-[9px]">Automático</Badge></TableCell>
                                                 <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge></TableCell>
                                                 <TableCell>{formatMoney(liq.val)}</TableCell>
@@ -712,7 +709,12 @@ export function OpsBilling() {
                                         const currentVal = Number((parseFloat(item.calculated_liquidation || "0") * calcRules.portfolioRate).toFixed(2))
                                         return (
                                             <TableRow key={item.id} className="bg-yellow-50/30">
-                                                <TableCell className="font-bold text-slate-700">{item.name}</TableCell>
+                                                <TableCell className="font-bold text-slate-700">
+                                                    {item.name}
+                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        {item.dni}
+                                                    </span>
+                                                </TableCell>
                                                 <TableCell><Badge variant="secondary" className="bg-yellow-100 text-yellow-700 text-[9px]">Manual DB</Badge></TableCell>
                                                 <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(item.prepaga)}`}>{item.prepaga}</Badge></TableCell>
                                                 <TableCell>${parseFloat(item.calculated_liquidation || "0").toLocaleString()}</TableCell>

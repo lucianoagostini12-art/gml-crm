@@ -1,12 +1,12 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Search, Download, Filter, Eye, Trash2, X } from "lucide-react"
+import { Search, Download, Filter, Eye, Trash2, X, CalendarCheck } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +40,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
 
     // Estados para Filtros Avanzados
     const [filterStatus, setFilterStatus] = useState("all")
+    const [filterSeller, setFilterSeller] = useState("all") // ✅ NUEVO FILTRO VENDEDOR
     const [filterDateStart, setFilterDateStart] = useState("")
     const [filterDateEnd, setFilterDateEnd] = useState("")
 
@@ -57,15 +58,27 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         }
     }
 
+    // ✅ EXTRAER VENDEDORES ÚNICOS PARA EL FILTRO
+    const uniqueSellers = useMemo(() => {
+        const sellers = new Set(localOperations.map((op: any) => op.seller).filter(Boolean))
+        return Array.from(sellers).sort() as string[]
+    }, [localOperations])
+
+    // ✅ HELPER PARA FORMATEAR MES DE LIQUIDACIÓN
+    const formatBillingPeriod = (period: string) => {
+        if (!period) return "-"
+        const [year, month] = period.split('-')
+        const date = new Date(parseInt(year), parseInt(month) - 1, 1)
+        return date.toLocaleString('es-ES', { month: 'long', year: 'numeric' })
+    }
+
     // --- LÓGICA DE FILTRADO ---
     const filteredOps = localOperations.filter((op: any) => {
         // 1. Buscador Potente (Texto libre)
         if (searchTerm) {
             const searchLower = searchTerm.toLowerCase()
-            // Creamos un string con toda la data importante para buscar ahí
             const opString = JSON.stringify({
                 ...op,
-                // Agregamos campos específicos para asegurar búsqueda fácil
                 search_date: op.entryDate,
                 search_seller: op.seller,
                 search_notes: op.history?.map((h:any) => h.action).join(" ")
@@ -77,7 +90,10 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         // 2. Filtro de Estado Exacto
         if (filterStatus !== "all" && op.status !== filterStatus) return false
 
-        // 3. Filtro de Fechas
+        // 3. ✅ Filtro de Vendedor
+        if (filterSeller !== "all" && op.seller !== filterSeller) return false
+
+        // 4. Filtro de Fechas
         if (filterDateStart && op.entryDate < filterDateStart) return false
         if (filterDateEnd && op.entryDate > filterDateEnd) return false
 
@@ -88,26 +104,24 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
     const handleExportCSV = () => {
         if (filteredOps.length === 0) return alert("No hay datos para exportar")
 
-        // Definir cabeceras
-        const headers = ["ID", "Fecha Ingreso", "Cliente", "DNI", "Estado", "Prepaga", "Plan", "Vendedor", "Admin", "Notas"]
+        const headers = ["ID", "Fecha Ingreso", "Mes Liquidado", "Cliente", "DNI", "Estado", "Prepaga", "Plan", "Vendedor", "Admin", "Notas"]
         
-        // Convertir datos a CSV
         const csvRows = filteredOps.map((op: any) => [
             op.id,
             op.entryDate,
-            `"${op.clientName}"`, // Comillas para evitar errores con comas en nombres
+            op.billing_period || "-", // Agregado al CSV también
+            `"${op.clientName}"`,
             op.dni,
             op.status,
             op.prepaga,
             op.plan,
             op.seller,
             op.operator || "Sin asignar",
-            `"${(op.history?.[0]?.action || "").replace(/"/g, '""')}"` // Escapar comillas en notas
+            `"${(op.history?.[0]?.action || "").replace(/"/g, '""')}"`
         ])
 
         const csvContent = [headers.join(","), ...csvRows.map((r: any) => r.join(","))].join("\n")
         
-        // Crear blob y descargar
         const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
         const url = URL.createObjectURL(blob)
         const link = document.createElement("a")
@@ -128,15 +142,12 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         if (!deleteId) return
         setDeleting(true)
         
-        // Borrar de Supabase
         const { error } = await supabase.from('leads').delete().eq('id', deleteId)
         
         if (error) {
             alert("Error al eliminar: " + error.message)
         } else {
-            // Actualización Optimista: Lo sacamos de la lista visual YA mismo
             setLocalOperations((prev: any[]) => prev.filter(op => op.id !== deleteId))
-            
             setIsDeleteOpen(false)
             setDeleteId(null)
         }
@@ -174,7 +185,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                     {/* FILTROS POPOVER */}
                     <Popover>
                         <PopoverTrigger asChild>
-                            <Button variant="secondary" className={`border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-600 ${(filterStatus !== 'all' || filterDateStart) ? 'text-blue-600 border-blue-200 bg-blue-50' : ''}`}>
+                            <Button variant="secondary" className={`border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-600 ${(filterStatus !== 'all' || filterSeller !== 'all' || filterDateStart) ? 'text-blue-600 border-blue-200 bg-blue-50' : ''}`}>
                                 <Filter size={16} className="mr-2"/> Filtros
                             </Button>
                         </PopoverTrigger>
@@ -182,8 +193,8 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center">
                                     <h4 className="font-bold text-sm">Filtrar Vista</h4>
-                                    {(filterStatus !== 'all' || filterDateStart) && (
-                                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-red-500" onClick={() => {setFilterStatus('all'); setFilterDateStart(''); setFilterDateEnd('')}}>
+                                    {(filterStatus !== 'all' || filterSeller !== 'all' || filterDateStart) && (
+                                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-red-500" onClick={() => {setFilterStatus('all'); setFilterSeller('all'); setFilterDateStart(''); setFilterDateEnd('')}}>
                                             Limpiar
                                         </Button>
                                     )}
@@ -200,6 +211,21 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                         </SelectContent>
                                     </Select>
                                 </div>
+                                
+                                {/* ✅ FILTRO POR VENDEDOR AGREGADO */}
+                                <div className="space-y-1">
+                                    <Label className="text-xs text-slate-500 uppercase font-bold">Vendedor / Profile</Label>
+                                    <Select value={filterSeller} onValueChange={setFilterSeller}>
+                                        <SelectTrigger><SelectValue/></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Todos los Vendedores</SelectItem>
+                                            {uniqueSellers.map((seller: string) => (
+                                                <SelectItem key={seller} value={seller}>{seller}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
                                 <div className="space-y-1">
                                     <Label className="text-xs text-slate-500 uppercase font-bold">Fecha Desde</Label>
                                     <Input type="date" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)}/>
@@ -225,6 +251,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                 <TableHead className="font-bold text-slate-700">DNI / CUIT</TableHead>
                                 <TableHead className="font-bold text-slate-700">Plan</TableHead>
                                 <TableHead className="font-bold text-slate-700">Estado</TableHead>
+                                <TableHead className="font-bold text-slate-700 text-center">Liquidación</TableHead> {/* ✅ NUEVA COLUMNA */}
                                 <TableHead className="font-bold text-slate-700">Ingreso</TableHead>
                                 <TableHead className="font-bold text-slate-700">Vendedor</TableHead>
                                 <TableHead className="font-bold text-slate-700">Admin</TableHead>
@@ -259,6 +286,18 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                             {op.status}
                                         </span>
                                     </TableCell>
+                                    
+                                    {/* ✅ NUEVA CELDA: MES DE LIQUIDACIÓN */}
+                                    <TableCell className="text-center">
+                                        {op.status === 'cumplidas' && op.billing_period ? (
+                                            <Badge variant="secondary" className="bg-green-50 text-green-700 border-green-200 font-bold capitalize flex items-center gap-1 justify-center">
+                                                <CalendarCheck size={10} /> {formatBillingPeriod(op.billing_period)}
+                                            </Badge>
+                                        ) : (
+                                            <span className="text-slate-300">-</span>
+                                        )}
+                                    </TableCell>
+
                                     <TableCell className="text-xs text-slate-500">{op.entryDate}</TableCell>
                                     <TableCell className="text-xs font-bold text-slate-600">{op.seller}</TableCell>
                                     <TableCell className="text-xs text-slate-500">{op.operator || '-'}</TableCell>
@@ -266,7 +305,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                             ))}
                             {filteredOps.length === 0 && (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="text-center py-10 text-slate-400">
+                                    <TableCell colSpan={9} className="text-center py-10 text-slate-400">
                                         No se encontraron resultados con los filtros actuales.
                                     </TableCell>
                                 </TableRow>

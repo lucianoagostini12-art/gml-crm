@@ -31,8 +31,7 @@ export async function POST(req: Request) {
     const ref = (body.ref || "").toString().trim()
 
     if (!telefono) {
-      // No cortamos con 400 para no “romper” frontends,
-      // pero devolvemos success false
+      // No cortamos con 400 para no romper frontends
       return NextResponse.json({ success: false, error: "No phone" }, { headers: corsHeaders() })
     }
 
@@ -91,7 +90,7 @@ export async function POST(req: Request) {
       if (provincia) updates.province = provincia
       if (cp) updates.zip = cp
 
-      // Notes: si ya hay, lo “apendizamos” sin pisar
+      // Notes: si ya hay, lo apendizamos sin pisar
       if (extraNotes) {
         const prev = (existingLead.notes || "").toString()
         updates.notes = prev ? `${prev}\n${extraNotes}` : extraNotes
@@ -101,9 +100,6 @@ export async function POST(req: Request) {
       if (!existingLead.source || existingLead.source === "WATI / Bot") {
         updates.source = finalTag
       }
-
-      // No cambiamos status si ya lo estaban trabajando, pero si querés forzar ingresado:
-      // updates.status = "ingresado"
 
       const { error: updErr } = await supabase.from("leads").update(updates).eq("id", existingLead.id)
       if (updErr) {
@@ -125,6 +121,14 @@ export async function POST(req: Request) {
       zip: cp || null,
       created_at: now,
       last_update: now,
+
+      // ✅ CLAVE para que aparezca en AdminLeadFactory:
+      // AdminLeadFactory filtra por agent_name IS NULL o agent_name = "Sin Asignar"
+      // Para no depender de mayúsculas/minúsculas: dejamos NULL.
+      agent_name: null,
+
+      // Opcional prolijo: tu tabla tiene assigned_to
+      assigned_to: null,
     })
 
     if (insErr) {

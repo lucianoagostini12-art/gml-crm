@@ -711,7 +711,8 @@ export function OpsModal({
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                            <EditableField label="Cápitas Total" value={localOp.capitas} onBlur={(v: any) => updateField('capitas', v)} />
+                                            {/* ✅ CORRECCIÓN CÁPITAS: Convertir a número */}
+                                            <EditableField label="Cápitas Total" value={localOp.capitas} onBlur={(v: any) => updateField('capitas', v === "" ? 0 : parseInt(v))} />
                                         </div>
                                         <div className="pt-3 border-t border-slate-200 space-y-2">
                                             {localOp.hijos && localOp.hijos.length > 0 ? localOp.hijos.map((h: any, i: number) => (
@@ -783,10 +784,11 @@ export function OpsModal({
                                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b pb-3"><DollarSign size={14}/> 4. Valores Económicos</h4>
                                     <div className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="grid grid-cols-4 gap-4">
-                                            <EditableField label="Full Price" value={localOp.full_price} onBlur={(v: string) => updateField('full_price', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
-                                            <EditableField label="Aportes" value={localOp.aportes} onBlur={(v: string) => updateField('aportes', v)} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
-                                            <EditableField label="Descuento" value={localOp.descuento} onBlur={(v: string) => updateField('descuento', v)} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
-                                            <EditableField label="Total a Pagar" value={localOp.total_a_pagar} onBlur={(v: string) => updateField('total_a_pagar', v)} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-900" />
+                                            {/* ✅ CORRECCIÓN PRECIOS: Convertir a float antes de enviar */}
+                                            <EditableField label="Full Price" value={localOp.full_price} onBlur={(v: string) => updateField('full_price', v === "" ? 0 : parseFloat(v))} icon={<DollarSign size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
+                                            <EditableField label="Aportes" value={localOp.aportes} onBlur={(v: string) => updateField('aportes', v === "" ? 0 : parseFloat(v))} icon={<Wallet size={12}/>} prefix="$" color="text-base font-bold text-slate-700" />
+                                            <EditableField label="Descuento" value={localOp.descuento} onBlur={(v: string) => updateField('descuento', v === "" ? 0 : parseFloat(v))} icon={<Percent size={12}/>} prefix="$" color="text-base font-bold text-green-600" />
+                                            <EditableField label="Total a Pagar" value={localOp.total_a_pagar} onBlur={(v: string) => updateField('total_a_pagar', v === "" ? 0 : parseFloat(v))} icon={<DollarSign size={12}/>} prefix="$" color="text-lg font-black text-slate-900" />
                                         </div>
                                     </div>
                                 </section>

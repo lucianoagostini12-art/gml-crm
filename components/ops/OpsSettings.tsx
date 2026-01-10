@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw, ShieldAlert, Crown, Briefcase, Headset, Snowflake, Flame, Eye, EyeOff, LayoutList } from "lucide-react"
+import { Plus, Trash2, Shield, User, Save, CreditCard, Users, BarChart, X, Globe, Lock, GitPullRequest, DollarSign, HeartHandshake, ListFilter, Camera, Upload, Mail, RefreshCw, ShieldAlert, Crown, Briefcase, Headset, Snowflake, Flame, Eye, EyeOff, LayoutList, History } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch" 
 import { Separator } from "@/components/ui/separator"
@@ -75,7 +75,7 @@ export function OpsSettings() {
     // 5. PERMISOS (Desde DB)
     const [permissions, setPermissions] = useState({
         exportData: true, editSettings: false, deleteSales: false, assignCases: true,
-        accessMetrics: false, accessBilling: false, accessPostSale: true, 
+        accessMetrics: false, accessBilling: false, accessPostSale: true, accessHistory: false // ✅ AGREGADO HISTORIAL
     })
 
     // --- CARGA INICIAL ---
@@ -589,7 +589,7 @@ export function OpsSettings() {
                                         <div className="space-y-4">
                                             <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2"><Lock size={16}/> Acceso a Módulos</h4>
                                             <Separator/>
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                                 <div className="flex flex-col justify-between p-4 bg-orange-50 border border-orange-100 rounded-lg h-full">
                                                     <div className="flex items-center gap-3 mb-3">
                                                         <div className="bg-orange-100 p-2 rounded-full text-orange-600"><BarChart size={16}/></div>
@@ -618,6 +618,17 @@ export function OpsSettings() {
                                                     <div className="flex justify-between items-center">
                                                         <p className="text-[10px] text-blue-600 leading-tight pr-2">Gestión de cartera y mora.</p>
                                                         <Switch checked={permissions.accessPostSale} onCheckedChange={() => togglePermission('accessPostSale')} className="data-[state=checked]:bg-blue-600"/>
+                                                    </div>
+                                                </div>
+                                                {/* ✅ NUEVO PERMISO: HISTORIAL */}
+                                                <div className="flex flex-col justify-between p-4 bg-indigo-50 border border-indigo-100 rounded-lg h-full">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <div className="bg-indigo-100 p-2 rounded-full text-indigo-600"><History size={16}/></div>
+                                                        <Label className="font-bold text-indigo-800">Historial</Label>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <p className="text-[10px] text-indigo-600 leading-tight pr-2">Auditoría completa.</p>
+                                                        <Switch checked={permissions.accessHistory} onCheckedChange={() => togglePermission('accessHistory')} className="data-[state=checked]:bg-indigo-600"/>
                                                     </div>
                                                 </div>
                                             </div>

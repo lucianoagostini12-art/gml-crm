@@ -89,8 +89,9 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
 
         fetchMessages()
 
+        // SUSCRIPCIÓN REALTIME (Escuchar mensajes de OTROS)
         const msgChannel = supabase
-            .channel(`room:${activeChatId}`)
+            .channel(`chat_room:${activeChatId}`)
             .on('postgres_changes', { 
                 event: 'INSERT', 
                 schema: 'public', 
@@ -98,18 +99,23 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                 filter: `room_id=eq.${activeChatId}`
             }, (payload) => {
                 const newMsgRaw = payload.new as any
-                const newMsg = {
-                    id: newMsgRaw.id,
-                    chatId: newMsgRaw.room_id,
-                    user: newMsgRaw.user_name,
-                    text: newMsgRaw.text,
-                    time: new Date(newMsgRaw.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    isMe: newMsgRaw.user_name === currentUser,
-                    type: newMsgRaw.type,
-                    saleData: newMsgRaw.sale_data,
-                    status: "sent"
-                }
-                setMessages(prev => [...prev, newMsg])
+                // Evitamos procesar el mensaje si ya lo tenemos (porque lo insertamos nosotros manualmente)
+                setMessages(prev => {
+                    if (prev.some(m => m.id === newMsgRaw.id)) return prev
+                    
+                    const newMsg = {
+                        id: newMsgRaw.id,
+                        chatId: newMsgRaw.room_id,
+                        user: newMsgRaw.user_name,
+                        text: newMsgRaw.text,
+                        time: new Date(newMsgRaw.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        isMe: newMsgRaw.user_name === currentUser,
+                        type: newMsgRaw.type,
+                        saleData: newMsgRaw.sale_data,
+                        status: "sent"
+                    }
+                    return [...prev, newMsg]
+                })
             })
             .subscribe()
 
@@ -149,6 +155,7 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
         if (activeChatId === id) setActiveChatId(null)
     }
 
+    // ✅ ENVÍO DE MENSAJE (CORREGIDO PARA ACTUALIZACIÓN INSTANTÁNEA)
     const handleSend = async () => {
         if ((!msg.trim() && !attachedSale) || !activeChatId) return
 
@@ -158,13 +165,54 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
         setMsg("")
         setAttachedSale(null)
 
-        await supabase.from('chat_messages').insert({
+        // 1. INSERTAMOS Y PEDIMOS EL DATO DE VUELTA (.select().single())
+        const { data, error } = await supabase.from('chat_messages').insert({
             room_id: activeChatId,
             user_name: currentUser,
             text: textToSend,
             type: saleToSend ? 'sale_link' : 'text',
             sale_data: saleToSend || null,
-        })
+        }).select().single()
+
+        if (error) {
+            console.error("Error enviando mensaje:", error)
+            return
+        }
+
+        // 2. ✅ ACTUALIZAMOS EL ESTADO LOCAL MANUALMENTE (Para no esperar el Realtime)
+        if (data) {
+            const myNewMsg = {
+                id: data.id,
+                chatId: data.room_id,
+                user: data.user_name,
+                text: data.text,
+                time: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isMe: true, // Es mío
+                type: data.type,
+                saleData: data.sale_data,
+                status: "sent"
+            }
+            
+            setMessages(prev => {
+                // Doble chequeo por si el Realtime fue más rápido que el .select()
+                if (prev.some(m => m.id === myNewMsg.id)) return prev
+                return [...prev, myNewMsg]
+            })
+        }
+
+        // 3. Notificaciones a otros (Menciones)
+        if (textToSend.includes("@")) {
+            const mentionedUser = textToSend.split("@")[1]?.split(" ")[0]; 
+            if (mentionedUser && mentionedUser !== currentUser) {
+                 await supabase.from('notifications').insert({
+                    user_name: mentionedUser, 
+                    title: `💬 Mención en Chat`,
+                    body: `${currentUser} te mencionó: "${textToSend.substring(0, 30)}..."`,
+                    type: 'info',
+                    read: false
+                })
+            }
+        }
     }
 
     // --- MENCIONES ---
@@ -197,7 +245,6 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
     const mentionOps = operations.filter((o:any) => o.clientName && o.clientName.toLowerCase().includes(mentionQuery.toLowerCase()))
 
     return (
-        // ✅ CAMBIO CLAVE: h-[calc(100vh-10rem)] para ocupar todo el alto disponible sin overflow
         <div className="flex h-[calc(100vh-10rem)] w-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden relative">
             
             {/* SIDEBAR IZQUIERDO */}

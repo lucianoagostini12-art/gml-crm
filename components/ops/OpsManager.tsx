@@ -31,6 +31,7 @@ import { OpsSettings } from "./OpsSettings"
 import { OpsAnnouncements } from "./OpsAnnouncements" 
 import { OpsBilling } from "./OpsBilling" 
 import { OpsPostSale } from "./OpsPostSale"
+import { OpsHistory } from "./OpsHistory" // ✅ 1. IMPORTAMOS EL HISTORIAL
 
 interface OpsManagerProps { role: 'admin_god' | 'admin_common' | 'ops', userName: string }
 
@@ -39,8 +40,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true) 
     const [isLoading, setIsLoading] = useState(false)
     
-    // VIEW MODE
-    const [viewMode, setViewMode] = useState<'dashboard' | 'stage_list' | 'pool' | 'mine' | 'kanban' | 'agenda' | 'metrics' | 'chat' | 'database' | 'settings' | 'announcements' | 'billing' | 'post_sale'>('dashboard')
+    // VIEW MODE - ✅ 2. AGREGAMOS 'history' AL TIPO
+    const [viewMode, setViewMode] = useState<'dashboard' | 'stage_list' | 'pool' | 'mine' | 'kanban' | 'agenda' | 'metrics' | 'chat' | 'database' | 'settings' | 'announcements' | 'billing' | 'post_sale' | 'history'>('dashboard')
     
     const [currentStageFilter, setCurrentStageFilter] = useState<string | null>(null)
     
@@ -49,7 +50,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [profiles, setProfiles] = useState<any[]>([]) 
     
     // --- CONFIGURACIÓN GLOBAL ---
-    // ✅ Agregamos postventa al estado inicial
     const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any, origins: string[], postventa: any}>({
         prepagas: [], 
         subStates: {},
@@ -136,7 +136,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             const o = data.find(c => c.key === 'sales_origins')?.value || ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro']
             const pv = data.find(c => c.key === 'postventa_config')?.value
             
-            // ✅ Inyectamos la config de postventa si existe
             setGlobalConfig({ 
                 prepagas: p, 
                 subStates: s, 
@@ -170,32 +169,23 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
-    // ✅ NUEVO: MANEJADOR DE CLIC EN NOTIFICACIÓN
     const handleNotificationClick = async (n: any) => {
-        // 1. Marcar como leída localmente y en DB
         if (!n.read) {
             setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, read: true } : item))
             await supabase.from('notifications').update({ read: true }).eq('id', n.id)
         }
         
-        // 2. Si tiene un ID de venta vinculado, abrir el modal
         if (n.lead_id) {
-            // Buscamos si la operación ya está cargada en la vista actual
             let targetOp = operations.find(o => o.id === n.lead_id)
-            
-            // Si no está (ej: está en una etapa que no estamos viendo), hacemos fetch rápido
             if (!targetOp) {
                 const { data } = await supabase.from('leads').select('*').eq('id', n.lead_id).single()
                 if (data) {
-                    // Creamos un objeto mínimo compatible con Operation para abrir el modal
-                    // OpsModal hará el fetch completo de datos igual
                     targetOp = { ...data, id: data.id, clientName: data.name, status: data.status } as any
                 }
             }
-
             if (targetOp) {
                 setSelectedOp(targetOp)
-                setIsBellOpen(false) // Cerramos el popover
+                setIsBellOpen(false) 
             }
         }
     }
@@ -303,7 +293,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 const newData = payload.new as any
                 const oldData = payload.old as any
 
-                // 🔔 NOTIFICACIÓN DE VENTA NUEVA (INSERT o UPDATE de estado)
                 if (
                     (payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) ||
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData.status !== newData.status)
@@ -313,12 +302,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 
                 fetchOperations() 
             })
-            // ✅ INYECCIÓN: Escuchar notificaciones en tiempo real
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
                 if (payload.new.user_name === userName || role === 'admin_god') {
                     setNotifications(prev => [payload.new, ...prev])
-                    // Opcional: Sonido
-                    // new Audio('/notification.mp3').play().catch(e => {})
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {
@@ -331,7 +317,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }, [])
 
 
-    // --- FILTROS ---
     const uniqueSellers = useMemo(() => Array.from(new Set(operations.map(o => o.seller).filter(Boolean))), [operations])
     
     const filteredOps = operations.filter(op => {
@@ -688,7 +673,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
                                 {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
                                 
-                                {/* ✅ PASAMOS LA CONFIGURACIÓN GLOBAL A POSTVENTA */}
                                 {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale globalConfig={globalConfig} />}
                                 
                                 {viewMode === 'settings' && (role === 'admin_god' || permissions.editSettings) && <OpsSettings />}
@@ -697,6 +681,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 {viewMode === 'chat' && (<OpsChat currentUser={userName} operations={operations} onViewSale={(op: any) => { setViewMode('pool'); setSelectedOp(op); }} />)}
                                 {viewMode === 'database' && <OpsDatabase operations={filteredOps} onSelectOp={handleCardClick} />}
                                 {viewMode === 'announcements' && <OpsAnnouncements />} 
+                                {viewMode === 'history' && role === 'admin_god' && <OpsHistory />} {/* ✅ 3. RENDERIZAMOS EL COMPONENTE */}
                             </div>
                         </ScrollArea>
                     )}
@@ -813,7 +798,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 onClick={() => setManualLoadData({...manualLoadData, type: 'pass'})}
                                 className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'pass' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                             >
-                                🔄 Pass / Traspaso
+                                🔄 Pass
                             </button>
                         </div>
 

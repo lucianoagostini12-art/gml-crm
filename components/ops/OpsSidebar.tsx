@@ -1,6 +1,7 @@
 "use client"
 import { useState } from "react"
-import { LayoutGrid, Inbox, UserCheck, CalendarDays, BarChart3, LogOut, PanelLeftClose, FileText, ShieldAlert, Lock, AlertTriangle, CheckCircle2, XCircle, MessageSquare, Database, Settings, Megaphone, ChevronDown, ChevronRight, DollarSign, HeartHandshake } from "lucide-react"
+// 1. Agregamos 'History' a los imports
+import { LayoutGrid, Inbox, UserCheck, CalendarDays, BarChart3, LogOut, PanelLeftClose, FileText, ShieldAlert, Lock, AlertTriangle, CheckCircle2, XCircle, MessageSquare, Database, Settings, Megaphone, ChevronDown, ChevronRight, DollarSign, HeartHandshake, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
@@ -97,7 +98,7 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
                     </div>
                 )}
 
-                {/* 3. SECCION: GESTIÓN (FACTURACIÓN Y POST-VENTA) */}
+                {/* 3. SECCION: GESTIÓN (FACTURACIÓN, POST-VENTA, AUDITORÍA) */}
                 {(canSeePostSale || canSeeBilling || canSeeMetrics) && (
                     <>
                         <SectionHeader label="Gestión" sectionKey="admin" />
@@ -111,6 +112,10 @@ export function OpsSidebar({ open, setOpen, viewMode, setViewMode, role, current
                                 )}
                                 {canSeeMetrics && (
                                     <SidebarBtn active={viewMode === 'metrics'} onClick={() => {setViewMode('metrics'); setStage(null)}} icon={<BarChart3 size={20} className="text-yellow-500"/>} label="Métricas" />
+                                )}
+                                {/* ✅ INYECCIÓN DE AUDITORÍA GOD */}
+                                {role === 'admin_god' && (
+                                    <SidebarBtn active={viewMode === 'history'} onClick={() => {setViewMode('history'); setStage(null)}} icon={<History size={20} className="text-orange-500"/>} label="Historial" />
                                 )}
                             </div>
                         )}

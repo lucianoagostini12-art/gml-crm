@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient as createSupabaseClient } from "@supabase/supabase-js"
+import { createClient } from "@/lib/supabase"
 
 function corsHeaders() {
   return {
@@ -13,44 +13,41 @@ export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders() })
 }
 
-export async function POST(req: Request) {
-  try {
-    // (Opcional pero MUY recomendado) secreto anti-spam
-    // En Vercel: WEBHOOK_SECRET=algo-largo
-    const secret = process.env.WEBHOOK_SECRET
-    if (secret) {
-      const incoming = req.headers.get("authorization") || ""
-      // Espera: Authorization: Bearer <secret>
-      if (incoming !== `Bearer ${secret}`) {
-        return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401, headers: corsHeaders() })
-      }
-    }
+function onlyDigits(v: any) {
+  return String(v || "").replace(/\D+/g, "")
+}
 
+export async function POST(req: Request) {
+  const supabase = createClient()
+
+  try {
     const body = await req.json()
 
-    const nombre = body.nombre || "Sin Nombre"
-    const telefono = body.telefono ? String(body.telefono).replace(/\D/g, "") : ""
-    const cp = body.cp || ""
-    const provincia = body.provincia || ""
-    const ref = body.ref || ""
-    const landing_url = body.landing_url || ""
+    const nombre = (body.nombre || body.name || "Sin Nombre").toString().trim()
+    const telefono = onlyDigits(body.telefono || body.phone)
+    const cp = (body.cp || body.zip || "").toString().trim()
+    const provincia = (body.provincia || body.province || "").toString().trim()
+    const landing_url = (body.landing_url || "").toString().trim()
+    const ref = (body.ref || "").toString().trim()
 
-    // ✅ Server supabase client (anon key alcanza con tu config actual)
-    const supabase = createSupabaseClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
+    if (!telefono) {
+      // No cortamos con 400 para no “romper” frontends,
+      // pero devolvemos success false
+      return NextResponse.json({ success: false, error: "No phone" }, { headers: corsHeaders() })
+    }
 
+    // Tag por defecto
     let finalTag = "Formulario - DoctoRed"
 
+    // Si mandan ref, intentamos reglas (igual que tu lógica previa)
     if (ref) {
-      const { data: config, error: cfgErr } = await supabase
+      const { data: config } = await supabase
         .from("system_config")
         .select("value")
         .eq("key", "message_source_rules")
         .limit(1)
 
-      if (!cfgErr && config && config.length > 0) {
+      if (config && config.length > 0) {
         const rules = (config[0] as any).value || []
         const match = rules.find((r: any) => {
           if (r.matchType === "exact") return r.trigger === ref
@@ -63,25 +60,84 @@ export async function POST(req: Request) {
       }
     }
 
-    const { error } = await supabase.from("leads").insert({
-      name: nombre,
-      phone: telefono,
-      city: provincia,
-      address: cp ? `CP: ${cp}` : "",
-      source: finalTag,
-      status: "ingresado",
-      notes: `Landing URL: ${landing_url}`,
-    })
+    const now = new Date().toISOString()
 
-    if (error) {
-      console.error("Error insertando en Supabase:", error)
-      // devolvé 200 para que la landing NO se caiga (lo que vos querés)
-      return NextResponse.json({ success: false, error: error.message }, { headers: corsHeaders() })
+    // 1) Buscar si ya existe por phone
+    const { data: existingLead, error: findErr } = await supabase
+      .from("leads")
+      .select("id, source, notes")
+      .eq("phone", telefono)
+      .maybeSingle()
+
+    if (findErr) {
+      console.error("Error buscando lead:", findErr)
+      return NextResponse.json({ success: false, error: findErr.message }, { headers: corsHeaders() })
     }
 
-    return NextResponse.json({ success: true }, { headers: corsHeaders() })
+    // Armar notes
+    const extraNotesParts: string[] = []
+    if (landing_url) extraNotesParts.push(`Landing URL: ${landing_url}`)
+    if (cp) extraNotesParts.push(`CP: ${cp}`)
+    if (provincia) extraNotesParts.push(`Provincia: ${provincia}`)
+    const extraNotes = extraNotesParts.join(" | ")
+
+    // 2) Si existe: update
+    if (existingLead?.id) {
+      const updates: any = {
+        last_update: now,
+      }
+
+      // Guardamos geo
+      if (provincia) updates.province = provincia
+      if (cp) updates.zip = cp
+
+      // Notes: si ya hay, lo “apendizamos” sin pisar
+      if (extraNotes) {
+        const prev = (existingLead.notes || "").toString()
+        updates.notes = prev ? `${prev}\n${extraNotes}` : extraNotes
+      }
+
+      // Si el source anterior es genérico o vacío, lo actualizamos al formulario
+      if (!existingLead.source || existingLead.source === "WATI / Bot") {
+        updates.source = finalTag
+      }
+
+      // No cambiamos status si ya lo estaban trabajando, pero si querés forzar ingresado:
+      // updates.status = "ingresado"
+
+      const { error: updErr } = await supabase.from("leads").update(updates).eq("id", existingLead.id)
+      if (updErr) {
+        console.error("Error actualizando lead:", updErr)
+        return NextResponse.json({ success: false, error: updErr.message }, { headers: corsHeaders() })
+      }
+
+      return NextResponse.json({ success: true, action: "updated" }, { headers: corsHeaders() })
+    }
+
+    // 3) Si NO existe: insert
+    const { error: insErr } = await supabase.from("leads").insert({
+      name: nombre,
+      phone: telefono,
+      source: finalTag,
+      status: "ingresado",
+      notes: extraNotes || null,
+      province: provincia || null,
+      zip: cp || null,
+      created_at: now,
+      last_update: now,
+    })
+
+    if (insErr) {
+      console.error("Error insertando lead:", insErr)
+      return NextResponse.json({ success: false, error: insErr.message }, { headers: corsHeaders() })
+    }
+
+    return NextResponse.json({ success: true, action: "created" }, { headers: corsHeaders() })
   } catch (error: any) {
-    console.error("Error general webhook:", error)
-    return NextResponse.json({ success: false, error: error?.message || "Unknown" }, { status: 500, headers: corsHeaders() })
+    console.error("Error general landing webhook:", error)
+    return NextResponse.json(
+      { success: false, error: error?.message || "Unknown error" },
+      { status: 500, headers: corsHeaders() }
+    )
   }
 }

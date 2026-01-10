@@ -30,15 +30,19 @@ export async function POST(req: Request) {
     const landing_url = (body.landing_url || "").toString().trim()
     const ref = (body.ref || "").toString().trim()
 
+    // ✅ NUEVO: permitir que cada landing defina el source
+    const sourceFromLanding = (body.source || "").toString().trim()
+
     if (!telefono) {
       // No cortamos con 400 para no romper frontends
       return NextResponse.json({ success: false, error: "No phone" }, { headers: corsHeaders() })
     }
 
-    // Tag por defecto
-    let finalTag = "Formulario - DoctoRed"
+    // ✅ CAMBIO: Tag por defecto + override por landing
+    let finalTag = sourceFromLanding || "Formulario - DoctoRed"
 
     // Si mandan ref, intentamos reglas (igual que tu lógica previa)
+    // (esto puede pisar el source de la landing si corresponde)
     if (ref) {
       const { data: config } = await supabase
         .from("system_config")
@@ -96,7 +100,7 @@ export async function POST(req: Request) {
         updates.notes = prev ? `${prev}\n${extraNotes}` : extraNotes
       }
 
-      // Si el source anterior es genérico o vacío, lo actualizamos al formulario
+      // ✅ CAMBIO: si el source anterior es genérico o vacío, lo actualizamos al de esta landing
       if (!existingLead.source || existingLead.source === "WATI / Bot") {
         updates.source = finalTag
       }
@@ -123,8 +127,6 @@ export async function POST(req: Request) {
       last_update: now,
 
       // ✅ CLAVE para que aparezca en AdminLeadFactory:
-      // AdminLeadFactory filtra por agent_name IS NULL o agent_name = "Sin Asignar"
-      // Para no depender de mayúsculas/minúsculas: dejamos NULL.
       agent_name: null,
 
       // Opcional prolijo: tu tabla tiene assigned_to

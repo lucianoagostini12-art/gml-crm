@@ -54,9 +54,13 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        // ✅ CORRECCIÓN: En v9 las claves son ChevronLeft y ChevronRight
-        ChevronLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" />,
-        ChevronRight: ({ ...props }) => <ChevronRight className="h-4 w-4" />,
+        // En la versión 9 se usa 'Chevron' y se detecta la orientación
+        Chevron: ({ orientation, ...props }) => {
+          if (orientation === "left") {
+            return <ChevronLeft className="h-4 w-4" {...props} />
+          }
+          return <ChevronRight className="h-4 w-4" {...props} />
+        }
       }}
       {...props}
     />

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase'
 
-// 1. CONFIGURACIÓN DE CORS (Para que DonWeb/Landing pueda hablar con tu CRM)
+// 1. HEADERS CORS (Permisos para que entre el dato desde afuera)
 function corsHeaders() {
     return {
         'Access-Control-Allow-Origin': '*', 
@@ -10,65 +10,73 @@ function corsHeaders() {
     }
 }
 
-// 2. MANEJO DE "PRE-FLIGHT" (El navegador pregunta permiso antes de enviar)
+// 2. MANEJO DE "PRE-FLIGHT" (El navegador pregunta antes de mandar)
 export async function OPTIONS() {
     return NextResponse.json({}, { headers: corsHeaders() })
 }
 
-// 3. PROCESAMIENTO DEL FORMULARIO
+// 3. PROCESAMIENTO
 export async function POST(req: Request) {
     const supabase = createClient()
     
     try {
         const body = await req.json()
+        // Extraemos los datos con valores por defecto para que no falle
         const { nombre, telefono, cp, provincia, ref, landing_url } = body
 
-        // --- LÓGICA HÍBRIDA DE ETIQUETADO ---
-        // 1. Etiqueta por defecto
-        let finalTag = "Formulario - DoctoRed"
+        // --- ETIQUETADO SEGURO (Try/Catch interno) ---
+        let finalTag = "Formulario - DoctoRed" // Etiqueta por defecto
 
-        // 2. Si viene un "ref" (ej: ?ref=reelmorsia), buscamos si tiene nombre lindo en AdminConfig
         if (ref) {
-            // Traemos las reglas guardadas en tu base de datos
-            const { data: config } = await supabase
-                .from('system_config')
-                .select('value')
-                .eq('key', 'message_source_rules')
-                .single()
-            
-            const rules = config?.value || []
-            
-            // Buscamos coincidencia
-            const match = rules.find((r: any) => {
-                if (r.matchType === 'exact') return r.trigger === ref
-                return ref.includes(r.trigger) // contains
-            })
+            try {
+                // Intentamos buscar reglas, pero usamos maybeSingle para que NO explote si no hay nada
+                const { data: config } = await supabase
+                    .from('system_config')
+                    .select('value')
+                    .eq('key', 'message_source_rules')
+                    .maybeSingle() 
+                
+                const rules = config?.value || []
+                
+                const match = rules.find((r: any) => {
+                    if (r.matchType === 'exact') return r.trigger === ref
+                    return ref.includes(r.trigger)
+                })
 
-            if (match) {
-                finalTag = match.source // Ej: "Meta Ads - Reel Morsia"
-            } else {
-                // Si no hay regla configurada pero hay ref, mostramos el código crudo
-                finalTag = `Meta Ads (${ref})`
+                if (match) {
+                    finalTag = match.source
+                } else {
+                    finalTag = `Meta Ads (${ref})`
+                }
+            } catch (err) {
+                console.error("Error calculando etiqueta, usando defecto:", err)
+                // Si falla esto, no pasa nada, seguimos con la etiqueta por defecto
             }
         }
 
         // --- GUARDADO EN SUPABASE ---
+        // Limpiamos los datos para asegurar que entren
+        const cleanPhone = telefono ? String(telefono).replace(/\D/g, '') : ''
+        
         const { error } = await supabase.from('leads').insert({
-            name: nombre,
-            phone: telefono,
+            name: nombre || 'Sin Nombre',
+            phone: cleanPhone,
             city: provincia || '', 
             address: cp ? `CP: ${cp}` : '', 
-            source: finalTag, // La etiqueta calculada
-            status: 'ingresado', // Estado inicial en el tablero
-            notes: `Landing URL: ${landing_url} | CP: ${cp}` // Datos extra en notas
+            source: finalTag, 
+            status: 'ingresado', 
+            notes: `Landing URL: ${landing_url || 'Directo'} | CP: ${cp || 'S/D'}` 
         })
 
-        if (error) throw error
+        if (error) {
+            console.error("Error insertando en Supabase:", error)
+            return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() })
+        }
 
         return NextResponse.json({ success: true }, { headers: corsHeaders() })
 
     } catch (error: any) {
-        console.error("Error webhook landing:", error)
+        console.error("Error general webhook:", error)
         return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() })
     }
 }

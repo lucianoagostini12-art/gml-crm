@@ -23,16 +23,56 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 // Importamos el Modal para ver detalles
 import { OpsModal } from "./OpsModal"
-// ✅ CORRECCIÓN: Agregado getSubStateStyle al import
 import { getStatusColor, getSubStateStyle, OpStatus } from "./data"
+
+// --- 1. DICCIONARIO DE TRADUCCIÓN ---
+const FIELD_TRANSLATIONS: Record<string, string> = {
+    name: "Nombre Completo",
+    dni: "DNI",
+    phone: "Teléfono",
+    email: "Email",
+    address: "Dirección",
+    birth_date: "Fecha de Nacimiento",
+    plan: "Plan",
+    prepaga: "Prepaga",
+    status: "Estado",
+    sub_state: "Sub-Estado",
+    notes: "Notas",
+    billing_period: "Periodo de Facturación",
+    price: "Precio",
+    payment_method: "Método de Pago",
+    cbu: "CBU",
+    alias: "Alias",
+    agent_name: "Vendedor Asignado"
+}
+
+const translateField = (field: string) => FIELD_TRANSLATIONS[field] || field
+
+// ✅ MAPA MANUAL DE USUARIOS (Corrección solicitada)
+const SPECIAL_USERS: Record<string, string> = {
+    "macoparra96@gmail.com": "Maca Parra",
+    "gmlsalesgroup.adm@gmail.com": "Iara Chain"
+}
+
+// ✅ HELPER PARA QUE NO DIGA VACÍO
+const formatValue = (val: any) => {
+    if (val === null || val === undefined || val === "") return "(Vacío)"
+    if (val === true) return "Sí"
+    if (val === false) return "No"
+    // Si es fecha ISO larga, la mostramos cortita
+    if (typeof val === 'string' && val.includes('-') && val.includes('T') && val.length > 20) {
+        try { return format(new Date(val), "dd/MM/yyyy") } catch { return val }
+    }
+    // Si es objeto, lo pasamos a texto
+    if (typeof val === 'object') return JSON.stringify(val)
+    return String(val)
+}
 
 // --- TIPOS DE EVENTOS ---
 type HistoryEvent = {
     id: string
     type: 'status_change' | 'audit_log' | 'system_msg' | 'manual_edit'
-    title: string
-    description: string
-    // Datos del Operador (Quien lo hizo)
+    actionLabel: string // Cambiado a actionLabel para la narrativa
     user: {
         name: string
         avatar?: string
@@ -40,7 +80,6 @@ type HistoryEvent = {
     }
     timestamp: string
     leadId?: string
-    // Datos del Cliente (A quien se lo hicieron)
     clientInfo?: {
         name: string
         dni: string
@@ -80,22 +119,21 @@ export function OpsHistory() {
     const [searchTerm, setSearchTerm] = useState("")
     
     // Data auxiliar
-    const [operatorsMap, setOperatorsMap] = useState<Record<string, any>>({}) // Mapa ID/Email -> Perfil
-    const [operatorsList, setOperatorsList] = useState<any[]>([]) // Lista para el select
+    const [operatorsMap, setOperatorsMap] = useState<Record<string, any>>({}) 
+    const [operatorsList, setOperatorsList] = useState<any[]>([]) 
     const [stats, setStats] = useState({ total: 0, changes: 0, edits: 0, alerts: 0 })
 
     // Modal de Detalle
     const [selectedOp, setSelectedOp] = useState<any>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
 
-    // --- 1. CARGAR PERFILES (La base de la identidad) ---
+    // --- 1. CARGAR PERFILES ---
     useEffect(() => {
         const loadProfiles = async () => {
             const { data } = await supabase.from('profiles').select('*')
             if (data) {
                 const map: Record<string, any> = {}
                 data.forEach(p => {
-                    // Mapeamos por ID, por Email y por Nombre (Normalizado a minúsculas para evitar errores)
                     if (p.id) map[p.id] = p
                     if (p.email) map[p.email.toLowerCase()] = p
                     if (p.full_name) map[p.full_name.toLowerCase()] = p
@@ -107,26 +145,49 @@ export function OpsHistory() {
         loadProfiles()
     }, [])
 
-    // --- HELPER PARA RESOLVER USUARIO ---
-    const resolveUser = (identifier: string | null) => {
-        if (!identifier) return { name: "Sistema", avatar: undefined }
+    // --- HELPER PARA RESOLVER USUARIO (MEJORADO CON TU DICCIONARIO) ---
+    const resolveUser = (identifier: string | null, actorNameFallback?: string) => {
+        if (!identifier) return { name: actorNameFallback || "Sistema", avatar: undefined }
         
-        // 1. Buscamos coincidencia directa o normalizada
+        // 1. Buscamos coincidencia exacta en Perfiles (por ID o Email)
         const profile = operatorsMap[identifier] || operatorsMap[identifier.toLowerCase()]
         
         if (profile) {
+            const email = profile.email?.toLowerCase() || ""
+            
+            // 🚨 2. CHEQUEO MANUAL: Si es Maca o Iara, forzamos el nombre
+            if (SPECIAL_USERS[email]) {
+                return { name: SPECIAL_USERS[email], avatar: profile.avatar_url, email: email }
+            }
+
             return {
-                name: profile.full_name || profile.email || "Usuario",
+                name: profile.full_name || email.split('@')[0], 
                 avatar: profile.avatar_url,
-                email: profile.email
+                email: email
             }
         }
-        // Si es un UUID y no lo encontró, mostramos "Usuario Desconocido"
+
+        // 3. Si no hay perfil, chequeamos si el identifier ES un mail de los especiales
+        const emailLower = identifier.toLowerCase()
+        if (SPECIAL_USERS[emailLower]) {
+            return { name: SPECIAL_USERS[emailLower], avatar: undefined }
+        }
+
+        // 4. Si es un EMAIL genérico, usamos la parte del nombre
+        if (identifier.includes("@")) {
+            return { name: identifier.split("@")[0], avatar: undefined } 
+        }
+        
+        // 5. Si es UUID desconocido pero tenemos el fallback name del log
+        if (actorNameFallback && actorNameFallback !== "null") {
+             return { name: actorNameFallback, avatar: undefined }
+        }
+        
+        // 6. Fallback final
         if (identifier.length > 20 && identifier.includes('-')) {
              return { name: "Usuario Desconocido", avatar: undefined }
         }
         
-        // Si no es UUID, devolvemos el texto original (ej: "Juan")
         return { name: identifier, avatar: undefined }
     }
 
@@ -144,27 +205,22 @@ export function OpsHistory() {
         const endIso = end.toISOString()
 
         try {
-            // A. Fetch de las fuentes
             const { data: statusHistory } = await supabase.from('lead_status_history').select('*').gte('changed_at', startIso).lte('changed_at', endIso).order('changed_at', { ascending: false })
-            // Intentamos traer audit logs
             const { data: auditLogs, error: auditError } = await supabase.from('audit_logs').select('*').gte('created_at', startIso).lte('created_at', endIso).order('created_at', { ascending: false })
             const { data: messages } = await supabase.from('lead_messages').select('*').gte('created_at', startIso).lte('created_at', endIso).order('created_at', { ascending: false })
 
-            // B. Recolectar IDs de Leads (Unificar nombres de columnas)
             const leadIds = new Set<string>()
             statusHistory?.forEach((h: any) => h.lead_id && leadIds.add(h.lead_id))
             
-            // OJO: Audit Logs a veces usa record_id o lead_id
             if (!auditError && auditLogs) {
                 auditLogs.forEach((a: any) => {
-                    if (a.record_id) leadIds.add(a.record_id)
-                    if (a.lead_id) leadIds.add(a.lead_id)
+                    // Fix: Audit logs a veces usa lead_id o record_id en metadata
+                    const lid = a.lead_id || a.metadata?.record_id || a.metadata?.lead_id
+                    if (lid) leadIds.add(lid)
                 })
             }
-            
             messages?.forEach((m: any) => m.lead_id && leadIds.add(m.lead_id))
 
-            // C. Fetch Masivo de Clientes (Datos ricos)
             let leadsMap: Record<string, any> = {}
             if (leadIds.size > 0) {
                 const { data: leadsData } = await supabase
@@ -175,7 +231,6 @@ export function OpsHistory() {
                 leadsData?.forEach((l: any) => { leadsMap[l.id] = l })
             }
 
-            // D. Unificación
             const combinedEvents: HistoryEvent[] = []
 
             // -> Cambios de Estado
@@ -184,8 +239,7 @@ export function OpsHistory() {
                 combinedEvents.push({
                     id: `status-${h.id}`,
                     type: 'status_change',
-                    title: 'Movimiento de Tablero',
-                    description: `${h.from_status?.toUpperCase() || 'DESCONOCIDO'} ➝ ${h.to_status?.toUpperCase() || 'DESCONOCIDO'}`,
+                    actionLabel: 'movió de estado a',
                     user: resolveUser(h.agent_name),
                     timestamp: h.changed_at,
                     leadId: h.lead_id,
@@ -197,28 +251,43 @@ export function OpsHistory() {
                 })
             })
 
-            // -> Auditoría (Fix Edición Undefined)
+            // -> Auditoría (Manual Edit) - CORREGIDO
             if (!auditError && auditLogs) {
                 auditLogs.forEach((a: any) => {
-                    // Normalizar ID del lead
-                    const targetLeadId = a.record_id || a.lead_id
+                    const targetLeadId = a.lead_id || a.metadata?.record_id || a.metadata?.lead_id
                     const lead = leadsMap[targetLeadId]
                     
-                    // Fix nombre campo
-                    const fieldName = a.field_changed || "Datos Generales"
+                    // EXTRAER DATA DEL JSON (Aquí estaba el problema)
+                    const meta = a.metadata || {}
+                    const rawField = a.field_changed || meta.field_changed || meta.field || "Dato"
+                    const fieldName = translateField(rawField)
+                    
+                    // Extraer Old y New desde Metadata (donde realmente están)
+                    const rawOld = meta.old_value ?? meta.old ?? meta.previous_value
+                    const rawNew = meta.new_value ?? meta.new ?? meta.current_value
+                    
                     const contextInfo = inferContext(fieldName, lead?.status || 'unknown')
                     
+                    // Usar actor_user_id en vez de performed_by (según tu esquema)
+                    const actorId = a.actor_user_id || a.performed_by
+                    const actorName = a.actor_name
+
                     combinedEvents.push({
                         id: `audit-${a.id}`,
                         type: 'manual_edit',
-                        title: `Edición: ${fieldName}`,
+                        actionLabel: `modificó ${fieldName} de`,
                         description: `Valor modificado manual`,
-                        user: resolveUser(a.performed_by),
+                        user: resolveUser(actorId, actorName), // ✅ Resolución mejorada
                         timestamp: a.created_at,
                         leadId: targetLeadId,
                         clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
                         context: contextInfo.label,
-                        metadata: { old: a.old_value, new: a.new_value, colorClass: contextInfo.color },
+                        // ✅ Usamos formatValue para evitar vacíos
+                        metadata: { 
+                            old: formatValue(rawOld), 
+                            new: formatValue(rawNew), 
+                            colorClass: contextInfo.color 
+                        },
                         icon: Edit3,
                         color: 'text-orange-600 bg-orange-100'
                     })
@@ -239,6 +308,7 @@ export function OpsHistory() {
                     combinedEvents.push({
                         id: `msg-${m.id}`,
                         type: isAlert ? 'audit_log' : 'system_msg',
+                        actionLabel: isBilling ? "actualizó facturación de" : isAlert ? "reportó alerta en" : "dejó una nota en",
                         title: typeTitle,
                         description: m.text.replace("ADMIN_NOTE|", "").replace("FACTURACION|", "").split('|').pop() || m.text,
                         user: resolveUser(m.sender),
@@ -246,6 +316,7 @@ export function OpsHistory() {
                         leadId: m.lead_id,
                         clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
                         context: context,
+                        metadata: { text: m.text.replace("ADMIN_NOTE|", "").replace("FACTURACION|", "").split('|').pop() || m.text },
                         icon: icon,
                         color: color
                     })
@@ -254,7 +325,6 @@ export function OpsHistory() {
 
             combinedEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
             setEvents(combinedEvents)
-
             setStats({
                 total: combinedEvents.length,
                 changes: combinedEvents.filter(e => e.type === 'status_change').length,
@@ -270,9 +340,8 @@ export function OpsHistory() {
     }
 
     useEffect(() => {
-        // Aseguramos cargar historial solo si ya tenemos el mapa de usuarios o al menos lo intentamos
         fetchHistory()
-    }, [selectedDate, operatorsMap]) // Recargar si cambian fecha o se cargan perfiles
+    }, [selectedDate, operatorsMap]) 
 
     // --- ACCIONES ---
     const handleOpenDetail = async (leadId: string) => {
@@ -290,8 +359,8 @@ export function OpsHistory() {
             const matchUser = selectedOperator === 'all' || e.user.name === selectedOperator
             const term = searchTerm.toLowerCase()
             const matchSearch = searchTerm === '' || 
-                                e.title.toLowerCase().includes(term) || 
-                                e.description.toLowerCase().includes(term) ||
+                                e.title?.toLowerCase().includes(term) || 
+                                e.actionLabel?.toLowerCase().includes(term) ||
                                 e.user.name.toLowerCase().includes(term) ||
                                 e.clientInfo?.name.toLowerCase().includes(term) ||
                                 e.clientInfo?.dni.includes(term) ||
@@ -379,8 +448,11 @@ export function OpsHistory() {
                                                         </div>
                                                         <div>
                                                             <div className="flex items-center gap-2">
-                                                                <h4 className="font-black text-slate-800 text-sm uppercase">{event.title}</h4>
-                                                                <Badge variant="outline" className="text-[9px] uppercase font-bold tracking-widest bg-slate-50">{event.context || "SISTEMA"}</Badge>
+                                                                <h4 className="font-black text-slate-800 text-sm uppercase">{event.user.name}</h4>
+                                                                <span className="mx-1.5 text-slate-500 text-sm">{event.actionLabel}</span>
+                                                                <span className="font-bold text-blue-700 cursor-pointer hover:underline text-sm" onClick={() => handleOpenDetail(event.leadId!)}>
+                                                                    {event.clientInfo?.name || "Cliente Desconocido"}
+                                                                </span>
                                                             </div>
                                                             <div className="flex items-center gap-2 mt-1">
                                                                 {/* ✅ AVATAR DEL OPERADOR */}
@@ -388,7 +460,6 @@ export function OpsHistory() {
                                                                     <AvatarImage src={event.user.avatar} />
                                                                     <AvatarFallback className="text-[8px] font-bold bg-slate-900 text-white">{event.user.name.substring(0,2)}</AvatarFallback>
                                                                 </Avatar>
-                                                                <span className="text-xs font-bold text-slate-700">{event.user.name}</span>
                                                                 <span className="text-[10px] text-slate-400">• {time}</span>
                                                             </div>
                                                         </div>
@@ -416,23 +487,31 @@ export function OpsHistory() {
                                                                 </p>
                                                             </div>
                                                         </div>
-                                                        {/* ✅ CORRECCIÓN FINAL: Casting seguro al estado */}
                                                         <Badge className={`${getStatusColor(event.clientInfo.status as OpStatus)} border-0 text-[10px]`}>{event.clientInfo.status}</Badge>
                                                     </div>
                                                 ) : (
-                                                    // Mensaje si no se encuentra el lead (Posiblemente eliminado)
                                                     <div className="bg-red-50 border border-red-100 rounded-lg p-2 mb-3 text-xs text-red-600 italic">
                                                         Datos del cliente no disponibles (Lead ID: {event.leadId})
                                                     </div>
                                                 )}
 
-                                                {/* DETALLE DEL CAMBIO (DIFF) */}
+                                                {/* DETALLE DEL CAMBIO (DIFF) - ✅ AHORA MUESTRA VACÍOS Y ANTES/DESPUÉS */}
                                                 <div className="text-sm text-slate-600 pl-1">
                                                     {event.type === 'manual_edit' ? (
                                                         <div className={`flex items-center gap-3 font-mono text-xs p-2 rounded border ${event.metadata?.colorClass || 'bg-white border-slate-100'}`}>
-                                                            <span className="text-red-500 line-through opacity-70 bg-slate-50 px-2 py-0.5 rounded border border-red-100">{event.metadata?.old || '(Vacío)'}</span>
-                                                            <ArrowRight size={14} className="text-slate-400"/>
-                                                            <span className="text-green-700 font-bold bg-green-50 px-2 py-0.5 rounded border border-green-100">{event.metadata?.new}</span>
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-[9px] uppercase font-bold text-red-400 mr-1">Antes:</span>
+                                                                <span className="text-red-500 line-through opacity-70 bg-slate-50 px-2 py-0.5 rounded border border-red-100">
+                                                                    {event.metadata?.old}
+                                                                </span>
+                                                            </div>
+                                                            <ArrowRight size={16} className="text-slate-300" />
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-[9px] uppercase font-bold text-green-500 mr-1">Ahora:</span>
+                                                                <span className="text-green-700 font-bold bg-green-50 px-2 py-0.5 rounded border border-green-100">
+                                                                    {event.metadata?.new}
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                     ) : (
                                                         <p className="font-medium">{event.description}</p>
@@ -455,7 +534,7 @@ export function OpsHistory() {
                     onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} 
                     onSubStateChange={()=>{}} onAddNote={()=>{}} onSendChat={()=>{}} onAddReminder={()=>{}} 
                     getStatusColor={getStatusColor} getSubStateStyle={getSubStateStyle}
-                    globalConfig={{prepagas:[], subStates:{}}} // Config vacía para visualización
+                    globalConfig={{prepagas:[], subStates:{}}}
                 />
             )}
         </div>

@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame, MessageCircle, RefreshCw, PenLine } from "lucide-react"
+import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame, MessageCircle, RefreshCw, PenLine, Tag, Zap, Bot } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -29,13 +29,18 @@ export function AdminConfig() {
 
     const [showPassword, setShowPassword] = useState(false)
 
-    // Configs
+    // Configs Generales
     const [ranges5hs, setRanges5hs] = useState<any[]>([])
     const [ranges8hs, setRanges8hs] = useState<any[]>([])
     const [absorb5, setAbsorb5] = useState("8")
     const [absorb8, setAbsorb8] = useState("12")
     const [freezeConfig, setFreezeConfig] = useState({ fantasmas: 30, precio: 60, interes: 45, quemados: 45, basural: 365 })
     const [wppTemplates, setWppTemplates] = useState<any[]>([])
+
+    // ✅ NUEVO: Reglas de Etiquetado y Orígenes
+    const [taggingRules, setTaggingRules] = useState<any[]>([])
+    const [origins, setOrigins] = useState<string[]>([]) // Para llenar el select
+    const [newRule, setNewRule] = useState({ trigger: "", source: "", matchType: "contains" })
 
     // Formulario Usuario
     const [formData, setFormData] = useState({
@@ -85,12 +90,17 @@ export function AdminConfig() {
             const a5 = data.find(c => c.key === 'absorb_5hs')?.value
             const a8 = data.find(c => c.key === 'absorb_8hs')?.value
             const gz = data.find(c => c.key === 'graveyard_config')?.value
+            // ✅ NUEVOS DATOS
+            const tr = data.find(c => c.key === 'message_source_rules')?.value
+            const og = data.find(c => c.key === 'sales_origins')?.value
 
             if (r5) setRanges5hs(r5); else setRanges5hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (r8) setRanges8hs(r8); else setRanges8hs([{ id: 1, min: 0, max: 999, percent: 0 }])
             if (a5) setAbsorb5(a5)
             if (a8) setAbsorb8(a8)
             if (gz) setFreezeConfig(gz)
+            if (tr) setTaggingRules(tr)
+            if (og) setOrigins(og)
         }
     }
 
@@ -101,7 +111,8 @@ export function AdminConfig() {
             { key: 'ranges_8hs', value: ranges8hs },
             { key: 'absorb_5hs', value: absorb5 },
             { key: 'absorb_8hs', value: absorb8 },
-            { key: 'graveyard_config', value: freezeConfig }
+            { key: 'graveyard_config', value: freezeConfig },
+            { key: 'message_source_rules', value: taggingRules } // ✅ GUARDAR REGLAS
         ]
         const { error: errConfig } = await supabase.from('system_config').upsert(updates)
         const { error: errWpp } = await supabase.from('whatsapp_templates').upsert(wppTemplates)
@@ -109,6 +120,25 @@ export function AdminConfig() {
         setLoading(false)
         if (errConfig || errWpp) alert("❌ Error al guardar.")
         else { alert("✅ Configuración guardada."); fetchWppTemplates() }
+    }
+
+    // --- MANEJO REGLAS ETIQUETADO ---
+    const addRule = () => {
+        if (!newRule.trigger || !newRule.source) return alert("Falta disparador o etiqueta")
+        setTaggingRules([...taggingRules, { ...newRule, id: Date.now() }])
+        setNewRule({ trigger: "", source: "", matchType: "contains" })
+    }
+
+    const deleteRule = (index: number) => {
+        const newRules = [...taggingRules]
+        newRules.splice(index, 1)
+        setTaggingRules(newRules)
+    }
+
+    const updateRuleField = (index: number, field: string, value: string) => {
+        const newRules = [...taggingRules]
+        newRules[index] = { ...newRules[index], [field]: value }
+        setTaggingRules(newRules)
     }
 
     // --- MANEJO USUARIOS ---
@@ -328,8 +358,138 @@ export function AdminConfig() {
                     </div>
                 </TabsContent>
 
-                {/* Resto de Tabs (CRM, Whatsapp, Comisiones, Sistema) se mantienen igual... */}
+                {/* 2. CRM Y REGLAS */}
                 <TabsContent value="crm" className="space-y-6 mt-6">
+                    
+                    {/* ✅ NUEVA SECCIÓN: REGLAS DE ETIQUETADO AUTOMÁTICO */}
+                    <Card className="border-l-4 border-l-purple-500 shadow-md bg-purple-50/20">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-purple-800">
+                                <Bot className="h-5 w-5"/> Reglas de Etiquetado Automático (IA Rules)
+                            </CardTitle>
+                            <CardDescription>Define qué etiqueta asignar según el contenido del mensaje recibido (Webhook).</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            
+                            {/* INPUTS PARA AGREGAR REGLA */}
+                            <div className="flex flex-col md:flex-row gap-3 items-end p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+                                <div className="space-y-1 w-full md:w-1/3">
+                                    <Label className="text-xs font-bold uppercase text-slate-500">Disparador (Trigger)</Label>
+                                    <div className="relative">
+                                        <Zap className="absolute left-2.5 top-2.5 h-4 w-4 text-purple-500" />
+                                        <Input 
+                                            placeholder="Ej: ctwa, 🔥, docto" 
+                                            className="pl-9 font-mono" 
+                                            value={newRule.trigger} 
+                                            onChange={e => setNewRule({...newRule, trigger: e.target.value})}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1 w-full md:w-1/4">
+                                    <Label className="text-xs font-bold uppercase text-slate-500">Coincidencia</Label>
+                                    <Select value={newRule.matchType} onValueChange={(v) => setNewRule({...newRule, matchType: v})}>
+                                        <SelectTrigger><SelectValue/></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="contains">Contiene Texto</SelectItem>
+                                            <SelectItem value="exact">Es Exacto</SelectItem>
+                                            <SelectItem value="starts_with">Empieza con</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-1 w-full md:w-1/3">
+                                    <Label className="text-xs font-bold uppercase text-slate-500">Asignar Etiqueta</Label>
+                                    <div className="relative">
+                                        <Tag className="absolute left-2.5 top-2.5 h-4 w-4 text-green-600" />
+                                        
+                                        {/* LOGICA DUAL: SELECT O INPUT */}
+                                        {newRule.source === 'custom_mode' || !origins.includes(newRule.source) && newRule.source !== "" ? (
+                                            <div className="flex gap-1 animate-in fade-in zoom-in-95 duration-200">
+                                                <Input 
+                                                    className="pl-9 font-bold text-green-700 bg-green-50/50 border-green-200"
+                                                    placeholder="Ej: Meta Ads - Verano"
+                                                    value={newRule.source === 'custom_mode' ? '' : newRule.source} 
+                                                    onChange={e => setNewRule({...newRule, source: e.target.value})}
+                                                    autoFocus
+                                                />
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon" 
+                                                    className="shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                                    onClick={() => setNewRule({...newRule, source: ""})} 
+                                                    title="Cancelar / Volver a lista"
+                                                >
+                                                    <XCircle className="h-5 w-5"/>
+                                                </Button>
+                                            </div>
+                                        ) : (
+                                            <Select 
+                                                value={newRule.source} 
+                                                onValueChange={(v) => {
+                                                    if (v === 'custom_mode') {
+                                                        // 🪄 MAGIA: Pre-llenamos con el formato que te gusta
+                                                        setNewRule({
+                                                            ...newRule, 
+                                                            source: `Meta Ads - ${newRule.trigger || 'Campaña'}`
+                                                        })
+                                                    } else {
+                                                        setNewRule({...newRule, source: v})
+                                                    }
+                                                }}
+                                            >
+                                                <SelectTrigger className="pl-9 font-bold text-green-700 bg-green-50/50 border-green-100">
+                                                    <SelectValue placeholder="Seleccionar origen..." />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <div className="p-2 text-xs text-slate-400 uppercase font-bold border-b mb-1">Orígenes Existentes</div>
+                                                    {origins.map(o => (
+                                                        <SelectItem key={o} value={o}>{o}</SelectItem>
+                                                    ))}
+                                                    <Separator className="my-1"/>
+                                                    <SelectItem value="custom_mode" className="font-black text-purple-600 focus:text-purple-700 bg-purple-50 focus:bg-purple-100 cursor-pointer">
+                                                        ✨ + Crear Nueva Etiqueta
+                                                    </SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <Button onClick={addRule} className="bg-purple-600 hover:bg-purple-700 text-white font-bold w-full md:w-auto">
+                                    <Plus className="h-4 w-4 mr-2"/> Agregar
+                                </Button>
+                            </div>
+
+                            {/* LISTA DE REGLAS EXISTENTES */}
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                                {taggingRules.length === 0 && <p className="text-center text-slate-400 py-4 text-sm">No hay reglas definidas.</p>}
+                                
+                                {taggingRules.map((rule, i) => (
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-100 hover:shadow-sm transition-all group">
+                                        <div className="bg-slate-100 p-2 rounded text-xs font-mono font-bold text-slate-600 min-w-[120px] text-center">
+                                            {rule.trigger}
+                                        </div>
+                                        
+                                        <div className="text-[10px] uppercase font-bold text-slate-400 px-2 bg-slate-50 rounded border">
+                                            {rule.matchType === 'contains' ? 'Contiene' : rule.matchType === 'exact' ? 'Exacto' : 'Empieza'}
+                                        </div>
+
+                                        <div className="flex-1">
+                                            <Badge className="bg-green-100 text-green-700 border-green-200 text-xs font-bold hover:bg-green-200">
+                                                {rule.source}
+                                            </Badge>
+                                        </div>
+
+                                        <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => deleteRule(i)}>
+                                            <Trash2 size={16}/>
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     <Card className="border-l-4 border-l-blue-500">
                         <CardHeader><CardTitle className="flex items-center gap-2"><Snowflake className="h-5 w-5 text-blue-500"/> Configuración de Cementerio</CardTitle></CardHeader>
                         <CardContent>

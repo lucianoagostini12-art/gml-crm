@@ -4,6 +4,9 @@ import { NextResponse } from "next/server"
 // 🔐 TU CONTRASEÑA DE SEGURIDAD
 const API_SECRET = "gml_crm_secret_key_2024" 
 
+// Helper para limpiar texto
+const cleanText = (t: string) => t?.toLowerCase().trim() || ""
+
 export async function POST(request: Request) {
     const supabase = createClient()
     
@@ -18,89 +21,118 @@ export async function POST(request: Request) {
 
         // 2. LEER DATOS Y EVITAR ERRORES DE TEST DE WATI
         const body = await request.json()
-        console.log("📥 Webhook Recibido:", JSON.stringify(body))
+        
+        // Logs para depuración (puedes quitarlos luego)
+        console.log("📥 Webhook Entrante:", JSON.stringify({
+            waId: body.waId,
+            text: body.text,
+            referral: body.referral,
+            sourceUrl: body.sourceUrl
+        }))
 
         if (body.waId === 'senderPhone' || body.info === 'test_notification') {
              return NextResponse.json({ message: "Test WATI recibido OK" }, { status: 200 })
         }
 
-        // 3. 🧠 INTELIGENCIA: RECUPERAR EL MENSAJE REAL (TEXTO O BOTÓN)
+        // 3. RECUPERAR EL MENSAJE REAL
         let finalMessage = body.text || ""
-        
-        // Si es respuesta de botón interactivo
-        if (body.interactiveButtonReply && body.interactiveButtonReply.title) {
-            finalMessage = `[Botón]: ${body.interactiveButtonReply.title}`
-        } 
-        // Si es respuesta de lista
-        else if (body.listReply && body.listReply.title) {
-            finalMessage = `[Lista]: ${body.listReply.title}`
-        }
+        if (body.interactiveButtonReply?.title) finalMessage = `[Botón]: ${body.interactiveButtonReply.title}`
+        else if (body.listReply?.title) finalMessage = `[Lista]: ${body.listReply.title}`
 
-        // 4. DATOS BÁSICOS
+        // 4. DATOS BÁSICOS DEL CLIENTE
         let phone = ""
         let name = "Desconocido"
         
-        // WATI
         if (body.waId) {
             phone = String(body.waId).replace(/\D/g, "")
             name = body.senderName || "Cliente WhatsApp"
-        } 
-        // WEB
-        else {
+        } else {
             phone = (body.phone || body.telefono || "").replace(/\D/g, "")
             name = body.name || body.nombre || "Cliente Web"
             finalMessage = body.message || body.mensaje || finalMessage || "Consulta Web"
         }
 
-        if (!phone) {
-            return NextResponse.json({ message: "Ignored: No valid phone" }, { status: 200 })
-        }
+        if (!phone) return NextResponse.json({ message: "Ignored: No valid phone" }, { status: 200 })
 
-        // 5. 🕵️ DETECTIVE DE ORIGEN Y PREPAGA
+        // =====================================================================
+        // 5. 🧠 EL CEREBRO: MOTOR DE REGLAS DINÁMICO (Híbrido)
+        // =====================================================================
+        
         let detectedSource = body.source || "WATI / Bot" 
         let detectedPrepaga = null
 
-        // A) ¿Viene de Meta Ads (CTWA)?
-        if (body.sourceId || body.sourceUrl || body.referral) {
-            detectedSource = "Meta Ads"
+        // A. Obtener Reglas desde la DB (system_config)
+        const { data: configData } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'message_source_rules')
+            .single()
+        
+        const rules = configData?.value || []
+        
+        // Ordenar reglas por prioridad (mayor número = mayor prioridad)
+        const sortedRules = Array.isArray(rules) 
+            ? rules.sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))
+            : []
+
+        let matchedRule = null
+
+        // B. ESTRATEGIA 1: REFERRAL DE META (Código de Anuncio)
+        // WATI suele mandar esto en body.referral o body.sourceId
+        const metaReferral = cleanText(body.referral || body.sourceId || "")
+        
+        if (metaReferral) {
+            // Buscamos si existe una regla específica para este código de anuncio
+            matchedRule = sortedRules.find((r: any) => cleanText(r.trigger) === metaReferral)
+            
+            // Si encontramos regla, perfecto. Si no, al menos sabemos que es Meta Ads.
+            if (!matchedRule) {
+                detectedSource = `Meta Ads (${metaReferral})`
+            }
         }
 
-        // B) Palabras Clave (Google Ads / Botones)
-        const msgLower = finalMessage.toLowerCase()
+        // C. ESTRATEGIA 2: ANÁLISIS DE TEXTO (Si no se resolvió por Referral)
+        if (!matchedRule) {
+            const msgLower = cleanText(finalMessage)
 
-        // --- REGLAS DEFINITIVAS ---
-        if (msgLower.includes("doctored")) {
-            detectedSource = "Google Ads"
-            detectedPrepaga = "DoctoRed"
-        } 
-        else if (msgLower.includes("prevencion") || msgLower.includes("prevención")) {
-            detectedSource = "Google Ads"
-            // IMPORTANTE: Lo guardamos como 'Prevencion' para que coincida con tu sistema (ops-types.ts)
-            detectedPrepaga = "Prevencion" 
-        } 
-        else if (msgLower.includes("sancor")) {
-            detectedSource = "Google Ads"
-            detectedPrepaga = "Sancor"
-        } 
-        else if (msgLower.includes("galeno")) {
-            detectedSource = "Google Ads"
-            detectedPrepaga = "Galeno"
-        } 
-        else if (msgLower.includes("swiss")) {
-            detectedSource = "Google Ads"
-            detectedPrepaga = "Swiss Medical"
-        } 
-        else if (msgLower.includes("osde")) {
-            detectedSource = "Google Ads"
-            detectedPrepaga = "Osde"
-        } 
-        else if (msgLower.includes("avalian")) {
-            detectedSource = "Google Ads"
-            detectedPrepaga = "Avalian"
+            for (const rule of sortedRules) {
+                const trigger = cleanText(rule.trigger)
+                const type = rule.matchType || 'contains'
+
+                if (!trigger) continue
+
+                let isMatch = false
+                if (type === 'exact' && msgLower === trigger) isMatch = true
+                else if (type === 'starts_with' && msgLower.startsWith(trigger)) isMatch = true
+                else if (type === 'contains' && msgLower.includes(trigger)) isMatch = true
+
+                if (isMatch) {
+                    matchedRule = rule
+                    break // Cortamos al encontrar la primera coincidencia por prioridad
+                }
+            }
         }
 
+        // D. APLICAR RESULTADO
+        if (matchedRule) {
+            detectedSource = matchedRule.source
+        }
 
-        // 6. BUSCAR SI YA EXISTE (LÓGICA ANTI-DUPLICADOS)
+        // E. INTELIGENCIA DE PREPAGA (Deducción inversa)
+        // Si el Origen detectado contiene el nombre de una prepaga, la asignamos.
+        const sourceLower = cleanText(detectedSource)
+        if (sourceLower.includes("doctored") || sourceLower.includes("docto red")) detectedPrepaga = "DoctoRed"
+        else if (sourceLower.includes("prevencion") || sourceLower.includes("prevención")) detectedPrepaga = "Prevencion"
+        else if (sourceLower.includes("sancor")) detectedPrepaga = "Sancor"
+        else if (sourceLower.includes("galeno")) detectedPrepaga = "Galeno"
+        else if (sourceLower.includes("swiss")) detectedPrepaga = "Swiss Medical"
+        else if (sourceLower.includes("osde")) detectedPrepaga = "Osde"
+        else if (sourceLower.includes("avalian")) detectedPrepaga = "Avalian"
+        else if (sourceLower.includes("ampf")) detectedPrepaga = "AMPF"
+
+        // =====================================================================
+
+        // 6. GESTIÓN DE LEADS (Insertar o Actualizar)
         const { data: existingLead } = await supabase
             .from('leads')
             .select('id, chat, name, notes, prepaga, source')
@@ -110,7 +142,7 @@ export async function POST(request: Request) {
         const now = new Date().toISOString()
         const timeString = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 
-        // CASO A: YA EXISTE -> ACTUALIZAMOS CHAT Y COMPLETAMOS DATOS FALTANTES
+        // CASO A: YA EXISTE -> ACTUALIZAR
         if (existingLead) {
             let currentChat = existingLead.chat
             if (typeof currentChat === 'string') try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
@@ -122,42 +154,31 @@ export async function POST(request: Request) {
                 time: timeString,
                 isMe: false
             }
-            const updatedChat = [...currentChat, newChatMsg]
-
+            
             const updates: any = { 
-                chat: updatedChat,
+                chat: [...currentChat, newChatMsg],
                 last_update: now
             }
 
-            // Solo completamos si faltaba el dato
-            if (!existingLead.prepaga && detectedPrepaga) {
-                updates.prepaga = detectedPrepaga
-            }
+            // Solo completamos datos si faltaban o si el origen anterior era genérico
+            if (!existingLead.prepaga && detectedPrepaga) updates.prepaga = detectedPrepaga
             if ((!existingLead.source || existingLead.source === "WATI / Bot") && detectedSource !== "WATI / Bot") {
                 updates.source = detectedSource
             }
 
             await supabase.from('leads').update(updates).eq('id', existingLead.id)
-
-            return NextResponse.json({ success: true, action: "updated" }, { status: 200 })
+            return NextResponse.json({ success: true, action: "updated", source: detectedSource }, { status: 200 })
         } 
         
-        // CASO B: NUEVO LEAD -> CREAMOS CON TODO
+        // CASO B: NUEVO LEAD -> CREAR
         else {
-            const initialChat = [{
-                user: "Cliente",
-                text: finalMessage,
-                time: timeString,
-                isMe: false
-            }]
-
             const newLeadData = {
                 name: name,
                 phone: phone,
                 source: detectedSource, 
                 status: 'nuevo',
                 agent_name: null,
-                chat: initialChat,
+                chat: [{ user: "Cliente", text: finalMessage, time: timeString, isMe: false }],
                 notes: `Ingreso automático. Mensaje: "${finalMessage}"`,
                 prepaga: detectedPrepaga,
                 created_at: now,
@@ -171,7 +192,7 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: error.message }, { status: 500 })
             }
 
-            return NextResponse.json({ success: true, action: "created" }, { status: 200 })
+            return NextResponse.json({ success: true, action: "created", source: detectedSource }, { status: 200 })
         }
 
     } catch (e: any) {

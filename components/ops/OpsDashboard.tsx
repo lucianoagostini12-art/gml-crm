@@ -42,16 +42,18 @@ const getCurrentMonthISO = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function OpsDashboard({ operations, activeFilter, setActiveFilter }: any) {
+// ✅ SE AGREGA "onMonthChange" A LAS PROPS
+export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMonthChange }: any) {
     
     // Iniciamos siempre en el mes corriente
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthISO())
 
-    // Efecto para debug: ver qué mes está seleccionado y qué datos llegan
+    // ✅ COMUNICACIÓN CON EL PADRE: Cada vez que cambia el mes, avisamos
     useEffect(() => {
-        // console.log("Dashboard - Mes seleccionado:", selectedMonth)
-        // console.log("Dashboard - Operaciones recibidas:", operations.length)
-    }, [selectedMonth, operations])
+        if (onMonthChange) {
+            onMonthChange(selectedMonth)
+        }
+    }, [selectedMonth, onMonthChange])
 
     const handleFilter = (stage: string) => {
         if (activeFilter === stage) setActiveFilter(null)

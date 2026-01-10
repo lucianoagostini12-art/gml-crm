@@ -119,7 +119,7 @@ export async function POST(req: Request) {
       name: nombre,
       phone: telefono,
       source: finalTag,
-      status: "ingresado",
+      status: "nuevo",
       notes: extraNotes || null,
       province: provincia || null,
       zip: cp || null,

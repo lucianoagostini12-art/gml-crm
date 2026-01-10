@@ -313,9 +313,12 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 
                 fetchOperations() 
             })
+            // ✅ INYECCIÓN: Escuchar notificaciones en tiempo real
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
                 if (payload.new.user_name === userName || role === 'admin_god') {
                     setNotifications(prev => [payload.new, ...prev])
+                    // Opcional: Sonido
+                    // new Audio('/notification.mp3').play().catch(e => {})
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {

@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle } from "lucide-react"
+import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle, Archive, Ban } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -32,7 +32,8 @@ const FREEZE_CONFIG: Record<string, number> = {
     interes: 45,    // "Lo pienso"
     quemados: 45,   // "+7 llamados"
     zombies: 0,     // ✅ AGREGADO: Los Zombies ya vienen "muertos" por tiempo, se pueden reciclar al instante
-    basural: 365    // Datos malos
+    recontactar: 90, // ✅ NUEVO: Competencia / Otros (3 meses)
+    basural: 365    // ✅ NUEVO: Error / Salud (1 año)
 }
 
 type Lead = {
@@ -122,7 +123,7 @@ export function AdminLeadFactory() {
 
   // ESTADOS CEMENTERIO (ESTADÍSTICAS)
   const [graveyardStats, setGraveyardStats] = useState({
-    fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, basural: 0,
+    fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, recontactar: 0, basural: 0 // ✅ NUEVOS CAMPOS
   })
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null)
 
@@ -313,7 +314,7 @@ export function AdminLeadFactory() {
     if (error) console.error(error)
 
     if (data) {
-      const stats = { fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, basural: 0 }
+      const stats = { fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, recontactar: 0, basural: 0 }
       ;(data as any[]).forEach((l: any) => {
         const agent = l.agent_name || ""
         const reason = l.loss_reason?.toLowerCase() || ""
@@ -325,7 +326,11 @@ export function AdminLeadFactory() {
         else if (reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
         else if (reason.includes("precio") || reason.includes("caro")) stats.precio++
         else if (reason.includes("interes") || reason.includes("no quiere")) stats.interes++
-        else stats.basural++
+        // ✅ CLASIFICACIÓN NUEVA
+        else if (reason.includes("competencia") || reason.includes("otros")) stats.recontactar++
+        else if (reason.includes("error") || reason.includes("requisitos") || reason.includes("salud")) stats.basural++
+        
+        else stats.basural++ // Default a basural por si acaso
       })
       setGraveyardStats(stats)
     }
@@ -358,8 +363,12 @@ export function AdminLeadFactory() {
     } else if (category === "interes") {
         reasonFilter = "interes"
         query = query.ilike('loss_reason', `%${reasonFilter}%`)
+    } 
+    // ✅ NUEVOS FILTROS
+    else if (category === "recontactar") {
+        query = query.or("loss_reason.ilike.%competencia%,loss_reason.ilike.%otros%")
     } else if (category === "basural") {
-        query = query.not('loss_reason', 'ilike', '%quemado%').not('loss_reason', 'ilike', '%precio%').not('loss_reason', 'ilike', '%no contesta%').not('loss_reason', 'ilike', '%interes%')
+        query = query.or("loss_reason.ilike.%error%,loss_reason.ilike.%requisitos%,loss_reason.ilike.%salud%")
     }
 
     const { data, error } = await query
@@ -958,6 +967,38 @@ export function AdminLeadFactory() {
                   <p className="text-xs text-slate-400 mt-2">Lo pensará</p>
                 </CardContent>
               </Card>
+
+              {/* ✅ NUEVO CAJÓN: RECONTACTAR */}
+              <Card className="hover:border-slate-400 cursor-pointer group" onClick={() => { setActiveDrawer("recontactar"); fetchDrawerLeads("recontactar"); }}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-700 flex items-center gap-2">
+                    <Archive className="h-4 w-4"/> Recontactar
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex justify-between items-end">
+                    <span className="text-4xl font-black text-slate-800 dark:text-white">{graveyardStats.recontactar}</span>
+                    <Badge className="bg-slate-100 text-slate-700">90 días</Badge>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">Competencia / Otros</p>
+                </CardContent>
+              </Card>
+
+              {/* ✅ NUEVO CAJÓN: BASURAL */}
+              <Card className="hover:border-red-800 cursor-pointer group border-l-4 border-l-slate-800 shadow-md bg-slate-50" onClick={() => { setActiveDrawer("basural"); fetchDrawerLeads("basural"); }}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                    <Ban className="h-4 w-4 text-red-600"/> Basural
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex justify-between items-end">
+                    <span className="text-4xl font-black text-slate-800 dark:text-white">{graveyardStats.basural}</span>
+                    <Badge variant="destructive">365 días</Badge>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">Error / Salud</p>
+                </CardContent>
+              </Card>
             </div>
           ) : (
             <Card className="border-t-4 border-t-slate-500 shadow-xl animate-in slide-in-from-bottom-4">
@@ -1070,10 +1111,10 @@ export function AdminLeadFactory() {
         </TabsContent>
       </Tabs>
 
-      {/* --- 🚀 MODAL TRIAJE / CHAT (NUEVO + ANCHO + MOTIVOS VENDEDOR) --- */}
+      {/* --- 🚀 MODAL TRIAJE / CHAT (AJUSTE FINAL: ANCHO Y SCROLL) --- */}
       <Dialog open={triageModalOpen} onOpenChange={setTriageModalOpen}>
-        <DialogContent className="max-w-[95vw] w-full h-[90vh] flex flex-col">
-          <DialogHeader>
+        <DialogContent style={{ maxWidth: '1200px', width: '95%', height: '90vh' }} className="flex flex-col p-0 gap-0 overflow-hidden">
+          <DialogHeader className="p-4 border-b bg-slate-50/50">
             <DialogTitle className="flex items-center gap-2">
                 🕵️ Triaje de Lead: <span className="text-blue-600">{leadToTriage?.name}</span>
                 {leadToTriage?.prepaga && <Badge className={getPrepagaBadgeColor(leadToTriage.prepaga)}>{leadToTriage.prepaga}</Badge>}
@@ -1081,55 +1122,57 @@ export function AdminLeadFactory() {
             <DialogDescription>Revisá el chat y decidí el destino del lead.</DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 overflow-hidden">
+          <div className="grid grid-cols-1 md:grid-cols-3 flex-1 overflow-hidden">
             {/* COLUMNA IZQUIERDA: DATOS */}
-            <div className="bg-slate-50 p-4 rounded-xl border space-y-4 h-full overflow-y-auto">
-                <div>
-                    <Label className="text-xs text-slate-500 uppercase">Teléfono</Label>
-                    <div className="font-mono text-lg font-bold">{leadToTriage?.phone}</div>
+            <div className="bg-slate-50 p-6 border-r space-y-6 h-full overflow-y-auto">
+                <div className="space-y-1">
+                    <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Teléfono</Label>
+                    <div className="font-mono text-lg font-black text-slate-700">{leadToTriage?.phone}</div>
                 </div>
-                <div>
-                    <Label className="text-xs text-slate-500 uppercase">Origen</Label>
-                    <div className="font-bold">{leadToTriage?.source}</div>
+                <div className="space-y-1">
+                    <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Origen</Label>
+                    <div className="font-bold text-slate-700 flex items-center gap-2"><Tag size={14}/> {leadToTriage?.source}</div>
                 </div>
-                <div>
-                    <Label className="text-xs text-slate-500 uppercase">Ingreso</Label>
-                    <div className="text-sm">{leadToTriage?.created_at && new Date(leadToTriage.created_at).toLocaleString()}</div>
+                <div className="space-y-1">
+                    <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Ingreso</Label>
+                    <div className="text-sm font-medium text-slate-600">{leadToTriage?.created_at && new Date(leadToTriage.created_at).toLocaleString()}</div>
                 </div>
                 
-                <div className="pt-6 border-t">
-                    <Label className="text-xs text-slate-500 uppercase mb-2 block">Asignar Manualmente</Label>
+                <div className="pt-6 border-t border-slate-200">
+                    <Label className="text-xs text-slate-500 uppercase mb-3 block font-bold">Asignar Manualmente</Label>
                     <div className="flex gap-2">
                         <Select value={targetAgent} onValueChange={setTargetAgent}>
-                            <SelectTrigger><SelectValue placeholder="Vendedor..." /></SelectTrigger>
+                            <SelectTrigger className="bg-white"><SelectValue placeholder="Elegir Vendedor..." /></SelectTrigger>
                             <SelectContent>
                                 {agentsList.map((a) => (<SelectItem key={a} value={a}>{a}</SelectItem>))}
                             </SelectContent>
                         </Select>
-                        <Button size="icon" onClick={() => leadToTriage && handleAssignFromTriage(leadToTriage.id)} disabled={!targetAgent} className="bg-blue-600"><Zap className="h-4 w-4"/></Button>
+                        <Button size="icon" onClick={() => leadToTriage && handleAssignFromTriage(leadToTriage.id)} disabled={!targetAgent} className="bg-blue-600 hover:bg-blue-700 shadow-md shrink-0"><Zap className="h-4 w-4"/></Button>
                     </div>
                 </div>
             </div>
 
-            {/* COLUMNA CENTRAL: CHAT */}
-            <div className="md:col-span-2 bg-white border rounded-xl flex flex-col h-full overflow-hidden shadow-sm">
-                <div className="bg-slate-100 p-3 border-b flex items-center gap-2">
+            {/* COLUMNA CENTRAL: CHAT CON SCROLL INTELIGENTE */}
+            <div className="md:col-span-2 bg-white flex flex-col h-full overflow-hidden">
+                <div className="bg-slate-50 p-3 border-b flex items-center gap-2 shrink-0">
                     <MessageCircle className="h-4 w-4 text-slate-500"/> <span className="font-bold text-sm text-slate-700">Historial de Chat</span>
                 </div>
-                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                    <ScrollArea className="flex-1 p-4 bg-slate-50/50">
+                
+                <div className="flex-1 overflow-hidden relative bg-slate-50/30">
+                    <ScrollArea className="h-full w-full p-6">
                         <div className="space-y-4 pb-4">
                             {leadToTriage?.chat && Array.isArray(leadToTriage.chat) && leadToTriage.chat.length > 0 ? (
                                 leadToTriage.chat.map((msg: any, i: number) => (
                                     <div key={i} className={`flex ${msg.isMe || msg.user === 'Bot' ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.isMe || msg.user === 'Bot' ? 'bg-blue-100 text-blue-900 rounded-tr-none' : 'bg-white border text-slate-800 rounded-tl-none shadow-sm'}`}>
+                                        <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${msg.isMe || msg.user === 'Bot' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
                                             <p>{msg.text}</p>
-                                            <span className="text-[10px] opacity-50 block text-right mt-1">{msg.time}</span>
+                                            <span className={`text-[10px] block text-right mt-1 font-medium ${msg.isMe ? 'text-blue-200' : 'text-slate-400'}`}>{msg.time}</span>
                                         </div>
                                     </div>
                                 ))
                             ) : (
-                                <div className="text-center py-10 text-slate-400 italic">
+                                <div className="text-center py-20 text-slate-400 italic">
+                                    <MessageCircle className="h-10 w-10 mx-auto mb-2 opacity-20"/>
                                     No hay historial de chat disponible.
                                     <br/><span className="text-xs">Este lead entró sin conversación previa o antes de la integración.</span>
                                 </div>
@@ -1138,24 +1181,24 @@ export function AdminLeadFactory() {
                     </ScrollArea>
                 </div>
                 
-                {/* BOTONERA DE CEMENTERIO (MOTIVOS VENDEDOR UNIFICADOS) */}
-                <div className="p-3 bg-white border-t grid grid-cols-3 gap-2 shrink-0">
-                    <Button variant="outline" className="text-xs border-green-200 hover:bg-green-50 text-green-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'precio')}>
+                {/* BOTONERA DE CEMENTERIO */}
+                <div className="p-4 bg-white border-t grid grid-cols-3 gap-3 shrink-0 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)] z-10">
+                    <Button variant="outline" className="text-xs border-green-200 hover:bg-green-50 text-green-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'precio')}>
                         <DollarSign className="h-4 w-4 mb-1"/> Precio / Muy caro
                     </Button>
-                    <Button variant="outline" className="text-xs border-blue-200 hover:bg-blue-50 text-blue-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'no_contesta')}>
+                    <Button variant="outline" className="text-xs border-blue-200 hover:bg-blue-50 text-blue-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'no_contesta')}>
                         <XCircle className="h-4 w-4 mb-1"/> No contesta
                     </Button>
-                    <Button variant="outline" className="text-xs border-orange-200 hover:bg-orange-50 text-orange-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'competencia')}>
+                    <Button variant="outline" className="text-xs border-orange-200 hover:bg-orange-50 text-orange-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'competencia')}>
                         <ShieldAlert className="h-4 w-4 mb-1"/> Competencia
                     </Button>
-                    <Button variant="outline" className="text-xs border-purple-200 hover:bg-purple-50 text-purple-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'requisitos')}>
+                    <Button variant="outline" className="text-xs border-purple-200 hover:bg-purple-50 text-purple-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'requisitos')}>
                         <Activity className="h-4 w-4 mb-1"/> Requisitos / Salud
                     </Button>
-                    <Button variant="outline" className="text-xs border-red-200 hover:bg-red-50 text-red-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'error')}>
+                    <Button variant="outline" className="text-xs border-red-200 hover:bg-red-50 text-red-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'error')}>
                         <Trash2 className="h-4 w-4 mb-1"/> Error / No solicitó
                     </Button>
-                    <Button variant="outline" className="text-xs border-slate-200 hover:bg-slate-50 text-slate-600 flex flex-col h-auto py-2" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'otros')}>
+                    <Button variant="outline" className="text-xs border-slate-200 hover:bg-slate-50 text-slate-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'otros')}>
                         <HelpCircle className="h-4 w-4 mb-1"/> Otros
                     </Button>
                 </div>
@@ -1164,7 +1207,7 @@ export function AdminLeadFactory() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL DUPLICADOS */}
+      {/* MODAL DUPLICADOS (INTACTO) */}
       <Dialog open={dupModalOpen} onOpenChange={setDupModalOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>

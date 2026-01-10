@@ -10,11 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pencil, Check, X, TrendingUp } from "lucide-react"
+import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pencil, Check, X, TrendingUp, MessageCircle, AlertCircle } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
-// Definimos la interfaz aquí para evitar errores de importación
 export interface Lead {
   id: string
   name: string
@@ -55,26 +55,18 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const [newMessage, setNewMessage] = useState("")
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   
-  // ✅ 1. NUEVO: Mapa para avatares de logs { "Nombre Usuario": "url_foto" }
   const [logAvatars, setLogAvatars] = useState<Record<string, string>>({})
-
-  // Estado local para Intención (para que se actualice al instante)
   const [intent, setIntent] = useState<'high' | 'medium' | 'low'>('medium')
 
   const chatEndRef = useRef<HTMLDivElement>(null)
-
-  // phone edit
   const [isEditingPhone, setIsEditingPhone] = useState(false)
   const [phoneDraft, setPhoneDraft] = useState("")
-
-  // headset link from config
   const [omniLink, setOmniLink] = useState<string>("")
 
   useEffect(() => {
     if (lead && open) {
       setObs("")
       setPrepaga(lead.prepaga || "")
-      // Formato ISO para que el input datetime-local lo lea bien
       setScheduledFor(lead.scheduled_for ? new Date(lead.scheduled_for).toISOString().slice(0, 16) : "")
       setIntent(lead.intent || 'medium')
 
@@ -105,7 +97,6 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
         supabase.removeChannel(channel)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead, open])
 
   useEffect(() => {
@@ -114,41 +105,21 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     }
   }, [messages])
 
-  // ✅ 2. CAMBIO: hourCycle 'h23' para forzar 24hs (ej: 17:00 en vez de 5:00 p.m.)
   const fmtDateTime24 = (date: Date) =>
     new Intl.DateTimeFormat("es-AR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23", 
+      day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", 
     }).format(date)
 
-  // ✅ 3. CAMBIO: Buscar fotos de perfil reales para los logs
   const fetchAuditLogs = async () => {
     if (!lead?.id) return
     const { data } = await supabase.from("audit_logs").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false })
     if (data) {
         setAuditLogs(data)
-        
-        // Extraemos los nombres únicos
         const uniqueUsers = Array.from(new Set(data.map((l: any) => l.user_name))).filter(Boolean)
-        
         if (uniqueUsers.length > 0) {
-            // Buscamos en profiles
-            const { data: profiles } = await supabase
-                .from('profiles')
-                .select('full_name, avatar_url')
-                .in('full_name', uniqueUsers)
-            
-            // Mapeamos nombre -> foto
+            const { data: profiles } = await supabase.from('profiles').select('full_name, avatar_url').in('full_name', uniqueUsers)
             const avatarMap: Record<string, string> = {}
-            profiles?.forEach((p: any) => {
-                if (p.full_name && p.avatar_url) {
-                    avatarMap[p.full_name] = p.avatar_url
-                }
-            })
+            profiles?.forEach((p: any) => { if (p.full_name && p.avatar_url) avatarMap[p.full_name] = p.avatar_url })
             setLogAvatars(avatarMap)
         }
     }
@@ -158,9 +129,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const { data } = await supabase.from("system_config").select("value").eq("key", "prepagas_plans").single()
     if (data && Array.isArray(data.value)) {
       const transform: Record<string, string[]> = {}
-      data.value.forEach((item: any) => {
-        transform[item.name] = item.plans
-      })
+      data.value.forEach((item: any) => { transform[item.name] = item.plans })
       setPlanesPorEmpresa(transform)
     }
   }
@@ -181,35 +150,23 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const tryKeys = ["omni_link", "omnileads_link"]
     for (const key of tryKeys) {
       const { data, error } = await supabase.from("system_config").select("value").eq("key", key).single()
-      if (!error && data?.value) {
-        setOmniLink(String(data.value))
-        return
-      }
+      if (!error && data?.value) { setOmniLink(String(data.value)); return }
     }
     setOmniLink("")
   }
 
-  // --- NUEVA FUNCIÓN: GUARDAR INTENCIÓN ---
   const handleIntentChange = async (newIntent: 'high' | 'medium' | 'low') => {
       if (!lead) return
       setIntent(newIntent) 
       lead.intent = newIntent
-
       await supabase.from("leads").update({ intent: newIntent, last_update: new Date().toISOString() }).eq("id", lead.id)
   }
 
   const saveAgenda = async () => {
     if (!lead || !scheduledFor) return
     const isoDate = new Date(scheduledFor).toISOString()
-
     await supabase.from("leads").update({ scheduled_for: isoDate, last_update: new Date().toISOString() }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({
-      lead_id: lead.id,
-      user_name: lead.agent,
-      action: "Agenda actualizada",
-      details: `Nueva cita: ${fmtDateTime24(new Date(scheduledFor))}`,
-    })
-
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Agenda actualizada", details: `Nueva cita: ${fmtDateTime24(new Date(scheduledFor))}` })
     lead.scheduled_for = isoDate
     fetchAuditLogs()
   }
@@ -219,103 +176,38 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const timestamp = fmtDateTime24(new Date())
     const newNoteLine = `SEP_NOTE|${timestamp}|${lead.agent}|${obs.trim()}`
     const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + newNoteLine
-
     await supabase.from("leads").update({ notes: updatedNotes, last_update: new Date().toISOString() }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({
-      lead_id: lead.id,
-      user_name: lead.agent,
-      action: "Nota agregada",
-      details: obs.trim(),
-    })
-
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Nota agregada", details: obs.trim() })
     lead.notes = updatedNotes
     setObs("")
     fetchAuditLogs()
   }
 
-  // ✅ crea quote
   const handleAddQuote = async () => {
     if (!lead || !newQuotePrepaga || !newQuotePlan || !newQuotePrice) return
-
     const isMain = quotes.length === 0
     const price = parseFloat(newQuotePrice)
-
-    const { data: inserted, error } = await supabase
-      .from("quotes")
-      .insert({ lead_id: lead.id, prepaga: newQuotePrepaga, plan: newQuotePlan, price, is_main: isMain })
-      .select()
-      .single()
-
+    const { data: inserted, error } = await supabase.from("quotes").insert({ lead_id: lead.id, prepaga: newQuotePrepaga, plan: newQuotePlan, price, is_main: isMain }).select().single()
     if (error) return
-
-    await supabase.from("audit_logs").insert({
-      lead_id: lead.id,
-      user_name: lead.agent,
-      action: "Cotización creada",
-      details: `${newQuotePrepaga} - ${newQuotePlan} ($${newQuotePrice})${isMain ? " [PRINCIPAL]" : ""}`,
-    })
-
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Cotización creada", details: `${newQuotePrepaga} - ${newQuotePlan} ($${newQuotePrice})${isMain ? " [PRINCIPAL]" : ""}` })
     if (isMain) {
-      await supabase
-        .from("leads")
-        .update({
-          quoted_prepaga: newQuotePrepaga,
-          quoted_plan: newQuotePlan,
-          quoted_price: price,
-          last_update: new Date().toISOString(),
-        })
-        .eq("id", lead.id)
-
-      lead.quoted_prepaga = newQuotePrepaga as any
-      lead.quoted_plan = newQuotePlan as any
-      lead.quoted_price = price as any
+      await supabase.from("leads").update({ quoted_prepaga: newQuotePrepaga, quoted_plan: newQuotePlan, quoted_price: price, last_update: new Date().toISOString() }).eq("id", lead.id)
+      lead.quoted_prepaga = newQuotePrepaga as any; lead.quoted_plan = newQuotePlan as any; lead.quoted_price = price as any
     }
-
-    fetchQuotes()
-    fetchAuditLogs()
-    setNewQuotePrepaga("")
-    setNewQuotePlan("")
-    setNewQuotePrice("")
+    fetchQuotes(); fetchAuditLogs(); setNewQuotePrepaga(""); setNewQuotePlan(""); setNewQuotePrice("")
   }
 
-  // ✅ set principal quote
   const setMainQuote = async (quoteId: string) => {
     if (!lead) return
-
     const currentMain = quotes.find((q) => q.is_main)
     const newMain = quotes.find((q) => q.id === quoteId)
-    if (!newMain) return
-
-    if (currentMain?.id === newMain.id) return
-
+    if (!newMain || currentMain?.id === newMain.id) return
     await supabase.from("quotes").update({ is_main: false }).eq("lead_id", lead.id)
     await supabase.from("quotes").update({ is_main: true }).eq("id", quoteId)
-
-    await supabase
-      .from("leads")
-      .update({
-        quoted_prepaga: newMain.prepaga,
-        quoted_plan: newMain.plan,
-        quoted_price: newMain.price,
-        last_update: new Date().toISOString(),
-      })
-      .eq("id", lead.id)
-
-    lead.quoted_prepaga = newMain.prepaga as any
-    lead.quoted_plan = newMain.plan as any
-    lead.quoted_price = newMain.price as any
-
-    await supabase.from("audit_logs").insert({
-      lead_id: lead.id,
-      user_name: lead.agent,
-      action: "Cotización principal cambiada",
-      details: `Anterior: ${
-        currentMain ? `${currentMain.prepaga} - ${currentMain.plan} ($${currentMain.price})` : "(ninguna)"
-      } → Nueva: ${newMain.prepaga} - ${newMain.plan} ($${newMain.price})`,
-    })
-
-    fetchQuotes()
-    fetchAuditLogs()
+    await supabase.from("leads").update({ quoted_prepaga: newMain.prepaga, quoted_plan: newMain.plan, quoted_price: newMain.price, last_update: new Date().toISOString() }).eq("id", lead.id)
+    lead.quoted_prepaga = newMain.prepaga as any; lead.quoted_plan = newMain.plan as any; lead.quoted_price = newMain.price as any
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Cotización principal cambiada", details: `Anterior: ${currentMain ? `${currentMain.prepaga} - ${currentMain.plan} ($${currentMain.price})` : "(ninguna)"} → Nueva: ${newMain.prepaga} - ${newMain.plan} ($${newMain.price})` })
+    fetchQuotes(); fetchAuditLogs()
   }
 
   const handleSendMessage = async () => {
@@ -329,68 +221,27 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     if (!lead) return
     const newPhone = phoneDraft.trim()
     const oldPhone = (lead.phone || "").trim()
-
-    if (!newPhone || newPhone === oldPhone) {
-      setIsEditingPhone(false)
-      setPhoneDraft(oldPhone)
-      return
-    }
-
+    if (!newPhone || newPhone === oldPhone) { setIsEditingPhone(false); setPhoneDraft(oldPhone); return }
     await supabase.from("leads").update({ phone: newPhone, last_update: new Date().toISOString() }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({
-      lead_id: lead.id,
-      user_name: lead.agent,
-      action: "Número cambiado",
-      details: `Anterior: ${oldPhone || "(vacío)"} → Nuevo: ${newPhone}`,
-    })
-
-    lead.phone = newPhone
-    setIsEditingPhone(false)
-    fetchAuditLogs()
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Número cambiado", details: `Anterior: ${oldPhone || "(vacío)"} → Nuevo: ${newPhone}` })
+    lead.phone = newPhone; setIsEditingPhone(false); fetchAuditLogs()
   }
 
   const handleCallIncrement = async () => {
     if (!lead) return
-
     const currentCalls = Number(lead.calls || 0)
     const newCallCount = currentCalls + 1
-
     const timestamp = fmtDateTime24(new Date())
-    const updatedNotes =
-      (lead.notes || "") +
-      (lead.notes ? "|||" : "") +
-      `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
-
+    const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
     let newStatus = (lead.status || "").toLowerCase()
     const isBurned = newCallCount >= 7 && (newStatus === "nuevo" || newStatus === "contactado")
     if (isBurned) newStatus = "perdido"
-
-    lead.calls = newCallCount as any
-    lead.notes = updatedNotes as any
-    lead.status = newStatus as any
-
-    await supabase
-      .from("leads")
-      .update({
-        calls: newCallCount,
-        notes: updatedNotes,
-        status: newStatus,
-        last_update: new Date().toISOString(),
-        loss_reason: isBurned ? "Dato quemado (7 llamados)" : null,
-      })
-      .eq("id", lead.id)
-
-    await supabase.from("audit_logs").insert({
-      lead_id: lead.id,
-      user_name: lead.agent,
-      action: "Llamada registrada",
-      details: `Llamada #${newCallCount}${isBurned ? " (Dato quemado)" : ""}`,
-    })
-
+    lead.calls = newCallCount as any; lead.notes = updatedNotes as any; lead.status = newStatus as any
+    await supabase.from("leads").update({ calls: newCallCount, notes: updatedNotes, status: newStatus, last_update: new Date().toISOString(), loss_reason: isBurned ? "Dato quemado (7 llamados)" : null }).eq("id", lead.id)
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Llamada registrada", details: `Llamada #${newCallCount}${isBurned ? " (Dato quemado)" : ""}` })
     fetchAuditLogs()
   }
 
-  // --- HELPER PARA ESTILO INTENCIÓN ---
   const getIntentStyle = (val: string) => {
       switch(val) {
           case 'high': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -437,83 +288,27 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
               </div>
 
               <div className="flex items-center justify-between mt-2">
-                {/* phone + pencil */}
                 <div className="flex items-center gap-2">
                   {!isEditingPhone ? (
                     <>
                       <span className="text-2xl font-bold text-blue-700 font-mono">{lead.phone}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPhoneDraft(lead.phone || "")
-                          setIsEditingPhone(true)
-                        }}
-                        className="text-slate-400 hover:text-slate-600 transition-colors"
-                        aria-label="Editar número"
-                        title="Editar número"
-                      >
-                        <Pencil className="h-4 w-4 opacity-70" />
-                      </button>
+                      <button type="button" onClick={() => { setPhoneDraft(lead.phone || ""); setIsEditingPhone(true) }} className="text-slate-400 hover:text-slate-600 transition-colors" title="Editar número"><Pencil className="h-4 w-4 opacity-70" /></button>
                     </>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <Input
-                        value={phoneDraft}
-                        onChange={(e) => setPhoneDraft(e.target.value)}
-                        className="h-10 w-[210px] bg-white border-slate-200 font-mono"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") savePhone()
-                          if (e.key === "Escape") {
-                            setIsEditingPhone(false)
-                            setPhoneDraft(lead.phone || "")
-                          }
-                        }}
-                      />
-                      <Button size="icon" variant="outline" className="h-10 w-10 rounded-full" onClick={savePhone}>
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-10 w-10 rounded-full"
-                        onClick={() => {
-                          setIsEditingPhone(false)
-                          setPhoneDraft(lead.phone || "")
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                      <Input value={phoneDraft} onChange={(e) => setPhoneDraft(e.target.value)} className="h-10 w-[210px] bg-white border-slate-200 font-mono" />
+                      <Button size="icon" variant="outline" className="h-10 w-10 rounded-full" onClick={savePhone}><Check className="h-4 w-4" /></Button>
+                      <Button size="icon" variant="outline" className="h-10 w-10 rounded-full" onClick={() => { setIsEditingPhone(false); setPhoneDraft(lead.phone || "") }}><X className="h-4 w-4" /></Button>
                     </div>
                   )}
                 </div>
 
                 <div className="flex gap-2">
-                  {/* phone button (calls count + same behavior) */}
-                  <Button
-                    type="button"
-                    onClick={handleCallIncrement}
-                    variant="outline"
-                    className="relative h-10 w-10 rounded-full bg-green-50 text-green-600 border-green-200 hover:bg-green-100"
-                    title="Registrar llamada"
-                  >
+                  <Button type="button" onClick={handleCallIncrement} variant="outline" className="relative h-10 w-10 rounded-full bg-green-50 text-green-600 border-green-200 hover:bg-green-100" title="Registrar llamada">
                     <Phone className="h-5 w-5" />
-                    <span className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white text-[9px] font-black rounded-full px-1.5 py-0.5 border-2 border-white">
-                      {lead.calls || 0}
-                    </span>
+                    <span className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white text-[9px] font-black rounded-full px-1.5 py-0.5 border-2 border-white">{lead.calls || 0}</span>
                   </Button>
-
-                  {/* headset opens config link */}
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      if (omniLink) window.open(omniLink, "_blank")
-                    }}
-                    size="icon"
-                    variant="outline"
-                    className="h-10 w-10 rounded-full bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
-                    title={omniLink ? "Abrir Omni" : "No hay link configurado"}
-                    disabled={!omniLink}
-                  >
+                  <Button type="button" onClick={() => { if (omniLink) window.open(omniLink, "_blank") }} size="icon" variant="outline" className="h-10 w-10 rounded-full bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100" disabled={!omniLink}>
                     <Headset className="h-5 w-5" />
                   </Button>
                 </div>
@@ -571,6 +366,41 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                     Guardar Nota
                   </Button>
                 </div>
+              </div>
+
+              {/* ✅ AQUI AGREGAMOS EL BLOQUE DE WATI (SOLO LECTURA) */}
+              <Separator className="my-4"/>
+              
+              <div className="space-y-3">
+                  <div className="flex justify-between items-center px-1">
+                      <Label className="font-black text-[11px] uppercase text-slate-500 tracking-wider flex items-center gap-2">
+                          <MessageCircle size={14}/> Historial CHAT CLIENTE (Solo Lectura)
+                      </Label>
+                  </div>
+                  
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
+                      <div className="h-48 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
+                          {messages.length === 0 ? (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-300">
+                                  <p className="text-xs italic">Sin historial de chat</p>
+                              </div>
+                          ) : (
+                              messages.map((m, i) => (
+                                  <div key={i} className={`flex flex-col ${m.sender !== 'supervisión' ? "items-start" : "hidden"}`}> 
+                                      {/* Solo mostramos mensajes que NO sean de supervisión para no duplicar */}
+                                      {m.sender !== 'supervisión' && (
+                                        <>
+                                          <div className={`px-3 py-2 rounded-xl max-w-[90%] text-xs shadow-sm border bg-white text-slate-700 border-slate-200 rounded-tl-none`}>
+                                              {m.text}
+                                          </div>
+                                          <span className="text-[9px] text-slate-400 mt-1 px-1">{m.sender}</span>
+                                        </>
+                                      )}
+                                  </div>
+                              ))
+                          )}
+                      </div>
+                  </div>
               </div>
 
               <Separator />
@@ -653,7 +483,6 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
               </div>
             </TabsContent>
 
-            {/* CHAT MAXIMIZADO */}
             <TabsContent value="chat" className="h-full min-h-[580px] flex flex-col pt-2 animate-in fade-in">
               <div className="flex flex-col border border-slate-200 rounded-3xl overflow-hidden shadow-xl bg-white h-[550px]">
                 <div className="bg-[#0f172a] text-[10px] font-black text-center py-3 uppercase text-white tracking-[0.3em] flex items-center justify-center gap-2 shrink-0">

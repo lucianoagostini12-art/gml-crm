@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, AlertTriangle, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, BarChart3 } from "lucide-react"
+import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
@@ -118,6 +118,9 @@ export function OpsBilling() {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
     const [isLocked, setIsLocked] = useState(false)
     
+    // ✅ NUEVO: ESTADO PARA EL OJO DE PRIVACIDAD
+    const [showValues, setShowValues] = useState(true)
+
     // Config
     const [calcRules, setCalcRules] = useState(INITIAL_CALC_RULES)
     const [commissionRules, setCommissionRules] = useState(INITIAL_COMMISSION_RULES)
@@ -231,6 +234,17 @@ export function OpsBilling() {
         return () => { supabase.removeChannel(channel) }
     }, [])
 
+    // ✅ HELPER: FORMATEO DE MONEDA CON PRIVACIDAD Y REDONDEO OPCIONAL
+    const formatMoney = (val: number, round: boolean = false) => {
+        if (!showValues) return "$ ****"
+        
+        // Si round es true, usamos Math.round y 0 decimales
+        const valueToUse = round ? Math.round(val) : val
+        const decimals = round ? 0 : 2
+
+        return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(valueToUse)
+    }
+
     const updateOpBilling = async (id: string, updates: any) => {
         setOperations(prev => prev.map(op => op.id === id ? { ...op, ...updates } : op))
         await supabase.from('leads').update(updates).eq('id', id)
@@ -239,6 +253,7 @@ export function OpsBilling() {
     const calculate = (op: any) => {
         let val = 0, formula = ""
         if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
+            // ✅ CORRECCIÓN: Respetar decimales en override
             val = parseFloat(op.billing_price_override.toString())
             formula = "Manual (Editado)"
         } else {
@@ -264,15 +279,19 @@ export function OpsBilling() {
             }
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
+        
         let portfolioVal = 0
         if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
              portfolioVal = parseFloat(op.billing_portfolio_override.toString())
         } else {
              const full = parseFloat(op.fullPrice || "0"); const aportes = parseFloat(op.aportes || "0"); const desc = parseFloat(op.descuento || "0")
              const netPayable = Math.max(0, full - desc - aportes)
-             portfolioVal = Math.round(netPayable * calcRules.portfolioRate)
+             // ✅ CORRECCIÓN: Usamos toFixed(2) para mantener decimales en cálculo
+             portfolioVal = Number((netPayable * calcRules.portfolioRate).toFixed(2))
         }
-        return { val: Math.round(val), formula, portfolio: portfolioVal }
+        
+        // ✅ CORRECCIÓN FINAL: Devolver con 2 decimales fijos, NO redondear a entero
+        return { val: Number(val.toFixed(2)), formula, portfolio: Number(portfolioVal.toFixed(2)) }
     }
 
     const changeMonth = (delta: number) => {
@@ -285,13 +304,12 @@ export function OpsBilling() {
         return new Date(y, m - 1, 1).toLocaleString('es-ES', { month: 'long', year: 'numeric' })
     }
 
-    // --- FILTRADO DE DATOS (LA LÓGICA CLAVE ESTÁ ACÁ) ---
+    // --- FILTRADO DE DATOS ---
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
             
-            // LÓGICA: Si existe billing_period, usa eso. Si no, usa la fecha de creación.
             const targetMonth = op.billing_period || defaultMonth
             
             if (targetMonth !== selectedMonth) return false
@@ -363,7 +381,6 @@ export function OpsBilling() {
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
             
-            // ✅ USAMOS EL MAPA DINÁMICO
             const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${sellerName}` }
             const shiftRules = commissionRules.scales[sellerInfo.shift] 
             
@@ -396,7 +413,7 @@ export function OpsBilling() {
                 const tier = shiftRules.tiers.find(t => totalStandardCount >= t.min && totalStandardCount <= t.max)
                 const finalTier = tier || shiftRules.tiers[shiftRules.tiers.length - 1]
                 scalePercentage = finalTier.pct
-                payableCount = standardOps.slice(absorbableLimit).length // Esto es solo visual aproximado, lo que importa es el valor $
+                payableCount = standardOps.slice(absorbableLimit).length 
                 const totalLiquidatedStandard = standardOps.slice(absorbableLimit).reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedStandard * scalePercentage
                 const totalLiquidatedSpecial = specialOps.reduce((acc, op) => acc + calculate(op).val, 0)
@@ -429,7 +446,6 @@ export function OpsBilling() {
     const confirmRetro = () => { 
         if(retroOpId){ 
             const [y,m]=selectedMonth.split('-').map(Number); 
-            // Si es Enero (1), pasamos a Diciembre (12) del año anterior (y-1)
             const prevM=m===1?12:m-1; 
             const prevY=m===1?y-1:y; 
             updateOpBilling(retroOpId, { billing_period: `${prevY}-${String(prevM).padStart(2,'0')}` }); 
@@ -505,36 +521,41 @@ export function OpsBilling() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {/* ✅ BOTÓN DE PRIVACIDAD */}
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setShowValues(!showValues)} title={showValues ? "Ocultar Valores" : "Mostrar Valores"}>
+                        {showValues ? <Eye size={16}/> : <EyeOff size={16}/>}
+                    </Button>
+                    <div className="h-4 w-px bg-slate-200 mx-1"></div>
                     <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}><Settings2 size={14} className="mr-2"/> Reglas</Button>
                     <Button size="sm" variant={isLocked ? "secondary" : "default"} onClick={() => setIsLocked(!isLocked)} className="gap-2 font-bold min-w-[130px]">{isLocked ? <><Lock size={14}/> Reabrir Mes</> : <><Save size={14}/> Cerrar Mes</>}</Button>
                 </div>
             </div>
 
-            {/* TOTALES */}
+            {/* TOTALES - ✅ APLICADO ROUNDING A LOS VALORES GRANDES */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
                 <Card className="bg-slate-900 border-0 text-white shadow-xl relative overflow-hidden">
                     <CardContent className="p-5 flex flex-col justify-between h-full z-10 relative">
                         <div>
                             <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Total Facturación (Neto)</p>
-                            <div className="text-4xl font-black text-green-400">{Math.round(totalNeto).toLocaleString()}</div>
+                            <div className="text-4xl font-black text-green-400">{formatMoney(totalNeto, true)}</div>
                         </div>
                         <div className="mt-3 pt-3 border-t border-slate-700/50 flex flex-col gap-1 text-[10px] text-slate-400">
-                            <div className="flex justify-between"><span>+ IVA (Prevención {calcRules.prevencionVat * 100}%):</span> <span className="font-bold text-white">${Math.round(totalIVA).toLocaleString()}</span></div>
-                            <div className="flex justify-between"><span>Facturación Total:</span> <span className="font-bold text-white">${Math.round(totalBilling).toLocaleString()}</span></div>
+                            <div className="flex justify-between"><span>+ IVA (Prevención {calcRules.prevencionVat * 100}%):</span> <span className="font-bold text-white">{formatMoney(totalIVA, true)}</span></div>
+                            <div className="flex justify-between"><span>Facturación Total:</span> <span className="font-bold text-white">{formatMoney(totalBilling, true)}</span></div>
                         </div>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-l-4 border-l-blue-500 shadow-md">
                     <CardContent className="p-5">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Cartera Nueva</p>
-                        <div className="text-3xl font-black text-slate-800">${Math.round(totalPortfolio).toLocaleString()}</div>
+                        <div className="text-3xl font-black text-slate-800">{formatMoney(totalPortfolio, true)}</div>
                         <p className="text-xs text-blue-600 mt-2 font-bold">Cobro Estimado</p>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-l-4 border-l-pink-500 shadow-md">
                     <CardContent className="p-5">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Pago Comisiones</p>
-                        <div className="text-3xl font-black text-slate-800">${Math.round(sellersCommissions.reduce((acc, s) => acc + s.total, 0)).toLocaleString()}</div>
+                        <div className="text-3xl font-black text-slate-800">{formatMoney(sellersCommissions.reduce((acc, s) => acc + s.total, 0), true)}</div>
                         <p className="text-xs text-pink-600 mt-2 font-bold">Total equipo de ventas</p>
                     </CardContent>
                 </Card>
@@ -568,7 +589,7 @@ export function OpsBilling() {
                     </div>
                 </div>
 
-                {/* --- MESA DE ENTRADA --- */}
+                {/* --- MESA DE ENTRADA (Mantiene formato original con decimales) --- */}
                 <TabsContent value="audit" className="flex-1 overflow-hidden m-0">
                     <Card className="h-full border-0 shadow-md flex flex-col">
                         <div className="bg-orange-50/50 p-3 border-b border-orange-100 flex items-center gap-2 text-xs text-orange-800 font-medium"><AlertTriangle size={14}/> Estas ventas están en el período seleccionado pero aún no fueron aprobadas.</div>
@@ -577,7 +598,6 @@ export function OpsBilling() {
                                 <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[220px]">Cliente / Origen</TableHead><TableHead>Vendedor</TableHead><TableHead>Prepaga / Plan</TableHead><TableHead className="text-right">Valores Base</TableHead><TableHead className="w-[180px]">Cálculo</TableHead><TableHead className="text-right font-bold text-slate-700">Estimado</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
                                 <TableBody>{pendingOps.length === 0 ? (<TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {formatMonth(selectedMonth)}.</TableCell></TableRow>) : pendingOps.map((op: any) => {
                                     const calc = calculate(op)
-                                    // Eliminamos isDeferred para no ocultar botones. Siempre se muestran.
                                     return (
                                         <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
                                             <TableCell><div className="font-bold text-slate-800">{op.clientName}</div><div className="text-[11px] font-mono text-slate-400">{op.dni}</div><div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div></TableCell>
@@ -588,7 +608,7 @@ export function OpsBilling() {
                                             </TableCell>
                                             <TableCell className="text-right text-xs font-mono text-slate-500"><div>FP: ${parseInt(op.fullPrice || "0").toLocaleString()}</div></TableCell>
                                             <TableCell><div className="text-[10px] bg-slate-100 p-1 rounded font-mono text-slate-500 truncate" title={calc.formula}>{calc.formula}</div></TableCell>
-                                            <TableCell className="text-right font-bold text-slate-800 text-sm">${calc.val.toLocaleString()}</TableCell>
+                                            <TableCell className="text-right font-bold text-slate-800 text-sm">{formatMoney(calc.val)}</TableCell>
                                             <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                                                 <div className="flex justify-end gap-2">
                                                     
@@ -622,9 +642,10 @@ export function OpsBilling() {
                                 <Button size="sm" variant="outline" className="h-7 text-xs gap-2" disabled={approvedOps.length === 0}><Download size={12}/> Exportar Excel</Button>
                             </div>
                             <div className="grid grid-cols-3 gap-4">
-                                <div className="bg-pink-50 border border-pink-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-pink-500 uppercase tracking-wider">Suma Prevención Salud</span><span className="text-sm font-black text-pink-700">${Math.round(breakdown.sumPreve).toLocaleString()}</span></div>
-                                <div className="bg-violet-50 border border-violet-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-violet-500 uppercase tracking-wider">Suma XP (Docto/Gal/Sw/Ava)</span><span className="text-sm font-black text-violet-700">${Math.round(breakdown.sumXP).toLocaleString()}</span></div>
-                                <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-sky-500 uppercase tracking-wider">Suma AMPF Salud</span><span className="text-sm font-black text-sky-700">${Math.round(breakdown.sumAMPF).toLocaleString()}</span></div>
+                                {/* ✅ Subtotales Redondeados para consistencia con tarjetas */}
+                                <div className="bg-pink-50 border border-pink-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-pink-500 uppercase tracking-wider">Suma Prevención Salud</span><span className="text-sm font-black text-pink-700">{formatMoney(breakdown.sumPreve, true)}</span></div>
+                                <div className="bg-violet-50 border border-violet-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-violet-500 uppercase tracking-wider">Suma XP (Docto/Gal/Sw/Ava)</span><span className="text-sm font-black text-violet-700">{formatMoney(breakdown.sumXP, true)}</span></div>
+                                <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg flex justify-between items-center"><span className="text-[10px] font-black text-sky-500 uppercase tracking-wider">Suma AMPF Salud</span><span className="text-sm font-black text-sky-700">{formatMoney(breakdown.sumAMPF, true)}</span></div>
                             </div>
                         </div>
 
@@ -645,7 +666,13 @@ export function OpsBilling() {
                                             <TableCell className="text-xs text-slate-600 font-medium">{op.seller}</TableCell>
                                             <TableCell className="text-right font-mono text-xs text-slate-500">${parseInt(op.fullPrice || "0").toLocaleString()}</TableCell>
                                             <TableCell className="text-center"><div className="bg-slate-100 text-[9px] px-2 py-0.5 rounded text-slate-500 truncate inline-block max-w-[150px]" title={calc.formula}>{calc.formula}</div></TableCell>
-                                            <TableCell className="text-right bg-green-50/30 p-2" onClick={e => e.stopPropagation()}><div className="relative"><span className="absolute left-3 top-2.5 text-green-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-green-700 border-green-200 bg-white focus:ring-green-500 text-right text-sm" value={calc.val} onChange={(e) => handlePriceChange(op.id, e.target.value)} disabled={isLocked}/></div></TableCell>
+                                            <TableCell className="text-right bg-green-50/30 p-2" onClick={e => e.stopPropagation()}>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2.5 text-green-600 font-bold text-xs">$</span>
+                                                    {/* ✅ STEP 0.01 PARA PERMITIR DECIMALES */}
+                                                    <Input className="h-8 pl-5 font-bold text-green-700 border-green-200 bg-white focus:ring-green-500 text-right text-sm" type="number" step="0.01" value={calc.val} onChange={(e) => handlePriceChange(op.id, e.target.value)} disabled={isLocked}/>
+                                                </div>
+                                            </TableCell>
                                             <TableCell className="text-right" onClick={e => e.stopPropagation()}><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => unapproveOp(op.id)}><Undo2 size={16}/></Button></TableCell>
                                         </TableRow>
                                     )
@@ -670,13 +697,19 @@ export function OpsBilling() {
                                                 <TableCell className="font-bold text-slate-700">{op.clientName}</TableCell>
                                                 <TableCell><Badge variant="secondary" className="text-[9px]">Automático</Badge></TableCell>
                                                 <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge></TableCell>
-                                                <TableCell>${liq.val.toLocaleString()}</TableCell>
-                                                <TableCell className="text-right bg-blue-50/50 p-2" onClick={e => e.stopPropagation()}><div className="relative"><span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span><Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked}/></div></TableCell>
+                                                <TableCell>{formatMoney(liq.val)}</TableCell>
+                                                <TableCell className="text-right bg-blue-50/50 p-2" onClick={e => e.stopPropagation()}>
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span>
+                                                        {/* ✅ STEP 0.01 */}
+                                                        <Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" type="number" step="0.01" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked}/>
+                                                    </div>
+                                                </TableCell>
                                             </TableRow>
                                         )
                                     })}
                                     {manualPortfolio.map(item => {
-                                        const currentVal = Math.round(parseFloat(item.calculated_liquidation || "0") * calcRules.portfolioRate)
+                                        const currentVal = Number((parseFloat(item.calculated_liquidation || "0") * calcRules.portfolioRate).toFixed(2))
                                         return (
                                             <TableRow key={item.id} className="bg-yellow-50/30">
                                                 <TableCell className="font-bold text-slate-700">{item.name}</TableCell>
@@ -713,13 +746,15 @@ export function OpsBilling() {
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className={`text-3xl font-black ${seller.isThresholdMet ? 'text-slate-800' : 'text-slate-400'}`}>${Math.round(seller.total).toLocaleString()}</div>
+                                                    {/* ✅ REDONDEADO EN LA TARJETA */}
+                                                    <div className={`text-3xl font-black ${seller.isThresholdMet ? 'text-slate-800' : 'text-slate-400'}`}>{formatMoney(seller.total, true)}</div>
                                                     <div className="text-[10px] font-bold text-green-600 uppercase tracking-wider">A Pagar</div>
                                                 </div>
                                             </div>
                                             <div className="space-y-2 text-xs text-slate-500 border-t pt-3">
-                                                <div className="flex justify-between"><span>Estandar ({seller.variableCount} / {seller.absorbableCount}):</span><span className="font-bold text-slate-700">${Math.round(seller.variableCommission).toLocaleString()}</span></div>
-                                                <div className="flex justify-between"><span>Especiales ({seller.specialCount}):</span><span className="font-bold text-slate-700">${Math.round(seller.specialCommission).toLocaleString()}</span></div>
+                                                {/* ✅ REDONDEADO EN EL DESGLOSE */}
+                                                <div className="flex justify-between"><span>Estandar ({seller.variableCount} / {seller.absorbableCount}):</span><span className="font-bold text-slate-700">{formatMoney(seller.variableCommission, true)}</span></div>
+                                                <div className="flex justify-between"><span>Especiales ({seller.specialCount}):</span><span className="font-bold text-slate-700">{formatMoney(seller.specialCommission, true)}</span></div>
                                                 {!seller.isThresholdMet && <div className="text-red-500 font-bold text-center mt-2 text-[10px]">Faltan {seller.absorbableCount - seller.variableCount} ventas estándar para desbloquear cobros.</div>}
                                             </div>
                                         </CardContent>
@@ -802,7 +837,7 @@ export function OpsBilling() {
             
             <Dialog open={showHistory} onOpenChange={setShowHistory}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Historial Anual</DialogTitle></DialogHeader><div className="py-4"><Table><TableHeader><TableRow><TableHead>Mes</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-[50%]">Gráfico</TableHead></TableRow></TableHeader><TableBody>{historyData.map((data) => { const max=Math.max(...historyData.map(d=>d.total)); const w=max>0?(data.total/max)*100:0; return (<TableRow key={data.month}><TableCell className="capitalize font-bold">{formatMonth(data.month)}</TableCell><TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell><TableCell><div className="h-4 bg-slate-100 rounded-full w-full overflow-hidden"><div className="h-full bg-green-500" style={{width:`${w}%`}}></div></div></TableCell></TableRow>)})}</TableBody></Table></div></DialogContent></Dialog>
             
-            <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc=calculate(op); return (<TableRow key={op.id} className={op.payStatus==='absorbed'||op.payStatus==='special_locked'?'opacity-50 bg-slate-50':''}><TableCell className="text-xs">{op.entryDate}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-right font-mono text-xs">${calc.val.toLocaleString()}</TableCell><TableCell>{op.payStatus==='special_paid'&&<Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus==='special_locked'&&<Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus==='absorbed'&&<Badge variant="outline">Absorbida</Badge>}{op.payStatus==='paid'&&<Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>)})}</TableBody></Table></div></DialogContent></Dialog>
+            <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc=calculate(op); return (<TableRow key={op.id} className={op.payStatus==='absorbed'||op.payStatus==='special_locked'?'opacity-50 bg-slate-50':''}><TableCell className="text-xs">{op.entryDate}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-right font-mono text-xs">{formatMoney(calc.val)}</TableCell><TableCell>{op.payStatus==='special_paid'&&<Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus==='special_locked'&&<Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus==='absorbed'&&<Badge variant="outline">Absorbida</Badge>}{op.payStatus==='paid'&&<Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>)})}</TableBody></Table></div></DialogContent></Dialog>
             
             <Dialog open={isAddingClient} onOpenChange={setIsAddingClient}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Agregar Manual</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-6 py-4"><div className="space-y-4"><div className="space-y-1"><Label>Nombre</Label><Input value={newClient.name} onChange={e=>setNewClient({...newClient, name:e.target.value})}/></div><div className="space-y-1"><Label>DNI</Label><Input value={newClient.dni} onChange={e=>setNewClient({...newClient, dni:e.target.value})}/></div></div><div className="space-y-4 bg-slate-50 p-4 rounded"><div className="space-y-1"><Label>Full Price</Label><Input type="number" value={newClient.fullPrice} onChange={e=>setNewClient({...newClient, fullPrice:e.target.value})}/></div><div className="grid grid-cols-2 gap-2"><div><Label>Aportes</Label><Input type="number" value={newClient.aportes} onChange={e=>setNewClient({...newClient, aportes:e.target.value})}/></div><div><Label>Desc.</Label><Input type="number" value={newClient.descuento} onChange={e=>setNewClient({...newClient, descuento:e.target.value})}/></div></div><div className="pt-2 flex justify-between text-sm font-bold text-blue-600"><span>Cartera Est:</span><span>${Math.round((parseFloat(newClient.fullPrice)-parseFloat(newClient.descuento)-parseFloat(newClient.aportes))*calcRules.portfolioRate).toLocaleString()}</span></div></div></div><DialogFooter><Button onClick={handleAddClient}>Guardar</Button></DialogFooter></DialogContent></Dialog>
         </div>

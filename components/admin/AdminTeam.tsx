@@ -338,52 +338,61 @@ export function AdminTeam() {
                 </DialogContent>
             </Dialog>
 
-            {/* --- MODAL ESPIAR (TABLERO LIVE) --- */}
+            {/* --- MODAL ESPIAR (AJUSTADO: ANCHO COMPLETO PARA VER COLUMNAS) --- */}
             <Dialog open={!!spyAgent} onOpenChange={() => setSpyAgent(null)}>
-                <DialogContent className="max-w-[98vw] h-[90vh] flex flex-col bg-[#F8F9FA] p-0 overflow-hidden border-none">
+                <DialogContent style={{ maxWidth: '1400px', width: '95vw', height: '90vh' }} className="flex flex-col p-0 gap-0 overflow-hidden border-none bg-[#F8F9FA]">
                     {spyAgent && (
                         <>
-                            <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm z-10">
+                            <div className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-10 shrink-0">
                                 <div className="flex items-center gap-4">
-                                    <Avatar className="h-10 w-10 border">
-                                        {/* ✅ USO DE FOTO REAL EN MODAL ESPIA */}
+                                    <Avatar className="h-12 w-12 border-2 border-blue-100 shadow-sm">
                                         <AvatarImage src={spyAgent.avatar} className="object-cover" />
                                         <AvatarFallback>{spyAgent.name[0]}</AvatarFallback>
                                     </Avatar>
                                     <div>
-                                        <DialogTitle className="text-lg font-black flex items-center gap-2">
+                                        <DialogTitle className="text-xl font-black flex items-center gap-2 text-slate-800">
                                             TABLERO DE {spyAgent.name.toUpperCase()}
-                                            <Badge className={`${spyAgent.status === 'online' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                        </DialogTitle>
+                                        <div className="flex items-center gap-2">
+                                            <Badge className={`${spyAgent.status === 'online' ? 'bg-green-100 text-green-700 hover:bg-green-100' : 'bg-red-100 text-red-700 hover:bg-red-100'} border-0`}>
                                                 {spyAgent.status === 'online' ? '● LIVE' : '● OFFLINE'}
                                             </Badge>
-                                        </DialogTitle>
+                                            <span className="text-xs text-slate-400">Vista de Supervisor</span>
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <Button size="icon" variant="outline" className="text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => setMessageModalOpen(true)}>
-                                        <Megaphone className="h-5 w-5" />
+                                    <Button size="sm" variant="outline" className="text-orange-600 border-orange-200 hover:bg-orange-50 gap-2 font-bold" onClick={() => setMessageModalOpen(true)}>
+                                        <Megaphone className="h-4 w-4" /> Enviar Alerta
                                     </Button>
-                                    <Button variant="ghost" onClick={() => setSpyAgent(null)}><X className="h-6 w-6 text-slate-400 hover:text-slate-800"/></Button>
+                                    <Button variant="ghost" size="icon" onClick={() => setSpyAgent(null)} className="h-9 w-9 rounded-full hover:bg-slate-100"><X className="h-5 w-5 text-slate-500"/></Button>
                                 </div>
                             </div>
 
-                            <ScrollArea className="flex-1 w-full bg-slate-100">
-                                <div className="flex gap-4 p-6 min-w-[1200px] h-full">
+                            <ScrollArea className="flex-1 w-full bg-slate-100/50">
+                                <div className="flex gap-6 p-8 min-w-[1200px] h-full items-start">
                                     {SELLER_COLUMNS.map(col => {
                                         const colLeads = spyLeads.filter((l:any) => l.status === col.id)
                                         return (
-                                            <div key={col.id} className="flex-1 min-w-[280px] max-w-[320px] flex flex-col gap-3">
-                                                <div className={`bg-white p-3 rounded-t-lg border-t-4 ${col.color} shadow-sm flex justify-between`}>
-                                                    <span className="font-bold text-xs uppercase text-slate-600">{col.title}</span>
-                                                    <Badge variant="secondary">{colLeads.length}</Badge>
+                                            <div key={col.id} className="flex-1 min-w-[300px] max-w-[350px] flex flex-col gap-3">
+                                                <div className={`bg-white px-4 py-3 rounded-xl border-t-4 ${col.color} shadow-sm flex justify-between items-center border-x border-b border-slate-100`}>
+                                                    <span className="font-black text-xs uppercase tracking-wider text-slate-700">{col.title}</span>
+                                                    <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-0">{colLeads.length}</Badge>
                                                 </div>
-                                                <div className="space-y-3 pb-10">
+                                                <div className="space-y-3 pb-20">
                                                     {colLeads.map((lead:any) => (
-                                                        <div key={lead.id} onClick={() => setSelectedLead(lead)} className="bg-white p-3 rounded-lg shadow-sm border border-slate-100 hover:shadow-md cursor-pointer transition-all hover:scale-[1.02]">
-                                                            <div className="flex justify-between items-start mb-2"><p className="font-bold text-sm text-slate-800 line-clamp-1">{lead.name}</p></div>
-                                                            <div className="flex justify-between items-center mt-2 border-t pt-2 border-slate-50">
-                                                                <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1"><Clock className="h-3 w-3"/> {new Date(lead.last_update).toLocaleDateString()}</span>
-                                                                {col.id === 'cotizacion' && <span className="text-[10px] font-bold text-green-600">$ {lead.quoted_price || '-'}</span>}
+                                                        <div key={lead.id} onClick={() => setSelectedLead(lead)} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:shadow-md cursor-pointer transition-all hover:scale-[1.02] group relative overflow-hidden">
+                                                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-slate-100 group-hover:bg-blue-400 transition-colors"></div>
+                                                            <div className="pl-2">
+                                                                <div className="flex justify-between items-start mb-2">
+                                                                    <p className="font-bold text-sm text-slate-800 line-clamp-1">{lead.name}</p>
+                                                                </div>
+                                                                <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-50">
+                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                                                                        <Clock className="h-3 w-3"/> {new Date(lead.last_update).toLocaleDateString()}
+                                                                    </span>
+                                                                    {col.id === 'cotizacion' && <span className="text-xs font-black text-green-600 bg-green-50 px-2 py-0.5 rounded-full">$ {lead.quoted_price || '-'}</span>}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -414,39 +423,48 @@ export function AdminTeam() {
 
             {/* FICHA LEAD (CHAT UNIFICADO + DETALLE PREMIUM) */}
             <Sheet open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
-                <SheetContent className="sm:max-w-[500px] flex flex-col p-0">
+                <SheetContent className="sm:max-w-[500px] flex flex-col p-0 w-full" style={{ maxWidth: '500px' }}>
                     {selectedLead && (
                         <>
-                            <div className="p-6 pb-4 border-b bg-slate-50">
+                            <div className="p-6 pb-4 border-b bg-slate-50 shrink-0">
                                 <SheetHeader>
-                                    <SheetTitle className="text-xl font-black">{selectedLead.name}</SheetTitle>
-                                    <SheetDescription className="flex gap-2"><Badge variant="outline">{selectedLead.source || 'Sin origen'}</Badge><Badge>{selectedLead.status}</Badge></SheetDescription>
+                                    <SheetTitle className="text-2xl font-black text-slate-800">{selectedLead.name}</SheetTitle>
+                                    <div className="flex gap-2 mt-2">
+                                        <Badge variant="outline" className="bg-white">{selectedLead.source || 'Sin origen'}</Badge>
+                                        <Badge className="capitalize bg-slate-800">{selectedLead.status}</Badge>
+                                    </div>
                                 </SheetHeader>
                             </div>
                             <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden">
-                                <TabsList className="w-full rounded-none border-b bg-white"><TabsTrigger value="info" className="flex-1">Ficha Técnica</TabsTrigger><TabsTrigger value="chat" className="flex-1">Chat Supervisión</TabsTrigger></TabsList>
+                                <TabsList className="w-full rounded-none border-b bg-white h-12">
+                                    <TabsTrigger value="info" className="flex-1 h-full data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Ficha Técnica</TabsTrigger>
+                                    <TabsTrigger value="chat" className="flex-1 h-full data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Chat Supervisión</TabsTrigger>
+                                </TabsList>
                                 
                                 {/* 🟢 NUEVO CONTENIDO DETALLADO */}
                                 <TabsContent value="info" className="flex-1 p-0 h-full overflow-hidden">
                                     <ScrollArea className="h-full">
-                                        <div className="p-6 space-y-6">
+                                        <div className="p-6 space-y-8">
                                             {/* SECCIÓN 1: COTIZACIÓN */}
                                             <div className="space-y-3">
                                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                                     <DollarSign className="h-4 w-4" /> Detalle de Cotización
                                                 </h4>
                                                 <div className="grid grid-cols-2 gap-3">
-                                                    <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Prepaga</p>
-                                                        <p className="font-bold text-slate-800">{selectedLead.prepaga || '—'}</p>
+                                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Prepaga</p>
+                                                        <p className="font-bold text-slate-800 text-sm">{selectedLead.prepaga || '—'}</p>
                                                     </div>
-                                                    <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Plan</p>
-                                                        <p className="font-bold text-slate-800">{selectedLead.plan || '—'}</p>
+                                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Plan</p>
+                                                        <p className="font-bold text-slate-800 text-sm">{selectedLead.plan || '—'}</p>
                                                     </div>
-                                                    <div className="bg-green-50 p-3 rounded-xl border border-green-100 shadow-sm col-span-2">
-                                                        <p className="text-[10px] font-bold text-green-600 uppercase">Precio Cotizado</p>
-                                                        <p className="text-2xl font-black text-green-700 tracking-tight">
+                                                    <div className="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm col-span-2 flex justify-between items-center">
+                                                        <div>
+                                                            <p className="text-[10px] font-bold text-green-600 uppercase">Precio Cotizado</p>
+                                                            <p className="text-xs text-green-500 font-medium">Valor mensual</p>
+                                                        </div>
+                                                        <p className="text-3xl font-black text-green-700 tracking-tight">
                                                             $ {selectedLead.quoted_price || selectedLead.price || '0'}
                                                         </p>
                                                     </div>
@@ -460,22 +478,22 @@ export function AdminTeam() {
                                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                                     <User className="h-4 w-4" /> Datos Personales
                                                 </h4>
-                                                <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-                                                    <div className="p-3 border-b border-slate-50 flex justify-between">
-                                                        <span className="text-xs text-slate-500">DNI / CUIT</span>
-                                                        <span className="text-xs font-bold font-mono">{selectedLead.dni || selectedLead.cuit || '—'}</span>
+                                                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                                    <div className="p-3 border-b border-slate-100 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                                                        <span className="text-xs font-bold text-slate-500">DNI / CUIT</span>
+                                                        <span className="text-xs font-bold font-mono text-slate-800 bg-slate-100 px-2 py-1 rounded">{selectedLead.dni || selectedLead.cuit || '—'}</span>
                                                     </div>
-                                                    <div className="p-3 border-b border-slate-50 flex justify-between">
-                                                        <span className="text-xs text-slate-500">Email</span>
-                                                        <span className="text-xs font-bold">{selectedLead.email || '—'}</span>
+                                                    <div className="p-3 border-b border-slate-100 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                                                        <span className="text-xs font-bold text-slate-500">Email</span>
+                                                        <span className="text-xs font-medium text-slate-800">{selectedLead.email || '—'}</span>
                                                     </div>
-                                                    <div className="p-3 border-b border-slate-50 flex justify-between">
-                                                        <span className="text-xs text-slate-500">Teléfono</span>
-                                                        <span className="text-xs font-bold font-mono">{selectedLead.phone || '—'}</span>
+                                                    <div className="p-3 border-b border-slate-100 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                                                        <span className="text-xs font-bold text-slate-500">Teléfono</span>
+                                                        <span className="text-xs font-bold font-mono text-slate-800 bg-slate-100 px-2 py-1 rounded">{selectedLead.phone || '—'}</span>
                                                     </div>
-                                                    <div className="p-3 flex justify-between">
-                                                        <span className="text-xs text-slate-500">Edad / Nac.</span>
-                                                        <span className="text-xs font-bold">{selectedLead.dob || '—'}</span>
+                                                    <div className="p-3 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                                                        <span className="text-xs font-bold text-slate-500">Edad / Nac.</span>
+                                                        <span className="text-xs font-bold text-slate-800">{selectedLead.dob || '—'}</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -488,11 +506,17 @@ export function AdminTeam() {
                                                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                                             <Users className="h-4 w-4" /> Grupo Familiar
                                                         </h4>
-                                                        <div className="bg-white rounded-xl border border-slate-100 p-1">
+                                                        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                                                             <table className="w-full text-xs">
+                                                                <thead className="bg-slate-50 border-b border-slate-200">
+                                                                    <tr>
+                                                                        <th className="text-left p-2 font-bold text-slate-500">Nombre</th>
+                                                                        <th className="text-right p-2 font-bold text-slate-500">Edad/DNI</th>
+                                                                    </tr>
+                                                                </thead>
                                                                 <tbody>
                                                                     {(selectedLead.family_members || selectedLead.hijos).map((f: any, idx: number) => (
-                                                                        <tr key={idx} className="border-b border-slate-50 last:border-0">
+                                                                        <tr key={idx} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                                                                             <td className="p-2 font-bold text-slate-700">{f.name || f.nombre}</td>
                                                                             <td className="p-2 text-right font-mono text-slate-500">{f.dni || f.edad}</td>
                                                                         </tr>
@@ -511,7 +535,7 @@ export function AdminTeam() {
                                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                                     <FileText className="h-4 w-4" /> Notas del Vendedor
                                                 </h4>
-                                                <div className="bg-yellow-50/50 p-4 rounded-xl border border-yellow-100 text-sm text-slate-600 italic leading-relaxed">
+                                                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-sm text-slate-700 italic leading-relaxed shadow-sm">
                                                     {selectedLead.notes ? `"${selectedLead.notes}"` : "Sin observaciones registradas."}
                                                 </div>
                                             </div>
@@ -520,30 +544,38 @@ export function AdminTeam() {
                                 </TabsContent>
 
                                 <TabsContent value="chat" className="flex-1 flex flex-col p-0 h-full">
-                                    <ScrollArea className="flex-1 p-4 bg-slate-50">
+                                    <ScrollArea className="flex-1 p-4 bg-slate-100">
                                         <div className="space-y-4">
                                             {/* Chat Messages REALES */}
                                             {chatMessages.length === 0 ? (
-                                                <div className="text-center text-xs text-slate-400 py-10 opacity-50 flex flex-col items-center gap-2">
-                                                    <MessageSquare size={32}/>
+                                                <div className="text-center text-xs text-slate-400 py-20 opacity-50 flex flex-col items-center gap-2">
+                                                    <MessageSquare size={40} className="text-slate-300"/>
                                                     Inicia el chat con el vendedor.
                                                 </div>
                                             ) : (
                                                 chatMessages.map((msg: any, i: number) => (
-                                                    <div key={i} className={`flex flex-col ${msg.sender === 'Supervisión' ? 'items-end' : 'items-start'}`}>
-                                                        <div className={`max-w-[80%] p-3 rounded-lg text-sm shadow-sm ${msg.sender === 'Supervisión' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border rounded-bl-none text-slate-700'}`}>
+                                                    <div key={i} className={`flex flex-col ${msg.sender === 'Supervisión' ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2`}>
+                                                        <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${msg.sender === 'Supervisión' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-slate-200 rounded-bl-none text-slate-700'}`}>
                                                             {msg.text}
                                                         </div>
-                                                        <span className="text-[10px] text-slate-400 mt-1 font-bold">{msg.sender === 'Supervisión' ? 'Vos' : msg.sender} • {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                                        <span className="text-[10px] text-slate-400 mt-1 font-bold px-1">{msg.sender === 'Supervisión' ? 'Vos' : msg.sender} • {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                                                     </div>
                                                 ))
                                             )}
                                             <div ref={scrollRef} />
                                         </div>
                                     </ScrollArea>
-                                    <div className="p-4 border-t bg-white flex gap-2">
-                                        <Input placeholder="Escribí un mensaje..." value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendLeadComment()}/>
-                                        <Button size="icon" onClick={sendLeadComment} className="bg-blue-600 hover:bg-blue-700"><Send className="h-4 w-4 text-white"/></Button>
+                                    <div className="p-4 border-t bg-white flex gap-2 shrink-0 shadow-[0_-5px_10px_rgba(0,0,0,0.05)] z-20">
+                                        <Input 
+                                            className="bg-slate-50 border-slate-200 focus-visible:ring-blue-500" 
+                                            placeholder="Escribí un mensaje..." 
+                                            value={chatMessage} 
+                                            onChange={(e) => setChatMessage(e.target.value)} 
+                                            onKeyDown={(e) => e.key === 'Enter' && sendLeadComment()}
+                                        />
+                                        <Button size="icon" onClick={sendLeadComment} className="bg-blue-600 hover:bg-blue-700 shadow-md transition-transform active:scale-95">
+                                            <Send className="h-4 w-4 text-white"/>
+                                        </Button>
                                     </div>
                                 </TabsContent>
                             </Tabs>

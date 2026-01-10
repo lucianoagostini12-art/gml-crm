@@ -10,10 +10,12 @@ import {
 } from "@dnd-kit/core"
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { ArchiveX, Trophy, BellRing, AlertOctagon, Skull, MessageCircle, Phone, CheckCircle2, Clock } from "lucide-react"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+// ✅ Íconos seguros
+import { ArchiveX, Trophy, BellRing, AlertOctagon, Skull, MessageCircle, Phone, CheckCircle2, Clock, AlertTriangle } from "lucide-react" 
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { toast } from "sonner"
 
 // --- COMPONENTES ---
 import { Lead, LeadCard } from "./LeadCard"
@@ -52,7 +54,6 @@ const isLeadOverdue = (lastUpdateStr: string, status: string) => {
 function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
     
-    // CORRECCIÓN: Style compatible con TS
     const style: React.CSSProperties = { 
         transform: CSS.Transform.toString(transform), 
         transition, 
@@ -60,7 +61,6 @@ function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAg
         touchAction: 'none'
     }
     
-    // Aplicamos escala en el transform string manualmente para evitar error de tipo 'scale'
     if (isDragging && style.transform) {
         style.transform += " scale(1.05)";
     }
@@ -110,14 +110,16 @@ function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAg
 function KanbanColumn({ col, leads, onClickLead, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { setNodeRef } = useDroppable({ id: col.id })
     return (
-        <div ref={setNodeRef} className={`min-w-[300px] w-[300px] flex flex-col rounded-xl ${col.color} p-4 min-h-full h-fit`}>
-            <div className="flex justify-between items-center mb-4 px-1 text-slate-700 sticky top-0 z-10 py-1 bg-inherit">
+        <div ref={setNodeRef} className={`min-w-[300px] w-[300px] flex flex-col rounded-xl ${col.color} h-full max-h-full border shadow-sm`}>
+            {/* Header Fijo */}
+            <div className="flex justify-between items-center p-4 pb-2 text-slate-700 shrink-0 bg-inherit rounded-t-xl z-10">
                 <h3 className="font-black text-xs uppercase tracking-wider">{col.title}</h3>
                 <span className="bg-white text-[10px] font-black px-2 py-1 rounded-full shadow-sm border">{leads.length}</span>
             </div>
-            <div className="flex-1">
+            {/* Contenido Scrolleable */}
+            <div className="flex-1 overflow-y-auto p-4 pt-2 custom-scrollbar">
                 <SortableContext items={leads.map((l: any) => l.id)} strategy={verticalListSortingStrategy}>
-                    <div className="flex flex-col gap-5 pt-4 pb-10">
+                    <div className="flex flex-col gap-4 pb-4">
                         {leads.map((lead: any) => (
                             <SortableItem key={lead.id} lead={lead} onClick={() => onClickLead(lead)} onCallIncrement={onCallIncrement} onOmniClick={onOmniClick} onResolveAgenda={onResolveAgenda} />
                         ))}
@@ -150,6 +152,9 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const [overdueLead, setOverdueLead] = useState<Lead | null>(null)
     const [zombieLead, setZombieLead] = useState<Lead | null>(null)
     
+    // Comunicado Urgente
+    const [urgentMessage, setUrgentMessage] = useState<string | null>(null)
+
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
 
@@ -167,6 +172,16 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         const visibleStatuses = ['nuevo', 'contactado', 'cotizacion', 'documentacion'];
         const { data } = await supabase.from('leads').select('*').eq('agent_name', CURRENT_USER).in('status', visibleStatuses) 
         if (data) setLeads(mapLeads(data))
+    }
+
+    const checkUrgentMessage = async () => {
+        const { data } = await supabase.from('profiles').select('urgent_message').eq('full_name', CURRENT_USER).single()
+        if (data?.urgent_message) setUrgentMessage(data.urgent_message)
+    }
+
+    const dismissUrgentMessage = async () => {
+        await supabase.from('profiles').update({ urgent_message: null }).eq('full_name', CURRENT_USER)
+        setUrgentMessage(null)
     }
 
     const customCollisionDetection = (args: any) => {
@@ -193,17 +208,31 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     useEffect(() => {
         fetchLeads()
+        checkUrgentMessage()
+
+        // Canal de Leads (Cambios)
         const channel = supabase.channel('kanban_realtime_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
                 const newData = payload.new as any;
+                
+                // Notificaciones Inteligentes
                 if (payload.eventType === 'INSERT') {
                     if (newData && !['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(newData.status)) {
                         const newLead = mapLeads([newData])[0]
                         setLeads(prev => [newLead, ...prev])
+                        toast.success(`¡Nuevo Lead! ${newData.name}`, { 
+                            description: "Hacé click para ver detalles", 
+                            action: { label: "Ver", onClick: () => onLeadClick && onLeadClick(newData.id) } 
+                        })
                     }
                 } else if (payload.eventType === 'UPDATE') {
                     if (newData) {
                         const updated = mapLeads([newData])[0]
+                        
+                        if (['ingresado', 'precarga', 'medicas', 'legajo', 'cumplidas', 'vendido'].includes(updated.status)) {
+                             toast.info(`¡Movimiento en Venta! ${updated.name}`, { description: `Pasó a: ${updated.status.toUpperCase()}` })
+                        }
+
                         if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
                             setLeads(prev => prev.filter(l => l.id !== updated.id))
                         } else {
@@ -214,6 +243,30 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             })
             .subscribe()
         
+        // Canal de Mensajes (Admin/Ops)
+        const chatChannel = supabase.channel('kanban_messages')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages' }, async (payload) => {
+                const msg = payload.new as any
+                if (msg.target_role === 'seller' || msg.sender === 'Supervisión' || msg.sender === 'Administración') {
+                    const { data: leadData } = await supabase.from('leads').select('agent_name, name').eq('id', msg.lead_id).single()
+                    if (leadData && leadData.agent_name === CURRENT_USER) {
+                        toast.message(`Mensaje de ${msg.sender}`, {
+                            description: `${leadData.name}: ${msg.text.substring(0, 30)}...`,
+                            action: { label: "Responder", onClick: () => onLeadClick && onLeadClick(msg.lead_id) } 
+                        })
+                    }
+                }
+            })
+            .subscribe()
+
+        // Canal de Comunicados (Profiles)
+        const profileChannel = supabase.channel('kanban_profile_updates')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `full_name=eq.${CURRENT_USER}` }, (payload) => {
+                const newData = payload.new as any
+                if(newData.urgent_message) setUrgentMessage(newData.urgent_message)
+            })
+            .subscribe()
+
         if (typeof window !== 'undefined') { 
             audioRef.current = new Audio(ALARM_SOUND); 
             audioRef.current.loop = true; 
@@ -221,6 +274,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         
         return () => { 
             supabase.removeChannel(channel);
+            supabase.removeChannel(chatChannel);
+            supabase.removeChannel(profileChannel);
             stopAudio();
         }
     }, [CURRENT_USER])
@@ -282,29 +337,38 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         window.open(omniUrl, '_blank')
     }
 
-    // ✅ COMPLETAR AGENDA Y APAGAR ALARMAS
     const handleCompleteAgenda = async () => {
         if (!showConfirmCall) return;
         const leadId = showConfirmCall.id;
         stopAudio(); 
-        
-        // --- AQUÍ ESTABA EL ERROR ---
-        // 'scheduled_for' es string | undefined, no acepta null.
-        // Cambiamos null por undefined para el estado local.
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: undefined } : l))
-        
         setShowConfirmCall(null);
         setAlarmLead(null); 
         await supabase.from('leads').update({ scheduled_for: null, last_update: new Date().toISOString() }).eq('id', leadId)
     }
 
-    // ✅ GESTIONAR AHORA
     const handleManageNow = () => {
         if (!alarmLead) return;
         stopAudio(); 
         setIgnoredAlarmIds(prev => [...prev, alarmLead.id])
         if (onLeadClick) onLeadClick(alarmLead.id);
         setAlarmLead(null);
+    }
+
+    // ✅ FUNCIÓN DE APLAZAR (RESTAURADA)
+    const handleSnooze = async () => {
+        if (!alarmLead) return;
+        stopAudio();
+        const leadId = alarmLead.id;
+        const newTime = new Date(new Date().getTime() + 10 * 60000).toISOString();
+        
+        // Actualizar localmente
+        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: newTime } : l));
+        setAlarmLead(null); 
+        
+        // Actualizar en DB
+        await supabase.from('leads').update({ scheduled_for: newTime, last_update: new Date().toISOString() }).eq('id', leadId);
+        toast.success("Alarma aplazada 10 minutos 💤");
     }
 
     const handleDragEnd = async (event: DragEndEvent) => {
@@ -329,12 +393,12 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     }
 
     const sortLeads = (columnId: string) => leads.filter(l => l.status === columnId).sort(sortLeadsLogic)
-
-    // Render seguro
     const activeLeadForOverlay = activeId ? leads.find(l => l.id === activeId) : null;
 
     return (
         <div className="flex flex-col h-full relative overflow-hidden bg-slate-50/50">
+            {/* SIN TOOLBAR - LIMPIO */}
+
             <DndContext sensors={sensors} collisionDetection={customCollisionDetection} onDragStart={(e) => setActiveId(e.active.id as string)} onDragEnd={handleDragEnd}>
                 <div className="flex-1 flex gap-6 overflow-x-auto p-8 h-full items-start">
                     {ACTIVE_COLUMNS.map((col) => (
@@ -363,50 +427,9 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </DragOverlay>
             </DndContext>
             
+            {/* ... DIALOGS (Lost, Won, Quote, Doc) SIN CAMBIOS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
-            
-            {/* ✅ FIXED: SANITIZACIÓN DE DATOS PARA EVITAR ERROR 400 EN SUPABASE */}
-            <WonLeadDialog open={isWonDialogOpen} onOpenChange={setIsWonDialogOpen} onConfirm={async (data: any) => { 
-                const leadId = leadProcessingId; 
-                if (!leadId) return; 
-                
-                const { files, ...leadData } = data; 
-                const oldLead = leads.find(l => l.id === leadId); 
-                
-                // 1. Limpieza visual
-                setLeads(prev => prev.filter(l => l.id !== leadId)); 
-                setIsWonDialogOpen(false); 
-                
-                if (files && files.length > 0) { /* */ } 
-                
-                // 2. CONSTRUCCIÓN DE PAYLOAD LIMPIO (EVITA ERROR 400)
-                const payload: any = {
-                    status: 'vendido', // FORZADO
-                    last_update: new Date().toISOString(),
-                    quoted_price: leadData.price ? Number(leadData.price) : 0, // Asegura número
-                    quoted_prepaga: leadData.prepaga || null,
-                    quoted_plan: leadData.plan || null,
-                    notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes
-                };
-
-                // Campos opcionales (solo si tienen valor)
-                if (leadData.afiliado_number) payload.afiliado_number = leadData.afiliado_number;
-                if (leadData.cuit) payload.cuit = leadData.cuit;
-                if (leadData.aporte) payload.aporte = leadData.aporte;
-                if (leadData.derivacion_aportes) payload.derivacion_aportes = leadData.derivacion_aportes;
-                if (leadData.cant_capitas) payload.cant_capitas = Number(leadData.cant_capitas); // Asegura número
-
-                // 3. ENVÍO SEGURO
-                const { error } = await supabase.from('leads').update(payload).eq('id', leadId); 
-                
-                if (error) {
-                    console.error("Error confirmando venta:", error);
-                    alert("Hubo un error al guardar. Verificá los campos numéricos.");
-                } else if (oldLead) {
-                    logHistory(leadId, oldLead.status, 'vendido') 
-                }
-            }} />
-            
+            <WonLeadDialog open={isWonDialogOpen} onOpenChange={setIsWonDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if (!leadId) return; const { files, ...leadData } = data; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.filter(l => l.id !== leadId)); setIsWonDialogOpen(false); const payload: any = { status: 'vendido', last_update: new Date().toISOString(), quoted_price: leadData.price ? Number(leadData.price) : 0, quoted_prepaga: leadData.prepaga || null, quoted_plan: leadData.plan || null, notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes }; if (leadData.afiliado_number) payload.afiliado_number = leadData.afiliado_number; if (leadData.cuit) payload.cuit = leadData.cuit; if (leadData.aporte) payload.aporte = leadData.aporte; if (leadData.derivacion_aportes) payload.derivacion_aportes = leadData.derivacion_aportes; if (leadData.cant_capitas) payload.cant_capitas = Number(leadData.cant_capitas); const { error } = await supabase.from('leads').update(payload).eq('id', leadId); if (error) { console.error("Error confirmando venta:", error); alert("Hubo un error al guardar. Verificá los campos numéricos."); } else if (oldLead) { logHistory(leadId, oldLead.status, 'vendido') } }} />
             <QuotationDialog open={isQuoteDialogOpen} onOpenChange={setIsQuoteDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l)); setIsQuoteDialogOpen(false); await supabase.from('leads').update({ status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion') }} onCancel={() => setIsQuoteDialogOpen(false)} />
             <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
 
@@ -426,11 +449,10 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </DialogContent>
             </Dialog>
 
-            {/* ✅ 1. POP-UP PROFESIONAL DE ALARMA */}
+            {/* ✅ 1. POP-UP PROFESIONAL DE ALARMA + SNOOZE */}
             <Dialog open={!!alarmLead} onOpenChange={(open) => !open && handleManageNow()}>
                 <DialogContent className="max-w-[400px] border-0 shadow-2xl p-0 overflow-hidden bg-white" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} aria-describedby="alarm-desc">
                     
-                    {/* Header Azul Profesional */}
                     <div className="bg-[#1e3a8a] p-6 text-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-cyan-300"></div>
                         <div className="bg-white/10 p-3 rounded-full w-fit mx-auto mb-3 backdrop-blur-sm animate-[pulse_2s_infinite]">
@@ -440,7 +462,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                         <DialogDescription id="alarm-desc" className="text-blue-100 text-xs mt-1">Tenés una llamada programada ahora.</DialogDescription>
                     </div>
 
-                    {/* Cuerpo de la Tarjeta */}
                     <div className="p-6 text-center">
                         <Avatar className="h-20 w-20 mx-auto mb-4 border-4 border-slate-50 shadow-md">
                             <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${alarmLead?.name}`} />
@@ -452,12 +473,22 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                             <Phone size={14} /> {alarmLead?.phone}
                         </div>
 
-                        <Button 
-                            onClick={handleManageNow} 
-                            className="w-full h-12 text-md font-bold bg-[#1e3a8a] hover:bg-blue-900 text-white rounded-xl shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98]"
-                        >
-                            GESTIONAR AHORA
-                        </Button>
+                        <div className="flex flex-col gap-3">
+                            <Button 
+                                onClick={handleManageNow} 
+                                className="w-full h-12 text-md font-bold bg-[#1e3a8a] hover:bg-blue-900 text-white rounded-xl shadow-lg transition-all active:scale-[0.98]"
+                            >
+                                GESTIONAR AHORA
+                            </Button>
+                            {/* ✅ BOTÓN SNOOZE (APLAZAR) - CON ÍCONO CLOCK SEGURO */}
+                            <Button 
+                                onClick={handleSnooze}
+                                variant="outline"
+                                className="w-full h-10 border-slate-200 text-slate-500 hover:text-blue-600 gap-2"
+                            >
+                                <Clock size={16}/> Aplazar 10 minutos
+                            </Button>
+                        </div>
                     </div>
                 </DialogContent>
             </Dialog>
@@ -481,6 +512,24 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                         </Button>
                         <Button onClick={() => setShowConfirmCall(null)} variant="ghost" className="w-full h-10 text-slate-400 hover:text-slate-600 hover:bg-slate-50 font-medium">
                             Todavía no (Mantener Alarma)
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* ✅ 3. COMUNICADO URGENTE (BLOQUEANTE) */}
+            <Dialog open={!!urgentMessage} onOpenChange={() => {}}>
+                <DialogContent className="bg-red-600 border-none text-white max-w-lg shadow-[0_0_100px_rgba(220,38,38,0.5)]" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+                    <div className="flex flex-col items-center text-center p-6 gap-4">
+                        <div className="bg-white/20 p-4 rounded-full animate-bounce">
+                            <AlertTriangle size={48} className="text-white"/>
+                        </div>
+                        <DialogTitle className="text-3xl font-black uppercase tracking-widest">Comunicado Urgente</DialogTitle>
+                        <p className="text-lg font-medium leading-relaxed bg-white/10 p-6 rounded-xl w-full border border-white/20">
+                            {urgentMessage}
+                        </p>
+                        <Button onClick={dismissUrgentMessage} className="bg-white text-red-600 hover:bg-red-50 font-black w-full h-12 text-lg shadow-lg mt-4">
+                            ENTENDIDO
                         </Button>
                     </div>
                 </DialogContent>

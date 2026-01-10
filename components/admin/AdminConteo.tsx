@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -16,6 +16,17 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
+// --- REGLAS DE CÁLCULO (COPIADAS DE OPSBILLING PARA CONSISTENCIA) ---
+const INITIAL_CALC_RULES = {
+    taxRate: 0.105, 
+    prevencionVat: 0.21,
+    doctoRed: { base: 1.80, specialPlan: '500' },
+    ampf: { multiplier: 2.0 },
+    prevencion: { 'A1': 0.90, 'A1 CP': 0.90, 'A2': 1.30, 'A2 CP': 1.30, 'A4': 1.50, 'A5': 1.50, default: 1.30 },
+    generalGroup: { multiplier: 1.80 }, 
+    portfolioRate: 0.05 
+}
+
 export function AdminConteo() {
   const supabase = createClient()
 
@@ -28,8 +39,8 @@ export function AdminConteo() {
 
   const [loading, setLoading] = useState(true)
   const [agents, setAgents] = useState<any[]>([])
-  const [prepagaStats, setPrepagaStats] = useState<any[]>([])
   const [globalTotals, setGlobalTotals] = useState({ monthly: 0, fulfilled: 0, revenue: 0 })
+  const [profilesMap, setProfilesMap] = useState<Record<string, string>>({}) // Mapa Nombre -> Avatar URL
 
   // Helpers
   const norm = (v: any) => String(v ?? "").trim().toLowerCase()
@@ -46,48 +57,84 @@ export function AdminConteo() {
     return d
   }
 
+  // --- FÓRMULA DE FACTURACIÓN (ESPEJO DE OPSBILLING) ---
+  const calculateBillingValue = (op: any) => {
+      // 1. Si tiene override manual en Billing, gana eso.
+      if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
+          return parseFloat(op.billing_price_override.toString())
+      }
+      
+      const full = parseFloat(op.full_price || op.price || "0")
+      const aportes = parseFloat(op.aportes || "0")
+      const desc = parseFloat(op.descuento || "0")
+      const p = (op.prepaga || op.quoted_prepaga || "").toLowerCase()
+      const plan = op.plan || op.quoted_plan || ""
+      let val = 0
+
+      if (p.includes("preven")) {
+          const base = full - desc
+          // @ts-ignore
+          const rate = INITIAL_CALC_RULES.prevencion[plan] || INITIAL_CALC_RULES.prevencion.default
+          val = base * rate
+      } else if (p.includes("ampf")) {
+          val = full * INITIAL_CALC_RULES.ampf.multiplier
+      } else {
+          let base = full * (1 - INITIAL_CALC_RULES.taxRate)
+          if (p.includes("doctored") && plan.includes("500") && op.labor_condition === 'empleado') {
+              base = aportes * (1 - INITIAL_CALC_RULES.taxRate)
+          }
+          val = base * INITIAL_CALC_RULES.generalGroup.multiplier
+      }
+      
+      if (p.includes("pass") || op.type === 'pass') { val = 0 } // Pass no factura
+      
+      return Math.round(val)
+  }
+
   // Genera años desde el primer lead de la historia
   const buildYearOptions = async () => {
     const currentYear = new Date().getFullYear()
     let minYear = currentYear
 
     try {
-      const { data, error } = await supabase
-        .from("leads")
-        .select("created_at")
-        .order("created_at", { ascending: true })
-        .limit(1)
-
+      const { data, error } = await supabase.from("leads").select("created_at").order("created_at", { ascending: true }).limit(1)
       if (!error && data && data.length > 0) {
         const y = new Date(data[0].created_at).getFullYear()
         if (!Number.isNaN(y)) minYear = y
       }
-    } catch {
-      // fallback
-    }
+    } catch {}
 
     const years: string[] = []
     for (let y = minYear; y <= currentYear + 1; y++) years.push(String(y))
-
     setYearOptions(years)
+    if (!years.includes(selectedYear)) setSelectedYear(String(currentYear))
+  }
 
-    if (!years.includes(selectedYear)) {
-      setSelectedYear(String(currentYear))
-    }
+  // Carga perfiles reales para los avatares
+  const fetchProfiles = async () => {
+      const { data } = await supabase.from('profiles').select('full_name, avatar_url, email')
+      if (data) {
+          const map: Record<string, string> = {}
+          data.forEach((p: any) => {
+              if (p.full_name) map[norm(p.full_name)] = p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
+          })
+          setProfilesMap(map)
+      }
   }
 
   const fetchData = async () => {
     setLoading(true)
 
-    // 1. Rango de fechas
-    const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
-    const endDate = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
+    // 1. Rango de fechas (o TODO si es 'all')
+    let query = supabase.from("leads").select("*")
+    
+    if (selectedYear !== 'all') {
+        const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
+        const endDate = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
+        query = query.gte("created_at", startDate).lte("created_at", endDate)
+    }
 
-    const { data: leads, error } = await supabase
-      .from("leads")
-      .select("*")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate)
+    const { data: leads, error } = await query
 
     if (error) console.error("Error leyendo leads:", error)
 
@@ -101,18 +148,12 @@ export function AdminConteo() {
 
     let sellerNames: string[] = []
     try {
-      const { data: sellers } = await supabase
-        .from("profiles")
-        .select("full_name, role")
-        .eq("role", "seller")
-
+      const { data: sellers } = await supabase.from("profiles").select("full_name, role").eq("role", "seller")
       sellerNames = (sellers || [])
         .map((s: any) => String(s.full_name ?? "").trim())
         .filter(Boolean)
         .filter((n: string) => !manualBucketSet.has(norm(n)))
-    } catch (e) {
-      console.warn("profiles no disponible:", e)
-    }
+    } catch {}
 
     const manualNamesThisPeriod = [...new Set(
       safeLeads
@@ -129,13 +170,10 @@ export function AdminConteo() {
     let totalSalesGlobal = 0
     let totalFulfilledGlobal = 0
 
-    // ✅ HELPER: Regla de Negocio (AMPF = 1, Resto = Cápitas)
     const calculatePoints = (items: any[]) => {
         return items.reduce((acc, item) => {
-            // Protección contra nulos en prepaga
-            const pName = (item.prepaga || "").toLowerCase()
+            const pName = (item.prepaga || item.quoted_prepaga || "").toLowerCase()
             const isAMPF = pName.includes("ampf")
-            // Si es AMPF suma 1, si no suma cápitas (o 1 por defecto)
             const points = isAMPF ? 1 : (Number(item.capitas) || 1)
             return acc + points
         }, 0)
@@ -147,7 +185,7 @@ export function AdminConteo() {
       // FILTRO: Solo lo que se considera venta
       const salesLeads = agentLeads.filter((l: any) => SALE_STATUSES.includes(norm(l.status)))
 
-      // Contadores (Calculados por PUNTOS/CAPITAS)
+      // Contadores
       const dailyLeads = salesLeads.filter((l: any) => new Date(l.created_at).toDateString() === now.toDateString())
       const daily = calculatePoints(dailyLeads)
 
@@ -156,12 +194,16 @@ export function AdminConteo() {
       
       const monthly = calculatePoints(salesLeads)
 
-      const fulfilledLeads = agentLeads.filter((l: any) => norm(l.status) === "cumplidas")
+      // CUMPLIDAS: Solo tipo 'alta' (o sin tipo definido, asumiendo alta)
+      const fulfilledLeads = agentLeads.filter((l: any) => norm(l.status) === "cumplidas" && (!l.type || l.type === 'alta'))
       const fulfilled = calculatePoints(fulfilledLeads)
 
-      const efficiency = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
+      // PASS: Solo tipo 'pass'
+      const passLeads = agentLeads.filter((l: any) => norm(l.status) === "cumplidas" && l.type === 'pass')
+      const passCount = passLeads.length // Pass se cuenta por unidad, no cápita
 
-      const passCount = agentLeads.filter((l: any) => norm(l.status) === "pass").length // Pass sigue por unidad (no cápita)
+      // Ratio REAL: Cumplidas / Ingresadas
+      const ratioVal = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
 
       const recentMs = now.getTime() - 600000 // 10 min
       const status = agentLeads.some((l: any) => {
@@ -170,61 +212,42 @@ export function AdminConteo() {
         return Number.isFinite(t) && t > recentMs
       }) ? "online" : "offline"
 
-      // Acumular globales
       totalSalesGlobal += monthly
       totalFulfilledGlobal += fulfilled
 
+      // Foto Real
+      const avatarUrl = profilesMap[norm(name)] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`
+
       return {
         name,
+        avatarUrl,
         daily,
         weekly,
         monthly,
         fulfilled,
-        efficiency,
         passCount,
-        ratio: `1:${monthly > 0 ? Math.round(100 / monthly) : 0}`,
+        ratio: ratioVal, // Número puro para mostrar %
         status,
-        lastAction: "Hoy",
-        // Desglose por prepaga (Calculado por PUNTOS)
-        breakdown: [...new Set(salesLeads.map((l: any) => l.prepaga))] 
+        // Desglose visual
+        breakdown: [...new Set(salesLeads.map((l: any) => l.prepaga || l.quoted_prepaga))] 
           .filter(Boolean)
           .map((prepName: any) => ({
             name: prepName, 
-            sold: calculatePoints(salesLeads.filter((l: any) => l.prepaga === prepName)),
-            fulfilled: calculatePoints(salesLeads.filter((l: any) => l.prepaga === prepName && norm(l.status) === "cumplidas")),
+            sold: calculatePoints(salesLeads.filter((l: any) => (l.prepaga || l.quoted_prepaga) === prepName)),
+            fulfilled: calculatePoints(salesLeads.filter((l: any) => (l.prepaga || l.quoted_prepaga) === prepName && norm(l.status) === "cumplidas")),
           })),
       }
     })
 
-    // 5. Estadísticas Globales de Prepaga
-    const prepagas = [...new Set(safeLeads.map((l: any) => l.prepaga))].filter(Boolean)
-    const pStats = prepagas.map((p: any) => {
-      const pLeads = safeLeads.filter((l: any) => l.prepaga === p)
-      
-      const sold = calculatePoints(pLeads)
-      const pFulfilledLeads = pLeads.filter((l: any) => norm(l.status) === "cumplidas")
-      const fulfilled = calculatePoints(pFulfilledLeads)
-
-      return {
-        name: p,
-        totalSold: sold,
-        totalFulfilled: fulfilled,
-        rate: sold > 0 ? Math.round((fulfilled / sold) * 100) : 0,
-        color: "text-slate-800",
-      }
-    })
-
     setAgents(processedAgents)
-    setPrepagaStats(pStats)
 
-    // --- CÁLCULO DE TOTALES (CONECTADO A FACTURACIÓN OPS) ---
-    const fulfilledLeadsAll = safeLeads.filter((l: any) => norm(l.status) === "cumplidas")
+    // --- CÁLCULO DE TOTALES (FÓRMULA EXACTA) ---
+    // Usamos TODAS las cumplidas (incluso Pass si OpsBilling las contara, pero billing suele excluir pass)
+    // Filtramos solo las que opsbilling consideraría para sumar $
+    const billingCandidates = safeLeads.filter((l: any) => norm(l.status) === "cumplidas")
     
-    const totalRevenue = fulfilledLeadsAll.reduce((acc: number, curr: any) => {
-        const billingVal = Number(curr.billing_price_override)
-        const salesVal = Number(curr.price) || Number(curr.full_price)
-        const finalVal = !isNaN(billingVal) && billingVal !== 0 ? billingVal : (salesVal || 0)
-        return acc + finalVal
+    const totalRevenue = billingCandidates.reduce((acc: number, curr: any) => {
+        return acc + calculateBillingValue(curr)
     }, 0)
 
     setGlobalTotals({
@@ -238,28 +261,20 @@ export function AdminConteo() {
 
   useEffect(() => {
     buildYearOptions()
+    fetchProfiles()
   }, [])
 
   useEffect(() => {
-    fetchData()
-    // Realtime para actualizar
+    if (Object.keys(profilesMap).length > 0 || yearOptions.length > 0) {
+        fetchData()
+    }
     const channel = supabase
       .channel("conteo_realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => fetchData())
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [selectedMonth, selectedYear])
-
-  const getRatioColor = (ratioStr: string) => {
-    const num = parseInt(ratioStr.split(":")[1])
-    if (num === 0) return "text-slate-400 bg-slate-50 border-slate-200"
-    if (num <= 20) return "text-green-600 bg-green-50 border-green-200"
-    if (num <= 40) return "text-blue-600 bg-blue-50 border-blue-200"
-    return "text-red-600 bg-red-50 border-red-200"
-  }
+    return () => { supabase.removeChannel(channel) }
+  }, [selectedMonth, selectedYear, profilesMap]) // Dependencia en profilesMap para recargar avatares
 
   return (
     <div className="p-6 h-full overflow-y-auto max-w-7xl mx-auto space-y-8 pb-20 custom-scrollbar">
@@ -274,27 +289,32 @@ export function AdminConteo() {
 
         <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm">
           <Filter className="h-4 w-4 text-slate-400 ml-2" />
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="w-[130px] border-none shadow-none font-bold">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[...Array(12)].map((_, i) => (
-                  <SelectItem key={i} value={String(i + 1)}>{new Date(0, i).toLocaleString('es-ES', { month: 'long' }).charAt(0).toUpperCase() + new Date(0, i).toLocaleString('es-ES', { month: 'long' }).slice(1)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="h-6 w-[1px] bg-slate-200"></div>
-
+          
           <Select value={selectedYear} onValueChange={setSelectedYear}>
-            <SelectTrigger className="w-[90px] border-none shadow-none font-bold">
+            <SelectTrigger className="w-[140px] border-none shadow-none font-bold">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="all" className="font-bold text-indigo-600">Histórico Total</SelectItem>
               {yearOptions.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
             </SelectContent>
           </Select>
+
+          {selectedYear !== 'all' && (
+              <>
+                <div className="h-6 w-[1px] bg-slate-200"></div>
+                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                    <SelectTrigger className="w-[130px] border-none shadow-none font-bold">
+                    <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                    {[...Array(12)].map((_, i) => (
+                        <SelectItem key={i} value={String(i + 1)}>{new Date(0, i).toLocaleString('es-ES', { month: 'long' }).charAt(0).toUpperCase() + new Date(0, i).toLocaleString('es-ES', { month: 'long' }).slice(1)}</SelectItem>
+                    ))}
+                    </SelectContent>
+                </Select>
+              </>
+          )}
 
           {loading && <RefreshCw className="h-4 w-4 animate-spin text-indigo-500 ml-2" />}
         </div>
@@ -305,7 +325,7 @@ export function AdminConteo() {
         <CardHeader className="bg-slate-50/50 dark:bg-slate-900/50 pb-2 border-b border-slate-100 dark:border-slate-800">
           <div className="flex justify-between items-center">
             <CardTitle className="text-sm font-bold uppercase text-slate-500">
-              Resumen General - {selectedMonth}/{selectedYear}
+              Resumen General - {selectedYear === 'all' ? 'HISTÓRICO' : `${selectedMonth}/${selectedYear}`}
             </CardTitle>
             <div className="flex gap-2">
               <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 font-bold">
@@ -323,11 +343,11 @@ export function AdminConteo() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[250px] pl-6 py-4 font-bold text-slate-700 dark:text-slate-300">Asesora</TableHead>
-                <TableHead className="text-center font-bold text-slate-500 text-xs">Cargas Hoy</TableHead>
-                <TableHead className="text-center font-bold text-slate-500 text-xs">Cargas Sem</TableHead>
+                <TableHead className="text-center font-bold text-slate-500 text-xs">Diario</TableHead>
+                <TableHead className="text-center font-bold text-slate-500 text-xs">Semanal</TableHead>
                 <TableHead className="text-center font-black text-lg bg-blue-50/50 dark:bg-blue-900/20 border-x border-slate-100 dark:border-slate-800 text-blue-700 dark:text-blue-400">Ventas (Mes)</TableHead>
                 <TableHead className="text-center font-bold text-green-700 dark:text-green-400">Cumplidas</TableHead>
-                <TableHead className="text-center font-bold text-indigo-600 dark:text-indigo-400">Pass / Rechazo</TableHead>
+                <TableHead className="text-center font-bold text-indigo-600 dark:text-indigo-400">Ratio %</TableHead>
                 <TableHead className="text-center font-bold">Eficacia</TableHead>
               </TableRow>
             </TableHeader>
@@ -338,7 +358,7 @@ export function AdminConteo() {
                   <TableCell className="pl-6 py-4">
                     <div className="flex items-center gap-3">
                       <Avatar className="h-10 w-10 border border-slate-200">
-                        <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${agent.name}`} />
+                        <AvatarImage src={agent.avatarUrl} className="object-cover" />
                         <AvatarFallback className="font-bold">{agent.name[0]}</AvatarFallback>
                       </Avatar>
                       <div>
@@ -360,33 +380,36 @@ export function AdminConteo() {
                     <span className="font-black text-2xl text-blue-600 dark:text-blue-400">{agent.monthly}</span>
                   </TableCell>
 
-                  {/* CUMPLIDAS */}
+                  {/* CUMPLIDAS (Pass Chiquito abajo) */}
                   <TableCell className="text-center">
-                    {agent.fulfilled > 0 ? (
-                        <div className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 rounded-md">
-                        <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-                        <span className="font-black text-green-700 dark:text-green-400">{agent.fulfilled}</span>
-                        </div>
-                    ) : (
-                        <span className="text-slate-300 font-bold">-</span>
-                    )}
+                    <div className="flex flex-col items-center">
+                        {agent.fulfilled > 0 ? (
+                            <div className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 rounded-md">
+                                <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                <span className="font-black text-green-700 dark:text-green-400 text-lg">{agent.fulfilled}</span>
+                            </div>
+                        ) : (
+                            <span className="text-slate-300 font-bold text-lg">-</span>
+                        )}
+                        {agent.passCount > 0 && (
+                            <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1">
+                                +{agent.passCount} pass
+                            </span>
+                        )}
+                    </div>
                   </TableCell>
 
-                  {/* PASS / RECHAZO */}
+                  {/* RATIO % (Matemático Real) */}
                   <TableCell className="text-center">
-                    {agent.passCount > 0 ? (
-                        <Badge variant="outline" className="text-red-600 bg-red-50 border-red-200 font-mono">
-                            {agent.passCount}
-                        </Badge>
-                    ) : (
-                        <span className="text-slate-300">-</span>
-                    )}
+                    <span className={`font-bold ${agent.ratio >= 50 ? 'text-green-600' : 'text-slate-500'}`}>
+                        {agent.ratio}%
+                    </span>
                   </TableCell>
 
-                  {/* EFICACIA */}
+                  {/* EFICACIA (Visual) */}
                   <TableCell className="text-center">
-                      <div className="flex flex-col items-center">
-                        <span className={`font-black text-lg ${agent.efficiency >= 50 ? 'text-green-600' : 'text-slate-600'}`}>{agent.efficiency}%</span>
+                      <div className="w-full max-w-[80px] h-2 bg-slate-100 rounded-full mx-auto overflow-hidden">
+                          <div className={`h-full ${agent.ratio >= 50 ? 'bg-green-500' : 'bg-slate-400'}`} style={{width: `${agent.ratio}%`}}></div>
                       </div>
                   </TableCell>
                 </TableRow>
@@ -408,7 +431,7 @@ export function AdminConteo() {
                 <CardContent className="p-4">
                     <div className="flex justify-between items-center mb-3 border-b border-slate-100 dark:border-slate-800 pb-2">
                     <span className="font-bold text-sm text-slate-800 dark:text-white">{agent.name}</span>
-                    <span className="text-[10px] font-bold text-green-600">Eficiencia {agent.efficiency}%</span>
+                    <span className="text-[10px] font-bold text-green-600">Efectividad {agent.ratio}%</span>
                     </div>
                     <div className="space-y-3">
                     {agent.breakdown.length > 0 ? (
@@ -418,8 +441,9 @@ export function AdminConteo() {
                             <div key={item.name} className="space-y-1">
                             <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500">
                                 <span>{item.name}</span>
+                                {/* CAMBIO VISUAL V: / C: */}
                                 <span className="font-mono text-slate-800 dark:text-slate-300">
-                                V:{item.sold} <span className="text-green-600">L:{item.fulfilled}</span>
+                                V:{item.sold} <span className="text-green-600">C:{item.fulfilled}</span>
                                 </span>
                             </div>
                             <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
@@ -439,9 +463,8 @@ export function AdminConteo() {
         </div>
       </div>
 
-      {/* REMUNERACIÓN ESTIMADA REAL */}
+      {/* REMUNERACIÓN ESTIMADA REAL (Con Fórmula Importada) */}
       <div className="mt-8 bg-slate-900 text-white p-6 rounded-xl flex flex-col md:flex-row justify-between items-center border border-slate-700 shadow-2xl relative overflow-hidden group">
-        {/* Efecto de brillo de fondo */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none group-hover:bg-green-500/20 transition-all"></div>
         
         <div className="flex items-center gap-4 relative z-10">
@@ -451,8 +474,7 @@ export function AdminConteo() {
           <div>
             <h3 className="text-xl font-bold tracking-tight">Liquidación Estimada</h3>
             <p className="text-slate-400 text-xs font-medium max-w-sm leading-relaxed">
-                Calculado sobre leads en estado <span className="text-green-400 font-bold">CUMPLIDAS</span>. 
-                Prioriza valores auditados por ADM.
+               Calculado sobre leads en estado CUMPLIDAS.
             </p>
           </div>
         </div>
@@ -462,7 +484,7 @@ export function AdminConteo() {
           </p>
           <div className="flex justify-end items-center gap-2 mt-2 opacity-80">
              <CheckCircle2 className="h-3 w-3 text-green-500"/>
-             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Facturación</p>
+             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Facturación Auditada</p>
           </div>
         </div>
       </div>

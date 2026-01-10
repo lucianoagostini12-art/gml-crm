@@ -17,7 +17,7 @@ import {
   FileUp, MessageCircle, UserPlus, ArrowRightLeft, Plus, ImageIcon, 
   Users, CheckSquare, Save, Clock, FileText, DollarSign, Wallet, Percent,
   Eye, Download, X, AlertTriangle, Send, UserCog, CalendarDays, Loader2, 
-  Check, Trash2, Megaphone, Key 
+  Check, Trash2, Megaphone, Key, ShieldCheck, ShieldAlert
 } from "lucide-react"
 import { getStatusColor, getSubStateStyle } from "./data"
 
@@ -40,6 +40,23 @@ function EditableField({ label, value, onBlur, onChange, icon, color, prefix, su
         }
     }, [value])
 
+    // ✅ LÓGICA AGREGADA: Pegado inteligente de fechas
+    const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+        if (type === 'date') {
+            e.preventDefault();
+            const text = e.clipboardData.getData('text');
+            // Detecta 24/03/1998 o 24-03-1998
+            const match = text.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+            if (match) {
+                const [_, day, month, year] = match;
+                const isoDate = `${year}-${month}-${day}`;
+                setLocalValue(isoDate);
+                if (onChange) onChange(isoDate);
+                if (onBlur) onBlur(isoDate);
+            }
+        }
+    };
+
     return (
         <div className="flex flex-col gap-1 items-start w-full group">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -51,6 +68,7 @@ function EditableField({ label, value, onBlur, onChange, icon, color, prefix, su
                     type={type}
                     className={`text-sm font-medium border-0 border-b border-transparent group-hover:border-slate-200 focus-visible:border-blue-500 focus-visible:ring-0 px-0 h-7 rounded-none transition-all ${color || 'text-slate-800'} ${prefix ? 'pl-4' : ''}`}
                     value={localValue}
+                    onPaste={handlePaste} // ✅ Conectado
                     onChange={(e) => { 
                         setLocalValue(e.target.value)
                         if(onChange) onChange(e.target.value) 
@@ -124,6 +142,9 @@ export function OpsModal({
     const [realDocs, setRealDocs] = useState<any[]>([])
     const [realChat, setRealChat] = useState<any[]>([])
     const [realHistory, setRealHistory] = useState<any[]>([])
+
+    // ✅ ESTADO DE PRESENCIA
+    const [otherEditors, setOtherEditors] = useState<string[]>([])
     
     // Estados UX
     const [isUploading, setIsUploading] = useState(false)
@@ -164,15 +185,44 @@ export function OpsModal({
     useEffect(() => {
         if(isOpen && op?.id) {
             setLocalOp(null) // Purga inmediata
+            setOtherEditors([]) // Reset de editores
             fetchFullData(op.id)
             
-            const channel = supabase.channel('ops_chat_room')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages', filter: `lead_id=eq.${op.id}` }, (payload) => {
-                setRealChat(prev => [...prev, payload.new])
-            })
-            .subscribe()
+            // ✅ LÓGICA DE PRESENCIA
+            const channel = supabase.channel(`ops_room_${op.id}`)
 
-            return () => { supabase.removeChannel(channel) }
+            channel
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages', filter: `lead_id=eq.${op.id}` }, (payload) => {
+                    setRealChat(prev => [...prev, payload.new])
+                })
+                .on('presence', { event: 'sync' }, () => {
+                    const newState = channel.presenceState()
+                    const users: string[] = []
+                    
+                    for (const key in newState) {
+                        const state: any = newState[key]
+                        if (state && state.length > 0) {
+                            state.forEach((s: any) => {
+                                if (s.user && s.user !== currentUser) {
+                                    users.push(s.user)
+                                }
+                            })
+                        }
+                    }
+                    setOtherEditors([...new Set(users)])
+                })
+                .subscribe(async (status) => {
+                    if (status === 'SUBSCRIBED') {
+                        await channel.track({
+                            user: currentUser || 'Anon',
+                            online_at: new Date().toISOString(),
+                        })
+                    }
+                })
+
+            return () => { 
+                channel.unsubscribe()
+            }
         }
     }, [isOpen, op?.id]) 
 
@@ -210,7 +260,7 @@ export function OpsModal({
         }
     }
 
-    // --- HELPER DE NOTIFICACIÓN ---
+    // ✅ NUEVO: Función auxiliar para enviar notificaciones
     const sendNotification = async (targetUser: string, title: string, body: string, type: 'info'|'alert'|'success') => {
         if (!targetUser || targetUser === "Sin Asignar" || targetUser === currentUser) return
         
@@ -220,7 +270,7 @@ export function OpsModal({
             body,
             type,
             read: false,
-            lead_id: localOp.id // Vinculamos la notificación a esta operación
+            lead_id: localOp.id 
         })
     }
 
@@ -244,23 +294,9 @@ export function OpsModal({
     // ✅ FUNCIÓN PARA CAMBIAR ENTRE ALTA Y PASS AL CLICKEAR ICONO
     const toggleSaleType = async () => {
         if (!localOp) return
-        const isCurrentlyPass = localOp.type === 'pass' || localOp.source === 'pass' || localOp.sub_state === 'auditoria_pass'
-        const nextType = isCurrentlyPass ? 'alta' : 'pass'
-        
-        let nextSource = localOp.source
-        if (nextType === 'pass') {
-            nextSource = 'pass' 
-        } else if (localOp.source === 'pass') {
-            nextSource = 'Base de Datos' 
-        }
-
-        const updatedOp = { ...localOp, type: nextType, source: nextSource }
-        setLocalOp(updatedOp)
-        onUpdateOp(updatedOp)
-        setIsSaving(true)
-        
-        await supabase.from('leads').update({ type: nextType, source: nextSource }).eq('id', localOp.id)
-        setTimeout(() => setIsSaving(false), 300)
+        const currentType = (localOp.type === 'pass' || localOp.source === 'pass') ? 'alta' : 'pass'
+        await updateField('type', currentType)
+        if(currentType === 'pass') await updateField('source', 'pass') 
     }
 
     // --- NAVEGACIÓN ESTADOS ---
@@ -290,9 +326,12 @@ export function OpsModal({
             await updateField('status', next)
             requestAdvance()
             
-            // Notificación de éxito si llega al final
+            // ✅ NOTIFICACIÓN: Venta Cumplida
             if (next === 'cumplidas') {
-                sendNotification(localOp.agent_name, "🎉 Venta Cumplida", `La venta de ${localOp.name} fue aprobada.`, "success")
+                // Notificar al Vendedor
+                if (localOp.agent_name) {
+                    sendNotification(localOp.agent_name, "🎉 Venta Cumplida", `¡Felicitaciones! La venta de ${localOp.name} fue aprobada.`, "success")
+                }
             }
         }
     }
@@ -368,9 +407,9 @@ export function OpsModal({
             }
             await fetchRealDocs(localOp.id)
             
-            // Notificar al operador si quien sube es otro (ej: vendedor)
+            // Notificar si se suben archivos (opcional pero util)
             if (localOp.operator && localOp.operator !== currentUser) {
-                sendNotification(localOp.operator, "📎 Documentación Nueva", `${currentUser} subió archivos a ${localOp.name}`, "info")
+                sendNotification(localOp.operator, "📎 Documentación", `${currentUser} subió archivos a ${localOp.name}`, "info")
             }
 
         } catch (error: any) {
@@ -383,25 +422,21 @@ export function OpsModal({
 
     const sendChatMessage = async () => {
         if(!chatInput.trim()) return
-        
-        // Determinar rol destino
-        let targetRole = 'seller'
-        if (role === 'seller') targetRole = 'ops'
-
         const msg = {
             lead_id: op.id,
             sender: currentUser || "Administración",
             text: chatInput,
-            target_role: targetRole,
+            target_role: 'seller',
             created_at: new Date().toISOString()
         }
         setRealChat(prev => [...prev, msg])
         setChatInput("")
         await supabase.from('lead_messages').insert(msg)
-
-        // Notificar al destinatario
-        const dest = role === 'seller' ? (localOp.operator || "Admins") : localOp.agent_name
-        sendNotification(dest, "💬 Nuevo Mensaje", `Mensaje de ${currentUser} en ${localOp.name}`, "info")
+        
+        // Notificar chat
+        if (localOp.agent_name && localOp.agent_name !== currentUser) {
+             sendNotification(localOp.agent_name, "💬 Nuevo Mensaje", `Mensaje de ${currentUser} en ${localOp.name}`, "info")
+        }
     }
 
     const handleSubmitCorrection = async () => {
@@ -420,8 +455,10 @@ export function OpsModal({
         setRealChat(prev => [...prev, msg])
         await supabase.from('lead_messages').insert(msg)
 
-        // Notificación PRIORITARIA de Rechazo
-        sendNotification(localOp.agent_name, "⚠️ Venta Rechazada", `Motivo: ${correctionReason}. Revisar urgente.`, "alert")
+        // Notificar rechazo
+        if (localOp.agent_name) {
+            sendNotification(localOp.agent_name, "⚠️ Venta Rechazada", `Motivo: ${correctionReason}. Revisar urgente.`, "alert")
+        }
 
         setCorrectionReason("")
         setCorrectionComment("")
@@ -437,9 +474,14 @@ export function OpsModal({
         const updatedNotes = currentNotes ? `${currentNotes}|||${noteEntry}` : noteEntry
         await updateField('notes', updatedNotes)
         
-        // Notificar al operador asignado si no soy yo
+        // ✅ NOTIFICACIÓN: Nota agregada
+        // 1. Si yo NO soy el vendedor, notificar al vendedor
+        if (localOp.agent_name && localOp.agent_name !== currentUser) {
+             sendNotification(localOp.agent_name, "📝 Nota Nueva", `${currentUser} agregó una nota en ${localOp.name}`, "info")
+        }
+        // 2. Si yo NO soy el operador asignado, notificar al operador
         if (localOp.operator && localOp.operator !== currentUser) {
-            sendNotification(localOp.operator, "📝 Nota Interna", `${currentUser} agregó una nota en ${localOp.name}`, "info")
+             sendNotification(localOp.operator, "📝 Nota Interna", `${currentUser} agregó una nota en ${localOp.name}`, "info")
         }
 
         setNewNoteInput("")
@@ -492,12 +534,24 @@ export function OpsModal({
     return (
         <>
             <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+                {/* ✅ STYLE INLINE ORIGINAL RESTAURADO */}
                 <DialogContent style={{ maxWidth: '1200px', width: '95%', height: '90vh' }} 
                     className="flex flex-col p-0 gap-0 bg-white border-0 shadow-2xl overflow-hidden rounded-2xl text-slate-900"
-                    onPointerDownOutside={(e) => e.preventDefault()}
-                    onEscapeKeyDown={(e) => e.preventDefault()}
+                    // ⛔ Eliminé onPointerDownOutside y onEscapeKeyDown para que puedas cerrar con click afuera/ESC
                 >
-                    {/* CABECERA */}
+                    {/* ✅ BARRA DE PRESENCIA AGREGADA COMO PRIMER HIJO DEL FLEX (NO FLOTANTE, NO ABSOLUTE) */}
+                    {otherEditors.length > 0 ? (
+                        <div className="bg-red-500 border-b border-red-600 py-1 px-4 text-center text-xs font-black text-white flex items-center justify-center gap-2 animate-pulse">
+                            <ShieldAlert size={14} className="animate-bounce"/> 
+                            ¡CUIDADO! {otherEditors.join(', ')} TAMBIÉN ESTÁ EDITANDO
+                        </div>
+                    ) : (
+                        <div className="bg-emerald-50 border-b border-emerald-100 py-1 px-4 text-center text-xs font-bold text-emerald-700 flex items-center justify-center gap-2 animate-in slide-in-from-top-2">
+                            <ShieldCheck size={12}/> Editando como: {currentUser} (Modo Seguro)
+                        </div>
+                    )}
+
+                    {/* CABECERA (El resto del código sigue igual) */}
                     <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between shrink-0">
                         <div className="flex items-center gap-6">
                             
@@ -605,14 +659,14 @@ export function OpsModal({
                                         label="Fecha Ingreso" 
                                         type="date" 
                                         value={localOp.fecha_ingreso || localOp.created_at?.split('T')[0]} 
-                                        onBlur={(v: string) => updateField('fecha_ingreso', v === "" ? null : v)} 
+                                        onBlur={(v: string) => updateField('fecha_ingreso', v)} 
                                         icon={<CalendarDays size={14}/>}
                                     />
                                     <EditableField 
                                         label="Fecha Alta" 
                                         type="date" 
                                         value={localOp.fecha_alta} 
-                                        onBlur={(v: string) => updateField('fecha_alta', v === "" ? null : v)} 
+                                        onBlur={(v: string) => updateField('fecha_alta', v)} 
                                         icon={<CheckSquare size={14}/>}
                                         color="text-emerald-700 font-bold"
                                     />
@@ -623,14 +677,7 @@ export function OpsModal({
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-6">
                                         <EditableField label="Nombre Completo" value={localOp.name} onBlur={(v: string) => updateField('name', v)} />
                                         <EditableField label="CUIL/CUIT" value={localOp.dni} onBlur={(v: string) => updateField('dni', v)} />
-                                        
-                                        <EditableField 
-                                            label="Nacimiento" 
-                                            type="date" 
-                                            value={localOp.dob} 
-                                            onBlur={(v: string) => updateField('dob', v === "" ? null : v)} 
-                                        />
-                                        
+                                        <EditableField label="Nacimiento" type="date" value={localOp.dob} onBlur={(v: string) => updateField('dob', v)} />
                                         <EditableField label="Email" value={localOp.email} onBlur={(v: string) => updateField('email', v)} />
                                         <EditableField label="Teléfono" value={localOp.phone} onBlur={(v: string) => updateField('phone', v)} />
                                         

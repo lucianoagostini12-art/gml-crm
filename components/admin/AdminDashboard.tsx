@@ -26,13 +26,15 @@ import {
   PanelLeftClose,
   ChevronDown,
   ChevronRight,
-  Menu
+  Menu,
+  Calendar
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // IMPORTAMOS TUS COMPONENTES
 import { AdminLeadFactory } from "@/components/admin/AdminLeadFactory"
@@ -49,23 +51,35 @@ import { AdminCommissions } from "@/components/admin/AdminCommissions"
 import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
 
-// --- COMPONENTE DE VISIÓN GLOBAL ---
+// --- COMPONENTE DE VISIÓN GLOBAL CON FILTRO DE MES ---
 function AdminOverview() {
   const supabase = createClient()
   const [stats, setStats] = useState({ entered: 0, completed: 0, compliance: 0 })
   const [activities, setActivities] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  
+  // ✅ NUEVO: Estado para el filtro de mes (YYYY-MM o 'all')
+  // Iniciamos con el mes actual por defecto
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7))
 
   const fetchDashboardData = async () => {
     setLoading(true)
     const { data: leads } = await supabase.from("leads").select("*").order("last_update", { ascending: false })
 
     if (leads) {
-      const entered = leads.filter((l: any) => !["nuevo", "contactado", "perdido"].includes(l.status?.toLowerCase())).length
-      const completed = leads.filter((l: any) => l.status?.toLowerCase() === "cumplidas").length
+      // ✅ APLICAR FILTRO DE MES
+      let filteredLeads = leads
+      if (selectedMonth !== 'all') {
+          filteredLeads = leads.filter((l: any) => l.created_at?.startsWith(selectedMonth))
+      }
+
+      const entered = filteredLeads.filter((l: any) => !["nuevo", "contactado", "perdido"].includes(l.status?.toLowerCase())).length
+      const completed = filteredLeads.filter((l: any) => l.status?.toLowerCase() === "cumplidas").length
       const rate = entered > 0 ? Math.round((completed / entered) * 100) : 0
       setStats({ entered, completed, compliance: rate })
 
+      // Actividad reciente (siempre mostramos la última actividad global, independiente del filtro, para ver que el sistema vive)
+      // O si preferís filtrar también la actividad, cambiá 'leads' por 'filteredLeads' abajo.
       const recent = leads.slice(0, 15).map((l: any) => ({
         time: l.last_update ? new Date(l.last_update).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--",
         agent: l.agent_name || l.operator || "Sistema",
@@ -86,7 +100,20 @@ function AdminOverview() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [selectedMonth]) // ✅ Se recarga cuando cambia el mes
+
+  // Generar opciones de meses (últimos 12)
+  const getMonthOptions = () => {
+      const options = []
+      const today = new Date()
+      for (let i = 0; i < 12; i++) {
+          const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
+          const value = d.toISOString().slice(0, 7)
+          const label = d.toLocaleString('es-ES', { month: 'long', year: 'numeric' })
+          options.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1) })
+      }
+      return options
+  }
 
   return (
     <div className="p-8 space-y-8 h-full overflow-hidden flex flex-col">
@@ -94,9 +121,21 @@ function AdminOverview() {
         <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">
           Torre de Control 📡 {loading && <RefreshCw className="animate-spin h-5 w-5 text-slate-400" />}
         </h2>
-        <div className="bg-white border border-slate-200 px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm">
-          <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
-          <span className="text-sm font-bold text-slate-600">Sistema Online</span>
+        
+        {/* ✅ FILTRO DE MES Y BOTÓN REFRESH */}
+        <div className="flex items-center gap-2">
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                <SelectTrigger className="w-[180px] h-9 bg-white border-slate-300 text-slate-700 font-bold">
+                    <Calendar className="mr-2 h-4 w-4 text-slate-500"/>
+                    <SelectValue placeholder="Periodo" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Todo el Historial</SelectItem>
+                    {getMonthOptions().map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
         </div>
       </div>
 

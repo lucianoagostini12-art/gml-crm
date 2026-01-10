@@ -54,8 +54,9 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        IconPrevious: ({ ...props }) => <ChevronLeft className="h-4 w-4" />,
-        IconNext: ({ ...props }) => <ChevronRight className="h-4 w-4" />,
+        // ✅ CORRECCIÓN: En v9 las claves son ChevronLeft y ChevronRight
+        ChevronLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" />,
+        ChevronRight: ({ ...props }) => <ChevronRight className="h-4 w-4" />,
       }}
       {...props}
     />

@@ -23,7 +23,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 // Importamos el Modal para ver detalles
 import { OpsModal } from "./OpsModal"
-import { getStatusColor } from "./data"
+// ✅ CORRECCIÓN 1: Importamos OpStatus para tipar correctamente
+import { getStatusColor, OpStatus } from "./data"
 
 // --- TIPOS DE EVENTOS ---
 type HistoryEvent = {
@@ -44,7 +45,7 @@ type HistoryEvent = {
         name: string
         dni: string
         phone: string
-        status: string
+        status: OpStatus // ✅ CORRECCIÓN 2: Tipado estricto
         plan?: string
         prepaga?: string
     }
@@ -188,7 +189,7 @@ export function OpsHistory() {
                     user: resolveUser(h.agent_name),
                     timestamp: h.changed_at,
                     leadId: h.lead_id,
-                    clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status, plan: lead.plan, prepaga: lead.prepaga } : undefined,
+                    clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
                     context: 'FLUJO OPERATIVO',
                     metadata: { from: h.from_status, to: h.to_status },
                     icon: ArrowRightLeft,
@@ -215,7 +216,7 @@ export function OpsHistory() {
                         user: resolveUser(a.performed_by),
                         timestamp: a.created_at,
                         leadId: targetLeadId,
-                        clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status, plan: lead.plan, prepaga: lead.prepaga } : undefined,
+                        clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
                         context: contextInfo.label,
                         metadata: { old: a.old_value, new: a.new_value, colorClass: contextInfo.color },
                         icon: Edit3,
@@ -243,7 +244,7 @@ export function OpsHistory() {
                         user: resolveUser(m.sender),
                         timestamp: m.created_at,
                         leadId: m.lead_id,
-                        clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status, plan: lead.plan, prepaga: lead.prepaga } : undefined,
+                        clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
                         context: context,
                         icon: icon,
                         color: color
@@ -415,7 +416,8 @@ export function OpsHistory() {
                                                                 </p>
                                                             </div>
                                                         </div>
-                                                        <Badge className={`${getStatusColor(event.clientInfo.status)} border-0 text-[10px]`}>{event.clientInfo.status}</Badge>
+                                                        {/* ✅ CORRECCIÓN FINAL: Casting seguro al estado */}
+                                                        <Badge className={`${getStatusColor(event.clientInfo.status as OpStatus)} border-0 text-[10px]`}>{event.clientInfo.status}</Badge>
                                                     </div>
                                                 ) : (
                                                     // Mensaje si no se encuentra el lead (Posiblemente eliminado)
@@ -453,7 +455,7 @@ export function OpsHistory() {
                     onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} 
                     onSubStateChange={()=>{}} onAddNote={()=>{}} onSendChat={()=>{}} onAddReminder={()=>{}} 
                     getStatusColor={getStatusColor} getSubStateStyle={getSubStateStyle}
-                    globalConfig={{prepagas:[], subStates:{}}}
+                    globalConfig={{prepagas:[], subStates:{}}} // Config vacía para visualización
                 />
             )}
         </div>

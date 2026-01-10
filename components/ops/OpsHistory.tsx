@@ -48,8 +48,14 @@ const FIELD_TRANSLATIONS: Record<string, string> = {
 
 const translateField = (field: string) => FIELD_TRANSLATIONS[field] || field
 
-// ✅ MAPA MANUAL DE USUARIOS (Corrección solicitada)
-const SPECIAL_USERS: Record<string, string> = {
+// ✅ A. MAPA MANUAL DE IDs (Detectado en tu JSON)
+const MANUAL_ID_MAP: Record<string, string> = {
+    "8c01b3f6-4b9d-4f52-8df3-3b3cc8b533e7": "Maca Parra", 
+    // Si aparece otro ID "desconocido", pegalo acá
+}
+
+// ✅ B. MAPA DE EMAILS (Respaldo)
+const SPECIAL_EMAILS: Record<string, string> = {
     "macoparra96@gmail.com": "Maca Parra",
     "gmlsalesgroup.adm@gmail.com": "Iara Chain"
 }
@@ -63,7 +69,7 @@ const formatValue = (val: any) => {
     if (typeof val === 'string' && val.includes('-') && val.includes('T') && val.length > 20) {
         try { return format(new Date(val), "dd/MM/yyyy") } catch { return val }
     }
-    // Si es objeto, lo pasamos a texto
+    // Si es objeto, stringify
     if (typeof val === 'object') return JSON.stringify(val)
     return String(val)
 }
@@ -72,7 +78,9 @@ const formatValue = (val: any) => {
 type HistoryEvent = {
     id: string
     type: 'status_change' | 'audit_log' | 'system_msg' | 'manual_edit'
-    actionLabel: string // Cambiado a actionLabel para la narrativa
+    actionLabel: string // Cambiado para narrativa
+    description?: string // ✅ Fix: Agregado opcional para evitar el error de build
+    title?: string // Agregado por compatibilidad
     user: {
         name: string
         avatar?: string
@@ -145,45 +153,40 @@ export function OpsHistory() {
         loadProfiles()
     }, [])
 
-    // --- HELPER PARA RESOLVER USUARIO (MEJORADO CON TU DICCIONARIO) ---
+    // ✅ C. RESOLUCIÓN DE USUARIO (ID -> NOMBRE)
     const resolveUser = (identifier: string | null, actorNameFallback?: string) => {
         if (!identifier) return { name: actorNameFallback || "Sistema", avatar: undefined }
         
-        // 1. Buscamos coincidencia exacta en Perfiles (por ID o Email)
+        // 1. CHEQUEO MANUAL POR ID (Lo que arregla a Maca ahora mismo)
+        if (MANUAL_ID_MAP[identifier]) {
+            return { name: MANUAL_ID_MAP[identifier], avatar: undefined, email: identifier }
+        }
+
+        // 2. CHEQUEO EN SUPABASE
         const profile = operatorsMap[identifier] || operatorsMap[identifier.toLowerCase()]
-        
         if (profile) {
             const email = profile.email?.toLowerCase() || ""
+            // Si el perfil tiene mail, chequeamos si es especial (Maca/Iara)
+            if (SPECIAL_EMAILS[email]) return { name: SPECIAL_EMAILS[email], avatar: profile.avatar_url, email: email }
             
-            // 🚨 2. CHEQUEO MANUAL: Si es Maca o Iara, forzamos el nombre
-            if (SPECIAL_USERS[email]) {
-                return { name: SPECIAL_USERS[email], avatar: profile.avatar_url, email: email }
-            }
-
-            return {
+            return { 
                 name: profile.full_name || email.split('@')[0], 
-                avatar: profile.avatar_url,
-                email: email
+                avatar: profile.avatar_url, 
+                email: email 
             }
         }
 
-        // 3. Si no hay perfil, chequeamos si el identifier ES un mail de los especiales
-        const emailLower = identifier.toLowerCase()
-        if (SPECIAL_USERS[emailLower]) {
-            return { name: SPECIAL_USERS[emailLower], avatar: undefined }
-        }
-
-        // 4. Si es un EMAIL genérico, usamos la parte del nombre
+        // 3. FALLBACK: Si es email directo
         if (identifier.includes("@")) {
+            const emailLower = identifier.toLowerCase()
+            if (SPECIAL_EMAILS[emailLower]) return { name: SPECIAL_EMAILS[emailLower], avatar: undefined }
             return { name: identifier.split("@")[0], avatar: undefined } 
         }
+
+        // 4. Si el log trajo un nombre guardado
+        if (actorNameFallback && actorNameFallback !== "null") return { name: actorNameFallback, avatar: undefined }
         
-        // 5. Si es UUID desconocido pero tenemos el fallback name del log
-        if (actorNameFallback && actorNameFallback !== "null") {
-             return { name: actorNameFallback, avatar: undefined }
-        }
-        
-        // 6. Fallback final
+        // 5. Desconocido
         if (identifier.length > 20 && identifier.includes('-')) {
              return { name: "Usuario Desconocido", avatar: undefined }
         }
@@ -206,6 +209,7 @@ export function OpsHistory() {
 
         try {
             const { data: statusHistory } = await supabase.from('lead_status_history').select('*').gte('changed_at', startIso).lte('changed_at', endIso).order('changed_at', { ascending: false })
+            // ✅ TRAER TODO DE AUDIT LOGS
             const { data: auditLogs, error: auditError } = await supabase.from('audit_logs').select('*').gte('created_at', startIso).lte('created_at', endIso).order('created_at', { ascending: false })
             const { data: messages } = await supabase.from('lead_messages').select('*').gte('created_at', startIso).lte('created_at', endIso).order('created_at', { ascending: false })
 
@@ -214,7 +218,6 @@ export function OpsHistory() {
             
             if (!auditError && auditLogs) {
                 auditLogs.forEach((a: any) => {
-                    // Fix: Audit logs a veces usa lead_id o record_id en metadata
                     const lid = a.lead_id || a.metadata?.record_id || a.metadata?.lead_id
                     if (lid) leadIds.add(lid)
                 })
@@ -244,31 +247,29 @@ export function OpsHistory() {
                     timestamp: h.changed_at,
                     leadId: h.lead_id,
                     clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
-                    context: 'FLUJO OPERATIVO',
                     metadata: { from: h.from_status, to: h.to_status },
                     icon: ArrowRightLeft,
                     color: 'text-blue-600 bg-blue-100'
                 })
             })
 
-            // -> Auditoría (Manual Edit) - CORREGIDO
+            // -> Auditoría (Manual Edit)
             if (!auditError && auditLogs) {
                 auditLogs.forEach((a: any) => {
                     const targetLeadId = a.lead_id || a.metadata?.record_id || a.metadata?.lead_id
                     const lead = leadsMap[targetLeadId]
                     
-                    // EXTRAER DATA DEL JSON (Aquí estaba el problema)
                     const meta = a.metadata || {}
-                    const rawField = a.field_changed || meta.field_changed || meta.field || "Dato"
+                    const rawField = a.field_changed || meta.field_changed || meta.field || a.action || "Dato"
                     const fieldName = translateField(rawField)
                     
-                    // Extraer Old y New desde Metadata (donde realmente están)
-                    const rawOld = meta.old_value ?? meta.old ?? meta.previous_value
-                    const rawNew = meta.new_value ?? meta.new ?? meta.current_value
+                    // ✅ D. LECTURA DE DATOS (FIX: Leyendo 'from' y 'to')
+                    const rawOld = meta.old_value ?? meta.old ?? meta.previous_value ?? meta.from
+                    const rawNew = meta.new_value ?? meta.new ?? meta.current_value ?? meta.to
                     
                     const contextInfo = inferContext(fieldName, lead?.status || 'unknown')
                     
-                    // Usar actor_user_id en vez de performed_by (según tu esquema)
+                    // Usamos actor_user_id (el UUID)
                     const actorId = a.actor_user_id || a.performed_by
                     const actorName = a.actor_name
 
@@ -308,8 +309,8 @@ export function OpsHistory() {
                     combinedEvents.push({
                         id: `msg-${m.id}`,
                         type: isAlert ? 'audit_log' : 'system_msg',
-                        actionLabel: isBilling ? "actualizó facturación de" : isAlert ? "reportó alerta en" : "dejó una nota en",
                         title: typeTitle,
+                        actionLabel: isBilling ? "actualizó facturación de" : isAlert ? "reportó alerta en" : "dejó una nota en",
                         description: m.text.replace("ADMIN_NOTE|", "").replace("FACTURACION|", "").split('|').pop() || m.text,
                         user: resolveUser(m.sender),
                         timestamp: m.created_at,
@@ -496,27 +497,28 @@ export function OpsHistory() {
                                                 )}
 
                                                 {/* DETALLE DEL CAMBIO (DIFF) - ✅ AHORA MUESTRA VACÍOS Y ANTES/DESPUÉS */}
-                                                <div className="text-sm text-slate-600 pl-1">
-                                                    {event.type === 'manual_edit' ? (
-                                                        <div className={`flex items-center gap-3 font-mono text-xs p-2 rounded border ${event.metadata?.colorClass || 'bg-white border-slate-100'}`}>
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="text-[9px] uppercase font-bold text-red-400 mr-1">Antes:</span>
-                                                                <span className="text-red-500 line-through opacity-70 bg-slate-50 px-2 py-0.5 rounded border border-red-100">
-                                                                    {event.metadata?.old}
-                                                                </span>
-                                                            </div>
-                                                            <ArrowRight size={16} className="text-slate-300" />
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="text-[9px] uppercase font-bold text-green-500 mr-1">Ahora:</span>
-                                                                <span className="text-green-700 font-bold bg-green-50 px-2 py-0.5 rounded border border-green-100">
-                                                                    {event.metadata?.new}
-                                                                </span>
-                                                            </div>
+                                                {event.type === 'manual_edit' ? (
+                                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 mt-2 flex items-center gap-4 text-xs font-mono">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[9px] uppercase font-bold text-red-400 mb-0.5">Antes</span>
+                                                            <span className="text-red-500 line-through decoration-red-300 opacity-70">
+                                                                {event.metadata?.old}
+                                                            </span>
                                                         </div>
-                                                    ) : (
+                                                        <ArrowRight size={16} className="text-slate-300" />
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[9px] uppercase font-bold text-green-500 mb-0.5">Ahora</span>
+                                                            <span className="text-green-700 font-bold bg-green-100 px-2 py-0.5 rounded border border-green-100">
+                                                                {event.metadata?.new}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    // Mensaje normal si no es manual_edit
+                                                    <div className="text-sm text-slate-600 pl-1">
                                                         <p className="font-medium">{event.description}</p>
-                                                    )}
-                                                </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </Card>

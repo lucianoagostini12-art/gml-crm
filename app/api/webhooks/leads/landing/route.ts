@@ -1,76 +1,70 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase'
 
-// 1. HEADERS CORS (Permisos para que entre el dato desde afuera)
 function corsHeaders() {
     return {
-        'Access-Control-Allow-Origin': '*', 
+        'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     }
 }
 
-// 2. MANEJO DE "PRE-FLIGHT" (El navegador pregunta antes de mandar)
 export async function OPTIONS() {
     return NextResponse.json({}, { headers: corsHeaders() })
 }
 
-// 3. PROCESAMIENTO
 export async function POST(req: Request) {
     const supabase = createClient()
     
     try {
         const body = await req.json()
-        // Extraemos los datos con valores por defecto para que no falle
-        const { nombre, telefono, cp, provincia, ref, landing_url } = body
+        // Valores por defecto para que no explote si falta algo
+        const nombre = body.nombre || 'Sin Nombre'
+        const telefono = body.telefono ? String(body.telefono).replace(/\D/g, '') : ''
+        const cp = body.cp || ''
+        const provincia = body.provincia || ''
+        const ref = body.ref || ''
+        const landing_url = body.landing_url || ''
 
-        // --- ETIQUETADO SEGURO (Try/Catch interno) ---
-        let finalTag = "Formulario - DoctoRed" // Etiqueta por defecto
+        let finalTag = "Formulario - DoctoRed"
 
+        // Lógica de etiqueta manual (sin comandos raros)
         if (ref) {
-            try {
-                // Intentamos buscar reglas, pero usamos maybeSingle para que NO explote si no hay nada
-                const { data: config } = await supabase
-                    .from('system_config')
-                    .select('value')
-                    .eq('key', 'message_source_rules')
-                    .maybeSingle() 
-                
-                const rules = config?.value || []
-                
+            // Traemos la config como array simple
+            const { data: config } = await supabase
+                .from('system_config')
+                .select('value')
+                .eq('key', 'message_source_rules')
+                .limit(1) // Traemos solo 1, modo clásico
+            
+            // Verificamos si existe data
+            if (config && config.length > 0) {
+                const rules = config[0].value || []
                 const match = rules.find((r: any) => {
                     if (r.matchType === 'exact') return r.trigger === ref
                     return ref.includes(r.trigger)
                 })
-
-                if (match) {
-                    finalTag = match.source
-                } else {
-                    finalTag = `Meta Ads (${ref})`
-                }
-            } catch (err) {
-                console.error("Error calculando etiqueta, usando defecto:", err)
-                // Si falla esto, no pasa nada, seguimos con la etiqueta por defecto
+                if (match) finalTag = match.source
+                else finalTag = `Meta Ads (${ref})`
+            } else {
+                finalTag = `Meta Ads (${ref})`
             }
         }
 
-        // --- GUARDADO EN SUPABASE ---
-        // Limpiamos los datos para asegurar que entren
-        const cleanPhone = telefono ? String(telefono).replace(/\D/g, '') : ''
-        
         const { error } = await supabase.from('leads').insert({
-            name: nombre || 'Sin Nombre',
-            phone: cleanPhone,
-            city: provincia || '', 
-            address: cp ? `CP: ${cp}` : '', 
-            source: finalTag, 
-            status: 'ingresado', 
-            notes: `Landing URL: ${landing_url || 'Directo'} | CP: ${cp || 'S/D'}` 
+            name: nombre,
+            phone: telefono,
+            city: provincia,
+            address: cp ? `CP: ${cp}` : '',
+            source: finalTag,
+            status: 'ingresado',
+            notes: `Landing URL: ${landing_url}`
         })
 
         if (error) {
             console.error("Error insertando en Supabase:", error)
-            return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() })
+            // Respondemos 200 igual para no romper el frontend, pero logueamos el error
+            return NextResponse.json({ success: false, error: error.message }, { headers: corsHeaders() })
         }
 
         return NextResponse.json({ success: true }, { headers: corsHeaders() })

@@ -12,6 +12,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 // COLORES PARA GRAFICOS
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
+// --- DEFINICIÓN DEL MUNDO OPS ---
+// Solo estos estados pertenecen al circuito de Operaciones.
+// Todo lo demás (nuevo, contactado, etc.) es ruido de Ventas/Marketing.
+const OPS_SCOPE = [
+    'vendido', 
+    'ingresado', 
+    'precarga', 
+    'medicas', 
+    'documentacion', // Lo vi en tu SQL
+    'legajo', 
+    'demoras', 
+    'cumplidas', 
+    'rechazado', 
+    'baja'
+]
+
 // --- COMPONENTE INTERNO DE TOOLTIP ---
 const InfoTooltip = ({ text }: { text: string }) => {
     const [isVisible, setIsVisible] = useState(false)
@@ -55,7 +71,9 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
         const fetchData = async () => {
             setLoading(true)
             
-            // 1. Traemos Operaciones
+            // 1. Traemos TODO (luego filtramos en memoria por seguridad)
+            // Podríamos filtrar en la query .in('status', OPS_SCOPE) pero mejor traer todo y filtrar aquí 
+            // para tener flexibilidad si cambian los nombres de estados.
             const { data, error } = await supabase
                 .from('leads')
                 .select('*')
@@ -64,7 +82,7 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
                 const mappedData = data.map((l: any) => ({
                     id: l.id,
                     entryDate: l.created_at,
-                    status: l.status,               
+                    status: l.status ? l.status.toLowerCase() : 'desconocido',              
                     origen: l.source,               
                     seller: l.agent_name,           
                     lastUpdate: l.last_update,
@@ -105,25 +123,33 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
         rejectedCount
     } = useMemo(() => {
         
-        // 1. FILTRO DE FECHAS Y VENDEDOR
+        // 1. FILTRO DE ALCANCE (SCOPE) - EL CEREBRO DE LA CORRECCIÓN 🧠
+        // Primero nos quedamos SOLO con lo que es OPS. Tiramos a la basura 'nuevo', 'contactado', etc.
+        const opsScopeOperations = operations.filter(o => OPS_SCOPE.includes(o.status))
+
+        // 2. FILTRO DE FECHAS Y VENDEDOR (Sobre el universo OPS)
         const start = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).getTime()
         const end = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).getTime() // Último día del mes
 
-        let filteredOps = operations.filter(o => {
+        let filteredOps = opsScopeOperations.filter(o => {
             const opTime = new Date(o.entryDate).getTime()
             const matchDate = opTime >= start && opTime <= end
             const matchSeller = selectedSeller === 'all' || o.seller === selectedSeller
             return matchDate && matchSeller
         })
 
-        // 2. CALCULAR MÉTRICAS
+        // 3. CLASIFICACIÓN FINAL (Válidos vs Rechazados)
+        // Dentro del mundo OPS, separamos lo que cuenta como ingreso real de lo que se cayó.
+        const rejectedStatuses = ['rechazado', 'baja', 'cancelado', 'perdido'] // Perdido aquí sería un caso raro que entró a ops y se perdió
         
-        // CORRECCIÓN 1: Total Ingresos EXCLUYE rechazados (para no contar duplicados o basura)
-        // Pero guardamos los rechazados aparte para mostrarlos en la tarjeta de "Rechazos"
-        const validOps = filteredOps.filter(o => o.status !== 'rechazado')
-        const rejectedOps = filteredOps.filter(o => o.status === 'rechazado')
+        // validOps = Operaciones reales de OPS (En curso + Cerradas).
+        const validOps = filteredOps.filter(o => !rejectedStatuses.includes(o.status))
 
-        const total = validOps.length // Base limpia para métricas de éxito
+        // rejectedOps = Solo los descartados DENTRO de OPS
+        const rejectedOps = filteredOps.filter(o => rejectedStatuses.includes(o.status))
+
+        // MÉTRICAS
+        const total = validOps.length // Total Ingresos REALES (Solo OPS válido)
         const rejected = rejectedOps.length
         
         const closed = validOps.filter((o:any) => o.status === 'cumplidas').length
@@ -166,14 +192,14 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
             .slice(0, 5)
 
         // D. CUELLO DE BOTELLA (Usamos validOps)
-        const activeStatuses = ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras']
+        // Usamos los estados activos de OPS_SCOPE (excluyendo finales 'cumplidas', 'vendido' y rechazos)
+        const activeStatuses = ['ingresado', 'precarga', 'medicas', 'documentacion', 'legajo', 'demoras']
         const _bottleneckData = activeStatuses.map(status => ({
             name: status.charAt(0).toUpperCase() + status.slice(1),
             cantidad: validOps.filter((o:any) => o.status === status).length
         }))
 
         // E. RANKING VENDEDORES (Usamos validOps)
-        // Nota: Si filtras por vendedor arriba, este ranking mostrará solo a ese vendedor.
         const sellers = Array.from(new Set(validOps.map((o:any) => o.seller).filter(Boolean)))
         const _sellerData = sellers.map(seller => {
             const ops = validOps.filter((o:any) => o.seller === seller)
@@ -183,7 +209,7 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
             return { name: seller || "Sin Asignar", total: totalS, ok: okS, rate: rateS }
         }).sort((a:any, b:any) => b.ok - a.ok).slice(0, 5)
 
-        // F. AGING DE STOCK (Usamos validOps)
+        // F. AGING DE STOCK (Usamos validOps excluyendo cerradas)
         const now = new Date()
         const agingBuckets = { '< 7 días': 0, '7-15 días': 0, '15-30 días': 0, '> 30 días': 0 }
         
@@ -219,7 +245,7 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
 
         return {
             filteredCount: filteredOps.length,
-            totalOps: total, // Ahora esto es REAL (Sin rechazados/borrados)
+            totalOps: total, // AHORA ES CORRECTO: Solo OPS, sin nuevos, sin rechazados
             cumplidas: closed,
             tasaExito: rate,
             dataOrigen: _dataOrigen,
@@ -229,7 +255,7 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
             sellerData: _sellerData,
             dataAging: _dataAging,
             velocidadPromedio: _velocidad,
-            rejectedCount: rejected // Métrica separada
+            rejectedCount: rejected
         }
     }, [operations, selectedMonth, selectedYear, selectedSeller]) 
 
@@ -309,21 +335,21 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
                 <Card className="bg-white border-slate-200 shadow-sm hover:border-blue-300 transition-colors group">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center">
-                            Total Ingresos <InfoTooltip text="Ventas ingresadas válidas (Excluye rechazados y duplicados)."/>
+                            Total Ingresos <InfoTooltip text="Ventas que ingresaron al circuito administrativo (sin rechazados ni nuevos leads)."/>
                         </CardTitle>
                         <Users className="h-4 w-4 text-blue-500 group-hover:scale-110 transition-transform" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-black text-slate-800">{totalOps}</div>
                         <p className="text-xs text-slate-400 mt-1 flex items-center">
-                            <ArrowUpRight className="h-3 w-3 text-green-500 mr-1"/> Operaciones Limpias
+                            <ArrowUpRight className="h-3 w-3 text-green-500 mr-1"/> Operaciones de OPS
                         </p>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-slate-200 shadow-sm">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center">
-                            Efectividad <InfoTooltip text="Porcentaje de ventas que llegaron al estado CUMPLIDA sobre el total válido."/>
+                            Efectividad <InfoTooltip text="Porcentaje de ventas que llegaron al estado CUMPLIDA sobre el total de OPS."/>
                         </CardTitle>
                         <Target className="h-4 w-4 text-green-500" />
                     </CardHeader>
@@ -335,7 +361,7 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
                 <Card className="bg-white border-slate-200 shadow-sm">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center">
-                            En Proceso <InfoTooltip text="Ventas que están activas en el flujo (ni rechazadas ni cumplidas) actualmente."/>
+                            En Proceso <InfoTooltip text="Ventas que están activas en el flujo administrativo (ni rechazadas ni cumplidas)."/>
                         </CardTitle>
                         <TrendingUp className="h-4 w-4 text-yellow-500" />
                     </CardHeader>
@@ -347,13 +373,13 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
                 <Card className="bg-white border-slate-200 shadow-sm hover:border-red-300 transition-colors group">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center">
-                            Rechazos <InfoTooltip text="Ventas marcadas como RECHAZADO (No suman al total de ingresos)."/>
+                            Caídas <InfoTooltip text="Ventas que entraron a OPS y luego fueron rechazadas o dadas de baja."/>
                         </CardTitle>
                         <AlertCircle className="h-4 w-4 text-red-500 group-hover:scale-110 transition-transform" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-black text-slate-800">{rejectedCount}</div>
-                        <p className="text-xs text-slate-400 mt-1">Descartados / Duplicados</p>
+                        <p className="text-xs text-slate-400 mt-1">Rechazos en OPS</p>
                     </CardContent>
                 </Card>
             </div>

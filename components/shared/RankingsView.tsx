@@ -19,124 +19,127 @@ export function RankingsView() {
   const [metric, setMetric] = useState<Metric>("capitas")
   const [loading, setLoading] = useState(true)
 
+  const logRpcError = (err: any) => {
+    // PostgrestError suele tener props no-enumerables -> por eso a veces ves {}
+    console.error("Ranking RPC error (raw):", err)
+    console.error("Ranking RPC error (details):", {
+      message: err?.message,
+      code: err?.code,
+      details: err?.details,
+      hint: err?.hint,
+    })
+  }
+
   const fetchRankings = async () => {
     setLoading(true)
 
     const now = new Date()
     const year = now.getFullYear()
-    const month = String(now.getMonth() + 1).padStart(2, "0")
+    const monthNum = now.getMonth() + 1
 
-    const targetMonth = `${year}-${month}` // ej: 2026-01
-    const yearStart = `${year}-01`
-    const yearEnd = `${year}-12`
-
-    // ✅ Cumplidas reales: por billing_period + billing_approved
-    let query = supabase
-      .from("leads")
-      .select("agent_name, capitas, status, prepaga, source, billing_period, billing_approved")
-      .eq("status", "cumplidas")
-      .eq("billing_approved", true)
-      .not("billing_period", "is", null)
-
-    if (period === "month") {
-      query = query.eq("billing_period", targetMonth)
-    } else {
-      query = query.gte("billing_period", yearStart).lte("billing_period", yearEnd)
-    }
-
-    const { data: leadsData, error } = await query
+    // ✅ 1) Traemos ranking desde RPC (bypassea RLS y devuelve SOLO agregados)
+    const { data: rows, error } = await supabase.rpc("get_rankings_cumplidas", {
+      p_period: period, // 'month' | 'year'
+      p_year: year,
+      p_month: monthNum,
+    })
 
     if (error) {
-      console.error("Ranking fetch error:", error)
+      logRpcError(error)
+      setRankings([])
       setLoading(false)
       return
     }
 
-    // 2. Traemos perfiles para avatares
-    const { data: profilesData } = await supabase.from("profiles").select("full_name, avatar_url")
+    // ✅ 2) Traemos perfiles para avatares (normal)
+    const { data: profilesData, error: profilesError } = await supabase.from("profiles").select("full_name, avatar_url, email")
+
+    if (profilesError) {
+      console.error("Ranking profiles fetch error:", {
+        message: profilesError?.message,
+        code: (profilesError as any)?.code,
+        details: (profilesError as any)?.details,
+        hint: (profilesError as any)?.hint,
+      })
+    }
 
     const avatarMap: Record<string, string> = {}
     if (profilesData) {
       profilesData.forEach((p: any) => {
-        if (p.full_name) avatarMap[p.full_name] = p.avatar_url
+        const key = String(p.full_name || "").trim()
+        if (!key) return
+        avatarMap[key] = p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email || key}`
       })
     }
 
+    // ✅ 3) Mapear datos del RPC al formato que ya usabas
     const map: Record<string, any> = {}
+    ;(rows || []).forEach((r: any) => {
+      const name = String(r.agent_name || "Sin Nombre")
+      map[name] = {
+        name,
+        capitas: Number(r.capitas_total) || 0,
+        prevencionCount: Number(r.prevencion_count) || 0,
+        streak: 0,
+      }
+    })
 
-    if (leadsData) {
-      leadsData
-        // ✅ seguís excluyendo pass por source, como venías
-        .filter((l: any) => l.source !== "pass")
-        .forEach((l: any) => {
-          const name = l.agent_name || "Sin Nombre"
-          if (!map[name]) {
-            map[name] = {
-              name,
-              capitas: 0,
-              prevencionCount: 0,
-              streak: 0,
-            }
-          }
+    let array = Object.values(map)
 
-          // --- CÁLCULO VOLUMEN (CÁPITAS) ---
-          const isAMPF = l.prepaga && l.prepaga.includes("AMPF")
-          const points = isAMPF ? 1 : Number(l.capitas) || 1
-          map[name].capitas += points
+    // Ordenamiento dinámico
+    array.sort((a: any, b: any) => {
+      if (metric === "capitas") return b.capitas - a.capitas
+      return b.prevencionCount - a.prevencionCount
+    })
 
-          // --- CÁLCULO CALIDAD (PREVENCIÓN SALUD) ---
-          if (l.prepaga && l.prepaga.toLowerCase().includes("prevenci")) {
-            map[name].prevencionCount += 1
-          }
-        })
+    const finalRankings = array.map((u: any, i: number) => {
+      const score = metric === "capitas" ? u.capitas : u.prevencionCount
 
-      let array = Object.values(map)
+      let gapToNext = null
+      if (i > 0) {
+        const prevUser = array[i - 1]
+        const prevScore = metric === "capitas" ? prevUser.capitas : prevUser.prevencionCount
+        gapToNext = { diff: prevScore - score, name: prevUser.name.split(" ")[0] }
+      }
 
-      array.sort((a: any, b: any) => {
-        if (metric === "capitas") return b.capitas - a.capitas
-        return b.prevencionCount - a.prevencionCount
-      })
+      return {
+        ...u,
+        position: i + 1,
+        score,
+        gapToNext,
+        level:
+          u.capitas >= 50 ? "ORO 🥇" :
+          u.capitas >= 25 ? "PLATA 🥈" :
+          u.capitas >= 10 ? "BRONCE 🥉" :
+          "INICIO 🚀",
+        streak: u.capitas >= 5 ? Math.min(u.capitas, 10) : 0,
+        avatar: avatarMap[u.name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`,
+      }
+    })
 
-      const finalRankings = array.map((u: any, i: number) => {
-        const score = metric === "capitas" ? u.capitas : u.prevencionCount
-
-        let gapToNext = null
-        if (i > 0) {
-          const prevUser = array[i - 1]
-          const prevScore = metric === "capitas" ? prevUser.capitas : prevUser.prevencionCount
-          gapToNext = { diff: prevScore - score, name: prevUser.name.split(" ")[0] }
-        }
-
-        return {
-          ...u,
-          position: i + 1,
-          score,
-          gapToNext,
-          level:
-            u.capitas >= 50 ? "ORO 🥇" :
-            u.capitas >= 25 ? "PLATA 🥈" :
-            u.capitas >= 10 ? "BRONCE 🥉" :
-            "INICIO 🚀",
-          streak: u.capitas >= 5 ? Math.min(u.capitas, 10) : 0,
-          avatar: avatarMap[u.name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`,
-        }
-      })
-
-      setRankings(finalRankings)
-    }
-
+    setRankings(finalRankings)
     setLoading(false)
   }
 
   useEffect(() => {
     fetchRankings()
+
+    // Realtime (puede no disparar si RLS no deja ver cambios)
     const channel = supabase
       .channel("rankings_realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => fetchRankings())
       .subscribe()
+
+    // Fallback: refresco cada 30s para “modo vivo” incluso si realtime no llega
+    const interval = setInterval(() => {
+      fetchRankings()
+    }, 30000)
+
     return () => {
+      clearInterval(interval)
       supabase.removeChannel(channel)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, metric])
 
   const top1 = rankings.find((r) => r.position === 1)
@@ -189,9 +192,7 @@ export function RankingsView() {
               size="sm"
               variant={metric === "prevencion" ? "secondary" : "ghost"}
               onClick={() => setMetric("prevencion")}
-              className={`text-xs font-bold h-8 gap-2 ${
-                metric === "prevencion" ? "bg-pink-100 text-pink-700 hover:bg-pink-200" : "text-slate-500"
-              }`}
+              className={`text-xs font-bold h-8 gap-2 ${metric === "prevencion" ? "bg-pink-100 text-pink-700 hover:bg-pink-200" : "text-slate-500"}`}
             >
               <Star size={14} /> Prevención Salud
             </Button>
@@ -224,6 +225,7 @@ export function RankingsView() {
                 <div className="text-center">
                   <p className="font-bold text-slate-700 text-sm truncate w-full">{top2.name.split(" ")[0]}</p>
                   <p className="font-black text-2xl text-slate-500">{top2.score}</p>
+                  {/* Aliento en la nuca */}
                   <div className="text-[9px] text-orange-600 font-bold bg-orange-50 px-1.5 py-0.5 rounded mt-1 border border-orange-100 flex items-center justify-center gap-1">
                     <ArrowUpCircle size={10} /> A {top2.gapToNext?.diff} de {top2.gapToNext?.name}
                   </div>
@@ -232,7 +234,7 @@ export function RankingsView() {
               </div>
             )}
 
-            {/* PUESTO 1 */}
+            {/* PUESTO 1 (REY) */}
             {top1 && (
               <div className="flex flex-col items-center w-1/3 max-w-[160px] z-10 animate-in slide-in-from-bottom-10 duration-500">
                 <div className="relative mb-3">
@@ -269,6 +271,7 @@ export function RankingsView() {
                 <div className="text-center">
                   <p className="font-bold text-slate-700 text-sm truncate w-full">{top3.name.split(" ")[0]}</p>
                   <p className="font-black text-2xl text-orange-700">{top3.score}</p>
+                  {/* Aliento en la nuca */}
                   <div className="text-[9px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded mt-1 border border-slate-200 flex items-center justify-center gap-1">
                     <ArrowUpCircle size={10} /> A {top3.gapToNext?.diff} de {top3.gapToNext?.name}
                   </div>
@@ -278,10 +281,13 @@ export function RankingsView() {
             )}
           </div>
 
-          {/* --- RESTO --- */}
+          {/* --- LISTA DEL RESTO (4º HACIA ABAJO) --- */}
           <div className="space-y-3">
             {restOfTeam.map((user) => (
-              <Card key={user.name} className="flex items-center p-3 hover:shadow-md transition-all border border-slate-100 group animate-in fade-in slide-in-from-bottom-2">
+              <Card
+                key={user.name}
+                className="flex items-center p-3 hover:shadow-md transition-all border border-slate-100 group animate-in fade-in slide-in-from-bottom-2"
+              >
                 <div className="w-8 text-center font-bold text-slate-400 text-lg">#{user.position}</div>
 
                 <Avatar className="h-10 w-10 border border-slate-200 mr-3">
@@ -302,7 +308,9 @@ export function RankingsView() {
 
                 <div className="text-right">
                   <span className="text-xl font-black text-slate-800">{user.score}</span>
-                  <span className="text-[10px] text-slate-400 font-bold uppercase block -mt-1">{metric === "capitas" ? "Cápitas" : "Ventas"}</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase block -mt-1">
+                    {metric === "capitas" ? "Cápitas" : "Ventas"}
+                  </span>
                 </div>
               </Card>
             ))}

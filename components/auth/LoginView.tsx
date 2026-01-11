@@ -1,11 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Loader2, Eye, EyeOff } from "lucide-react" 
 
 const BRAND_COLOR = "#28315b"
@@ -16,30 +15,15 @@ export function LoginView() {
     // Estados
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
-    const [rememberMe, setRememberMe] = useState(false)
     const [showPassword, setShowPassword] = useState(false) 
     
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
 
-    useEffect(() => {
-        const savedEmail = localStorage.getItem("gml_user_email_remember")
-        if (savedEmail) {
-            setEmail(savedEmail)
-            setRememberMe(true)
-        }
-    }, [])
-
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
         setLoading(true)
         setError(null)
-
-        if (rememberMe) {
-            localStorage.setItem("gml_user_email_remember", email)
-        } else {
-            localStorage.removeItem("gml_user_email_remember")
-        }
 
         try {
             // LOGIN CON SUPABASE (Sin llamar a props externas)
@@ -132,20 +116,6 @@ export function LoginView() {
                                 {error}
                             </div>
                         )}
-
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                                <Checkbox 
-                                    id="remember" 
-                                    checked={rememberMe} 
-                                    onCheckedChange={(c) => setRememberMe(c as boolean)}
-                                    className="h-3.5 w-3.5 border-slate-300 data-[state=checked]:bg-[#28315b] data-[state=checked]:border-[#28315b] data-[state=checked]:text-white"
-                                />
-                                <label htmlFor="remember" className="text-xs text-slate-500 font-medium cursor-pointer select-none">
-                                    Recordar email
-                                </label>
-                            </div>
-                        </div>
 
                         <Button 
                             type="submit" 

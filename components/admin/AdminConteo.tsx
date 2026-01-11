@@ -50,10 +50,16 @@ export function AdminConteo() {
     return d
   }
 
-  // --- FÓRMULA DE FACTURACIÓN ---
-  const calculateBillingValue = (op: any) => {
+  // --- FÓRMULA DE FACTURACIÓN (ESPEJO OpsBilling - NETO) ---
+  // - Usa billing_price_override si existe (OPS manual/auditado)
+  // - Si no existe, calcula igual que OpsBilling (val con 2 decimales)
+  // - NO anula PASS por type (PASS suma si OPS lo define; override manda)
+  const calculateBillingNeto = (op: any) => {
+    let val = 0
+
     if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
-      return parseFloat(op.billing_price_override.toString())
+      val = parseFloat(op.billing_price_override.toString())
+      return Number(val.toFixed(2))
     }
 
     const full = parseFloat(op.full_price || op.price || "0")
@@ -61,7 +67,7 @@ export function AdminConteo() {
     const desc = parseFloat(op.descuento || "0")
     const p = (op.prepaga || op.quoted_prepaga || "").toLowerCase()
     const plan = op.plan || op.quoted_plan || ""
-    let val = 0
+    const condicionLaboral = op.labor_condition || op.condicionLaboral || ""
 
     if (p.includes("preven")) {
       const base = full - desc
@@ -72,16 +78,17 @@ export function AdminConteo() {
       val = full * INITIAL_CALC_RULES.ampf.multiplier
     } else {
       let base = full * (1 - INITIAL_CALC_RULES.taxRate)
-      if (p.includes("doctored") && plan.includes("500") && op.labor_condition === "empleado") {
+      if (p.includes("doctored") && String(plan).includes("500") && String(condicionLaboral) === "empleado") {
         base = aportes * (1 - INITIAL_CALC_RULES.taxRate)
       }
       val = base * INITIAL_CALC_RULES.generalGroup.multiplier
     }
 
-    // PASS no factura
-    if ((op.type || "").toLowerCase() === "pass") val = 0
+    // ⚠️ En OpsBilling hay una regla: if (p.includes("pass")) val = 0
+    // Acá NO la aplicamos por pedido tuyo: PASS suma y OPS define el monto manual.
+    // Si algún PASS dependiera de cálculo automático, lo vas a manejar con override.
 
-    return Math.round(val)
+    return Number(val.toFixed(2))
   }
 
   // Genera años (Asegurando 2025)
@@ -124,8 +131,8 @@ export function AdminConteo() {
     // Periodo seleccionado
     const targetPeriod = `${selectedYear}-${selectedMonth.padStart(2, "0")}`
 
-    // Helpers de fecha (VENTAS deben ir por fecha_ingreso)
-    const salesDateOf = (l: any) => l.fecha_ingreso || l.activation_date || l.fecha_alta || l.created_at
+    // Helpers de fecha (VENTAS deben ir por sold_at)
+    const salesDateOf = (l: any) => l.sold_at || l.fecha_ingreso || l.activation_date || l.fecha_alta || l.created_at
 
     const startDateISO =
       selectedYear !== "all"
@@ -136,15 +143,14 @@ export function AdminConteo() {
         ? new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
         : null
 
-    // A. PRODUCCIÓN (VENTAS por fecha_ingreso)
+    // A. PRODUCCIÓN (VENTAS por sold_at)
     if (selectedYear !== "all") {
-      // ✅ Si fecha_ingreso siempre existe para ventas (como validaste), filtramos por DB
       const { data: prodData } = await supabase
         .from("leads")
         .select("*")
         .in("status", SALE_STATUSES)
-        .gte("fecha_ingreso", startDateISO as string)
-        .lte("fecha_ingreso", endDateISO as string)
+        .gte("sold_at", startDateISO as string)
+        .lte("sold_at", endDateISO as string)
 
       if (prodData) productionLeads = prodData
     } else {
@@ -152,13 +158,17 @@ export function AdminConteo() {
       if (data) productionLeads = data
     }
 
-    // B. LIQUIDACIÓN (Mes de Cobro - CUMPLIDAS)
+    // B. LIQUIDACIÓN (ESPEJO OpsBilling)
+    // - Solo cumplidas
+    // - Solo aprobadas por OPS (billing_approved=true)
+    // - Periodo por billing_period; si no tiene, cae al mes de created_at (como OpsBilling)
     if (selectedYear !== "all") {
       const { data: billData } = await supabase
         .from("leads")
         .select("*")
-        .eq("billing_period", targetPeriod)
         .eq("status", "cumplidas")
+        .eq("billing_approved", true)
+        .or(`billing_period.eq.${targetPeriod},and(billing_period.is.null,created_at.gte.${startDateISO},created_at.lte.${endDateISO})`)
 
       if (billData) billingLeads = billData
     }
@@ -200,8 +210,6 @@ export function AdminConteo() {
 
     // 3. PROCESAR DATOS
     let totalSalesGlobal = 0
-    let totalSalesNoPassGlobal = 0
-    let totalPassSalesGlobal = 0
     let totalFulfilledGlobal = 0
 
     // ✅ Helper: Suma puntos
@@ -214,7 +222,7 @@ export function AdminConteo() {
       }, 0)
     }
 
-    // ✅ Helper: Detectar PASS (confirmado por SQL: type='pass')
+    // ✅ Helper: Detectar PASS (por type)
     const isPass = (l: any) => (l.type || "").toLowerCase() === "pass"
 
     const isSalesMonth = (lead: any) => {
@@ -233,10 +241,10 @@ export function AdminConteo() {
       return d >= weekStart
     }
 
+    // Misma lógica de OpsBilling para “entra en el período”
     const isBillingMonth = (op: any) => {
       if (selectedYear === "all") return true
       if (op.billing_period) return op.billing_period === targetPeriod
-      // fallback de seguridad (no debería usarse si billing_period está bien)
       const d = new Date(op.created_at)
       return d.getMonth() + 1 === parseInt(selectedMonth) && d.getFullYear() === parseInt(selectedYear)
     }
@@ -244,7 +252,7 @@ export function AdminConteo() {
     const processedAgents = agentNames.map((name) => {
       const agentLeads = safeLeads.filter((l: any) => norm(l.agent_name) === norm(name))
 
-      // A. VENTAS (AZUL): por fecha_ingreso + estados venta
+      // A. VENTAS (AZUL): por sold_at + estados venta
       const salesLeads = agentLeads.filter((l: any) => isSalesMonth(l) && SALE_STATUSES.includes(norm(l.status)))
       const salesLeadsNoPass = salesLeads.filter((l: any) => !isPass(l))
       const salesLeadsPass = salesLeads.filter((l: any) => isPass(l))
@@ -261,15 +269,23 @@ export function AdminConteo() {
       // ✅ Pass del mes (conteo separado para mostrar +X pass)
       const monthlyPassCount = salesLeadsPass.length
 
-      // B. CUMPLIDAS (VERDE): Mes de liquidación, EXCLUYENDO PASS
+      // B. CUMPLIDAS (VERDE): SOLO OFICIAL (billing_approved=true), EXCLUYENDO PASS (como tu tablero)
       const fulfilledLeads = agentLeads.filter(
-        (l: any) => norm(l.status) === "cumplidas" && !isPass(l) && isBillingMonth(l)
+        (l: any) =>
+          norm(l.status) === "cumplidas" &&
+          l.billing_approved === true &&
+          !isPass(l) &&
+          isBillingMonth(l)
       )
       const fulfilled = calculatePoints(fulfilledLeads)
 
       // C) PASS cumplidas (para mostrar +X pass también en verde)
       const fulfilledPassLeads = agentLeads.filter(
-        (l: any) => norm(l.status) === "cumplidas" && isPass(l) && isBillingMonth(l)
+        (l: any) =>
+          norm(l.status) === "cumplidas" &&
+          l.billing_approved === true &&
+          isPass(l) &&
+          isBillingMonth(l)
       )
       const passCount = fulfilledPassLeads.length
 
@@ -285,8 +301,6 @@ export function AdminConteo() {
         : "offline"
 
       totalSalesGlobal += monthly
-      totalSalesNoPassGlobal += monthly
-      totalPassSalesGlobal += monthlyPassCount
       totalFulfilledGlobal += fulfilled
 
       const avatarUrl = profilesMap[norm(name)] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`
@@ -298,8 +312,8 @@ export function AdminConteo() {
         weekly,
         monthly, // ventas sin pass
         monthlyPassCount, // pass de ventas (para mostrar +X)
-        fulfilled,
-        passCount, // pass en cumplidas
+        fulfilled, // cumplidas oficiales sin pass
+        passCount, // pass oficiales en cumplidas
         ratio: ratioVal,
         status,
         breakdown: [...new Set(salesLeadsNoPass.map((l: any) => l.prepaga || l.quoted_prepaga))]
@@ -314,11 +328,17 @@ export function AdminConteo() {
 
     setAgents(processedAgents)
 
-    // Totales $$$ (cumplidas liquidables sin pass)
-    const billingCandidates = safeLeads.filter((l: any) => norm(l.status) === "cumplidas" && isBillingMonth(l) && !isPass(l))
-    const totalRevenue = billingCandidates.reduce((acc: number, curr: any) => acc + calculateBillingValue(curr), 0)
+    // ✅ FACTURACIÓN (NETO) ESPEJO OPSBILLING: solo cumplidas oficiales del período, incluye PASS
+    const billingCandidates = safeLeads.filter(
+      (l: any) => norm(l.status) === "cumplidas" && l.billing_approved === true && isBillingMonth(l)
+    )
 
-    setGlobalTotals({ monthly: totalSalesGlobal, fulfilled: totalFulfilledGlobal, revenue: totalRevenue })
+    const totalNeto = billingCandidates.reduce((acc: number, curr: any) => acc + calculateBillingNeto(curr), 0)
+
+    // OpsBilling muestra NETO redondeado (formatMoney(totalNeto, true))
+    const totalNetoRounded = Math.round(totalNeto)
+
+    setGlobalTotals({ monthly: totalSalesGlobal, fulfilled: totalFulfilledGlobal, revenue: totalNetoRounded })
     setLoading(false)
   }
 
@@ -554,9 +574,9 @@ export function AdminConteo() {
             <DollarSign className="h-8 w-8 text-green-400" />
           </div>
           <div>
-            <h3 className="text-xl font-bold tracking-tight">Liquidación Estimada</h3>
+            <h3 className="text-xl font-bold tracking-tight">Liquidación</h3>
             <p className="text-slate-400 text-xs font-medium max-w-sm leading-relaxed">
-              Calculado sobre leads en estado CUMPLIDAS (sin PASS).
+             Solo CUMPLIDAS auditadas y aprobadas.
             </p>
           </div>
         </div>

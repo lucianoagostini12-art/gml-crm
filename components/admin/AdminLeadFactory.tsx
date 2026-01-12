@@ -412,16 +412,17 @@ export function AdminLeadFactory() {
 
   const fetchDrawerLeads = async (category: string) => {
     if (category === "zombies") {
-        const { data } = await supabase
-            .from("leads")
-            .select("*")
-            .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
-            .limit(100)
-        
-        if (error) console.error(error)
-        if (data) setDrawerLeads(data as Lead[])
-        return
-    }
+  const { data, error } = await supabase
+    .from("leads")
+    .select("*")
+    .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
+    .limit(100)
+
+  if (error) console.error(error)
+  if (data) setDrawerLeads(data as Lead[])
+  return
+}
+
 
     let reasonFilter = ""
     let query = supabase.from("leads").select("*").eq("status", "perdido").limit(100)

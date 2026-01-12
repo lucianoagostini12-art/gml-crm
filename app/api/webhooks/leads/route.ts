@@ -35,11 +35,32 @@ const matchRule = (inputRaw: any, rule: any) => {
   return input.includes(trigger)
 }
 
+// ✅ NUEVO: normaliza a "canon" 10 dígitos (AR) para dedupe
+const normalizePhoneCanon = (raw: any) => {
+  const d = String(raw || "").replace(/\D+/g, "")
+  if (!d) return null
+
+  // WhatsApp AR: 549 + 10 dígitos
+  if (d.startsWith("549") && d.length >= 13) return d.substring(3, 13)
+
+  // AR con país: 54 + 10 dígitos
+  if (d.startsWith("54") && d.length >= 12) return d.substring(2, 12)
+
+  // 9 + 10 dígitos
+  if (d.startsWith("9") && d.length === 11) return d.substring(1)
+
+  // Ya canon
+  if (d.length === 10) return d
+
+  // fallback: últimos 10
+  return d.length > 10 ? d.slice(-10) : d
+}
+
 export async function POST(request: Request) {
   const supabase = createClient()
 
   try {
-    // 1. VERIFICACIÓN DE SEGURIDAD
+    // 1) VERIFICACIÓN DE SEGURIDAD
     const url = new URL(request.url)
     const apiKey = url.searchParams.get("key")
 
@@ -47,7 +68,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Acceso denegado" }, { status: 401 })
     }
 
-    // 2. LEER DATOS Y EVITAR ERRORES DE TEST DE WATI
+    // 2) LEER DATOS Y EVITAR ERRORES DE TEST DE WATI
     const body = await request.json()
 
     console.log(
@@ -67,13 +88,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Test WATI recibido OK" }, { status: 200 })
     }
 
-    // 3. RECUPERAR EL MENSAJE REAL (como texto “humano”)
+    // 3) RECUPERAR EL MENSAJE REAL (como texto “humano”)
     let finalMessage = body.text || ""
     if (body.interactiveButtonReply?.title) finalMessage = `[Botón]: ${body.interactiveButtonReply.title}`
     else if (body.listReply?.title) finalMessage = `[Lista]: ${body.listReply.title}`
 
-    // ✅ NUEVO: candidatos para “primer mensaje”
-    // (esto evita que el prefijo [Botón]/[Lista] o signos rompan el match)
+    // ✅ candidatos para “primer mensaje”
     const textCandidates = [
       body.text || "",
       body.interactiveButtonReply?.title || "",
@@ -81,7 +101,7 @@ export async function POST(request: Request) {
       finalMessage || "",
     ].filter(Boolean)
 
-    // 4. DATOS BÁSICOS DEL CLIENTE
+    // 4) DATOS BÁSICOS DEL CLIENTE
     let phone = ""
     let name = "Desconocido"
 
@@ -96,19 +116,25 @@ export async function POST(request: Request) {
 
     if (!phone) return NextResponse.json({ message: "Ignored: No valid phone" }, { status: 200 })
 
+    // ✅ ACÁ estaba el bug: phoneCanon no existía
+    const phoneCanon = normalizePhoneCanon(phone)
+
     // =====================================================================
-    // 5. 🧠 MOTOR DE REGLAS DINÁMICO (Híbrido)
+    // 5) 🧠 MOTOR DE REGLAS DINÁMICO (Híbrido)
     // =====================================================================
 
     let detectedSource = body.source || "WATI / Bot"
     let detectedPrepaga: string | null = null
 
-    // A. Obtener Reglas desde la DB (system_config)
-    const { data: configData } = await supabase.from("system_config").select("value").eq("key", "message_source_rules").single()
+    // A) Obtener reglas desde system_config
+    const { data: configData } = await supabase
+      .from("system_config")
+      .select("value")
+      .eq("key", "message_source_rules")
+      .single()
 
     const rules = configData?.value || []
 
-    // Ordenar reglas por prioridad (mayor número = mayor prioridad)
     // ✅ copia defensiva para no mutar el array original
     const sortedRules = Array.isArray(rules)
       ? [...rules].sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))
@@ -116,25 +142,20 @@ export async function POST(request: Request) {
 
     let matchedRule: any = null
 
-    // B. ESTRATEGIA 1: REFERRAL DE META (Código de Anuncio)
+    // B) Estrategia 1: Referral/SourceId (Meta)
     const metaReferralRaw = body.referral || body.sourceId || ""
-    const metaReferralNorm = normalizeText(metaReferralRaw)
 
-    if (metaReferralNorm) {
-      // ✅ ANTES: solo exact
-      // ✅ AHORA: respeta matchType (exact / starts_with / contains)
+    if (String(metaReferralRaw || "").trim()) {
+      // respeta matchType
       matchedRule = sortedRules.find((r: any) => matchRule(metaReferralRaw, r)) || null
 
-      // Si no hubo match por rules, al menos marcamos Meta Ads (ID)
       if (!matchedRule) {
-        // mantenemos el ID “real” sin normalizar para que lo veas en UI
         detectedSource = `Meta Ads (${String(metaReferralRaw).trim()})`
       }
     }
 
-    // C. ESTRATEGIA 2: ANÁLISIS DE TEXTO (primer mensaje real)
+    // C) Estrategia 2: Texto (primer mensaje real)
     if (!matchedRule) {
-      // buscamos por prioridad en cualquiera de los candidatos
       for (const rule of sortedRules) {
         let isMatch = false
         for (const candidate of textCandidates) {
@@ -150,12 +171,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // D. APLICAR RESULTADO
+    // D) Aplicar resultado
     if (matchedRule?.source) {
       detectedSource = matchedRule.source
     }
 
-    // E. INTELIGENCIA DE PREPAGA (Deducción inversa)
+    // E) Deducción inversa prepaga
     const sourceLower = cleanText(detectedSource)
     if (sourceLower.includes("doctored") || sourceLower.includes("docto red")) detectedPrepaga = "DoctoRed"
     else if (sourceLower.includes("prevencion") || sourceLower.includes("prevención")) detectedPrepaga = "Prevencion"
@@ -167,13 +188,27 @@ export async function POST(request: Request) {
     else if (sourceLower.includes("ampf")) detectedPrepaga = "AMPF"
 
     // =====================================================================
+    // 6) GESTIÓN DE LEADS (Insertar o Actualizar)
+    // =====================================================================
 
-    // 6. GESTIÓN DE LEADS (Insertar o Actualizar)
-    const { data: existingLead } = await supabase
-      .from("leads")
-      .select("id, chat, name, notes, prepaga, source")
-      .eq("phone", phone)
-      .maybeSingle()
+    // Buscar por phone_canon cuando exista; fallback a phone
+    let existingLead: any = null
+
+    if (phoneCanon) {
+      const { data } = await supabase
+        .from("leads")
+        .select("id, chat, name, notes, prepaga, source, phone_canon")
+        .eq("phone_canon", phoneCanon)
+        .maybeSingle()
+      existingLead = data
+    } else {
+      const { data } = await supabase
+        .from("leads")
+        .select("id, chat, name, notes, prepaga, source, phone_canon")
+        .eq("phone", phone)
+        .maybeSingle()
+      existingLead = data
+    }
 
     const now = new Date().toISOString()
     const timeString = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
@@ -181,7 +216,9 @@ export async function POST(request: Request) {
     // CASO A: YA EXISTE -> ACTUALIZAR
     if (existingLead) {
       let currentChat = existingLead.chat
-      if (typeof currentChat === "string") try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
+      if (typeof currentChat === "string") {
+        try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
+      }
       if (!Array.isArray(currentChat)) currentChat = []
 
       const newChatMsg = {
@@ -196,8 +233,13 @@ export async function POST(request: Request) {
         last_update: now,
       }
 
-      // Solo completamos datos si faltaban o si el origen anterior era genérico
+      // ✅ completar canon si faltaba
+      if (!existingLead.phone_canon && phoneCanon) updates.phone_canon = phoneCanon
+
+      // completar prepaga si faltaba
       if (!existingLead.prepaga && detectedPrepaga) updates.prepaga = detectedPrepaga
+
+      // actualizar source solo si era genérico
       if ((!existingLead.source || existingLead.source === "WATI / Bot") && detectedSource !== "WATI / Bot") {
         updates.source = detectedSource
       }
@@ -207,9 +249,10 @@ export async function POST(request: Request) {
     }
 
     // CASO B: NUEVO LEAD -> CREAR
-    const newLeadData = {
-      name: name,
-      phone: phone,
+    const newLeadData: any = {
+      name,
+      phone,
+      phone_canon: phoneCanon, // ✅ CLAVE
       source: detectedSource,
       status: "nuevo",
       agent_name: null,

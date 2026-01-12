@@ -17,6 +17,28 @@ function onlyDigits(v: any) {
   return String(v || "").replace(/\D+/g, "")
 }
 
+// ✅ NUEVO: normaliza a "canon" 10 dígitos (AR) para dedupe
+function normalizePhoneCanon(raw: any) {
+  const d = String(raw || "").replace(/\D+/g, "")
+
+  if (!d) return null
+
+  // WhatsApp AR: 549XXXXXXXXXX (13+)
+  if (d.startsWith("549") && d.length >= 13) return d.substring(3, 13)
+
+  // AR con país: 54XXXXXXXXXX (12+)
+  if (d.startsWith("54") && d.length >= 12) return d.substring(2, 12)
+
+  // 9 + 10 dígitos
+  if (d.startsWith("9") && d.length === 11) return d.substring(1)
+
+  // Ya canon
+  if (d.length === 10) return d
+
+  // fallback: últimos 10
+  return d.length > 10 ? d.slice(-10) : d
+}
+
 export async function POST(req: Request) {
   const supabase = createClient()
 
@@ -25,6 +47,7 @@ export async function POST(req: Request) {
 
     const nombre = (body.nombre || body.name || "Sin Nombre").toString().trim()
     const telefono = onlyDigits(body.telefono || body.phone)
+    const phoneCanon = normalizePhoneCanon(telefono)
     const cp = (body.cp || body.zip || "").toString().trim()
     const provincia = (body.provincia || body.province || "").toString().trim()
     const landing_url = (body.landing_url || "").toString().trim()
@@ -65,12 +88,11 @@ export async function POST(req: Request) {
 
     const now = new Date().toISOString()
 
-    // 1) Buscar si ya existe por phone
-    const { data: existingLead, error: findErr } = await supabase
-      .from("leads")
-      .select("id, source, notes")
-      .eq("phone", telefono)
-      .maybeSingle()
+    // 1) Buscar si ya existe por phone_canon (si lo tenemos)
+    const baseFind = supabase.from("leads").select("id, source, notes, phone_canon")
+    const { data: existingLead, error: findErr } = phoneCanon
+      ? await baseFind.eq("phone_canon", phoneCanon).maybeSingle()
+      : await baseFind.eq("phone", telefono).maybeSingle()
 
     if (findErr) {
       console.error("Error buscando lead:", findErr)
@@ -88,6 +110,11 @@ export async function POST(req: Request) {
     if (existingLead?.id) {
       const updates: any = {
         last_update: now,
+      }
+
+      // ✅ Completar phone_canon si faltaba (para saneo)
+      if (!existingLead.phone_canon && phoneCanon) {
+        updates.phone_canon = phoneCanon
       }
 
       // Guardamos geo
@@ -118,6 +145,7 @@ export async function POST(req: Request) {
     const { error: insErr } = await supabase.from("leads").insert({
       name: nombre,
       phone: telefono,
+      phone_canon: phoneCanon, // ✅ NUEVO
       source: finalTag,
       status: "nuevo",
       notes: extraNotes || null,

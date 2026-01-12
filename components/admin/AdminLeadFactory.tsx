@@ -43,6 +43,7 @@ type Lead = {
   name?: string | null
   phone?: string | null
   phone_norm?: string | null
+  phone_canon?: string | null
   email?: string | null
   source?: string | null
   status?: string | null
@@ -57,10 +58,24 @@ type Lead = {
 const normPhone = (v?: string | null) => (v || "").replace(/\D/g, "")
 const normEmail = (v?: string | null) => (v || "").trim().toLowerCase()
 
+// ✅ Canon Argentina (últimos 10 dígitos). Si viene +54/549/etc, lo normaliza.
+// Si no llega a 10, devuelve el número completo.
+const canonPhone10 = (v?: string | null) => {
+  const d = normPhone(v)
+  if (!d) return ""
+  if (d.length <= 10) return d
+  return d.slice(-10)
+}
+
 // Clave para detectar duplicado: primero phone_norm, si no email
 const leadKey = (l: Lead) => {
+  // ✅ Primero usamos phone_canon (es la clave “real” anti 549 / +54 / etc)
+  const canon = (l.phone_canon && String(l.phone_canon).trim()) || ""
+  if (canon) return `pc:${canon}`
+
+  // Fallbacks (por si algún lead viejo todavía no tiene phone_canon)
   const p = (l.phone_norm && l.phone_norm.trim()) || normPhone(l.phone)
-  if (p) return `p:${p}`
+  if (p) return `p:${canonPhone10(p)}`
   const e = normEmail(l.email)
   if (e) return `e:${e}`
   return null
@@ -199,32 +214,30 @@ export function AdminLeadFactory() {
       const startOfDay = new Date()
       startOfDay.setHours(0,0,0,0)
 
-      // ✅ SOLO BANDEJA: contamos asignaciones de HOY que vienen desde la bandeja (from_status = 'inbox')
-      // Para que esto funcione, cuando asignamos desde Bandeja guardamos en historial:
-      // from_status: 'inbox'  | to_status: 'nuevo' | agent_name: <vendedora destino>
+      // ✅ OBJETIVO: “Asignaciones hechas hoy” (no “dueño actual”).
+      // Para que NO baje/oscile cuando un lead se reasigna después,
+      // contamos por el agent_name guardado en lead_status_history en el momento de asignación.
+      // IMPORTANTE: en este archivo, cuando asignamos a alguien, insertamos en history con agent_name = DESTINO.
       const { data: historyData, error } = await supabase
-          .from('lead_status_history')
-          .select('agent_name')
-          .gte('changed_at', startOfDay.toISOString())
-          .eq('to_status', 'nuevo')
-          .eq('from_status', 'inbox')
-          .not('agent_name', 'is', null)
+        .from('lead_status_history')
+        .select('agent_name')
+        .gte('changed_at', startOfDay.toISOString())
+        .eq('to_status', 'nuevo')
+        .not('agent_name', 'is', null)
+        .neq('agent_name', 'Sin Asignar')
 
       if (error) {
-          console.error(error)
-          setDailyAssignments({})
-          return
+        console.error('Error fetchDailyStats:', error)
+        setDailyAssignments({})
+        return
       }
 
       const counts: Record<string, number> = {}
-
-      if (historyData && historyData.length > 0) {
-          historyData.forEach((h: any) => {
-              const name = h.agent_name
-              if (!name) return
-              counts[name] = (counts[name] || 0) + 1
-          })
-      }
+      ;(historyData || []).forEach((h: any) => {
+        const name = h?.agent_name
+        if (!name) return
+        counts[name] = (counts[name] || 0) + 1
+      })
 
       setDailyAssignments(counts)
   }
@@ -253,8 +266,9 @@ export function AdminLeadFactory() {
             // Forzamos la creación de historial para que el contador lo detecte
             await supabase.from('lead_status_history').insert({
                 lead_id: leadToAssign.id,
-                from_status: 'inbox',
+                from_status: 'ingresado', // Estado anterior asumido
                 to_status: 'nuevo',
+                // ✅ Guardamos el DESTINO (owner asignado) para que el contador de "hoy" sea estable.
                 agent_name: agentToAssign,
                 changed_at: new Date().toISOString()
             })
@@ -308,16 +322,23 @@ export function AdminLeadFactory() {
     setUnassignedLeads(inbox)
 
     // LÓGICA DEDUPE (INTACTA)
-    const phones = Array.from(
+    // ✅ DEDUPE: usamos primero phone_canon (anti 549 / +54 / etc). Si falta, fallback a canon de 10 dígitos.
+    const canonPhones = Array.from(
       new Set(
         inbox
-          .map((l) => (l.phone_norm && l.phone_norm.trim()) || normPhone(l.phone))
+          .map((l) => {
+            const pc = (l.phone_canon && String(l.phone_canon).trim()) || ""
+            if (pc) return pc
+            const raw = (l.phone_norm && l.phone_norm.trim()) || normPhone(l.phone)
+            const c10 = canonPhone10(raw)
+            return c10 || ""
+          })
           .filter(Boolean)
       )
     )
     const emails = Array.from(new Set(inbox.map((l) => normEmail(l.email)).filter(Boolean)))
 
-    if (phones.length === 0 && emails.length === 0) {
+    if (canonPhones.length === 0 && emails.length === 0) {
       setDupMap({})
       setLoading(false)
       setDupLoading(false)
@@ -326,8 +347,24 @@ export function AdminLeadFactory() {
 
     const candidates: Lead[] = []
 
-    if (phones.length > 0) {
-      const { data: pData } = await supabase.from("leads").select("*").in("phone_norm", phones as any).not("agent_name", "is", null).neq("agent_name", "Sin Asignar")
+    if (canonPhones.length > 0) {
+      // ✅ Preferimos buscar por phone_canon
+      const { data: cData } = await supabase
+        .from("leads")
+        .select("*")
+        .in("phone_canon", canonPhones as any)
+        .not("agent_name", "is", null)
+        .neq("agent_name", "Sin Asignar")
+      if (cData) candidates.push(...(cData as Lead[]))
+
+      // 🔁 Fallback: si hay leads viejos sin phone_canon pero con phone_norm, también los buscamos por canon_10 (match aproximado)
+      // (Esto no es perfecto, pero ayuda mientras terminás de backfillear phone_canon en todo.)
+      const { data: pData } = await supabase
+        .from("leads")
+        .select("*")
+        .in("phone_norm", inbox.map((l) => (l.phone_norm && l.phone_norm.trim()) || normPhone(l.phone)).filter(Boolean) as any)
+        .not("agent_name", "is", null)
+        .neq("agent_name", "Sin Asignar")
       if (pData) candidates.push(...(pData as Lead[]))
     }
 
@@ -412,17 +449,16 @@ export function AdminLeadFactory() {
 
   const fetchDrawerLeads = async (category: string) => {
     if (category === "zombies") {
-  const { data, error } = await supabase
-    .from("leads")
-    .select("*")
-    .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
-    .limit(100)
-
-  if (error) console.error(error)
-  if (data) setDrawerLeads(data as Lead[])
-  return
-}
-
+        const { data, error } = await supabase
+            .from("leads")
+            .select("*")
+            .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
+            .limit(100)
+        
+        if (error) console.error(error)
+        if (data) setDrawerLeads(data as Lead[])
+        return
+    }
 
     let reasonFilter = ""
     let query = supabase.from("leads").select("*").eq("status", "perdido").limit(100)
@@ -487,9 +523,10 @@ export function AdminLeadFactory() {
       // Si el trigger de la base de datos no lo hace, lo hacemos aquí para asegurar que 'fetchDailyStats' lo vea.
       const historyEntries = selectedLeads.map(id => ({
           lead_id: id,
-          from_status: origin === 'inbox' ? 'inbox' : (origin === 'cementerio' ? 'perdido' : 'ingresado'), 
+          from_status: origin === 'cementerio' ? 'perdido' : 'ingresado', 
           to_status: 'nuevo',
-          agent_name: origin === 'inbox' ? targetAgent : 'Admin', // El "Actor" del cambio
+          // ✅ Guardamos el DESTINO (owner asignado). Esto hace que el conteo de "Asignaciones de hoy" sea estable.
+          agent_name: targetAgent,
           changed_at: new Date().toISOString()
       }))
       
@@ -544,7 +581,7 @@ export function AdminLeadFactory() {
       // Historial manual para el contador
       await supabase.from('lead_status_history').insert({
           lead_id: leadId,
-          from_status: 'inbox',
+          from_status: 'ingresado',
           to_status: 'nuevo',
           agent_name: targetAgent,
           changed_at: new Date().toISOString()
@@ -578,7 +615,7 @@ export function AdminLeadFactory() {
     
     // Historial
     await supabase.from('lead_status_history').insert({
-        lead_id: origLead.id, from_status: origLead.status, to_status: 'nuevo', agent_name: 'Admin', changed_at: new Date().toISOString()
+        lead_id: origLead.id, from_status: origLead.status, to_status: 'nuevo', agent_name: targetAgent, changed_at: new Date().toISOString()
     })
 
     setLoading(false)
@@ -595,7 +632,7 @@ export function AdminLeadFactory() {
     
     // Historial
     await supabase.from('lead_status_history').insert({
-        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: 'Admin', changed_at: new Date().toISOString()
+        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: targetAgent, changed_at: new Date().toISOString()
     })
 
     setLoading(false)
@@ -612,7 +649,7 @@ export function AdminLeadFactory() {
     
     // Historial
     await supabase.from('lead_status_history').insert({
-        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: 'Admin', changed_at: new Date().toISOString()
+        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: origLead.agent_name, changed_at: new Date().toISOString()
     })
 
     setLoading(false)

@@ -14,6 +14,9 @@ import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Label } from "@/components/ui/label" 
 
+// --- IMPORTAR UTILIDAD DE NOTIFICACIONES ---
+import { sendNativeNotification, requestNotificationPermission } from "@/utils/notifications"
+
 // DATOS
 import { Operation, OpStatus, Reminder, getStatusColor, getSubStateStyle, FLOW_STATES, ChatMsg } from "./data"
 
@@ -40,8 +43,29 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true) 
     const [isLoading, setIsLoading] = useState(false)
     
-    // VIEW MODE - ✅ 2. AGREGAMOS 'history' AL TIPO
-    const [viewMode, setViewMode] = useState<'dashboard' | 'stage_list' | 'pool' | 'mine' | 'kanban' | 'agenda' | 'metrics' | 'chat' | 'database' | 'settings' | 'announcements' | 'billing' | 'post_sale' | 'history'>('dashboard')
+    // ✅ 1. INICIALIZACIÓN INTELIGENTE (Lee la URL al cargar para no volver al inicio)
+    const [viewMode, setViewMode] = useState<'dashboard' | 'stage_list' | 'pool' | 'mine' | 'kanban' | 'agenda' | 'metrics' | 'chat' | 'database' | 'settings' | 'announcements' | 'billing' | 'post_sale' | 'history'>(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search)
+            const tab = params.get('tab')
+            if (tab) return tab as any
+        }
+        return 'dashboard'
+    })
+
+    // ✅ 2. EFECTO DE PERSISTENCIA (Actualiza la URL al cambiar de vista)
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search)
+            if (viewMode === 'dashboard') {
+                params.delete('tab')
+            } else {
+                params.set('tab', viewMode)
+            }
+            const newUrl = `${window.location.pathname}?${params.toString()}`
+            window.history.replaceState(null, '', newUrl)
+        }
+    }, [viewMode])
     
     const [currentStageFilter, setCurrentStageFilter] = useState<string | null>(null)
     
@@ -282,6 +306,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }
 
     useEffect(() => {
+        // ✅ 1. Pedir permiso al cargar
+        requestNotificationPermission();
+
         fetchProfiles()
         fetchPermissions()
         fetchSystemConfig() 
@@ -298,6 +325,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData.status !== newData.status)
                 ) {
                     setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
+                    
+                    // 🔥 NOTIFICACIÓN NATIVA DE VENTA 🔥
+                    sendNativeNotification("¡Venta Nueva! 🚀", `${newData.agent_name} vendió un plan ${newData.plan} a ${newData.name}.`);
                 }
                 
                 fetchOperations() 
@@ -305,6 +335,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
                 if (payload.new.user_name === userName || role === 'admin_god') {
                     setNotifications(prev => [payload.new, ...prev])
+                    // 🔥 NOTIFICACIÓN NATIVA DE MENSAJE O ALERTA INTERNA
+                    sendNativeNotification("Nueva Notificación 🔔", payload.new.title || "Tenés un mensaje nuevo.");
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {

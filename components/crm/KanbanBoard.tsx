@@ -17,6 +17,9 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { toast } from "sonner"
 
+// --- IMPORTAR UTILIDAD DE NOTIFICACIONES ---
+import { sendNativeNotification, requestNotificationPermission } from "@/utils/notifications"
+
 // --- COMPONENTES ---
 import { Lead, LeadCard } from "./LeadCard"
 import { DocConfirmDialog } from "./DocConfirmDialog"
@@ -238,6 +241,9 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     }
 
     useEffect(() => {
+        // ✅ 1. Solicitar permiso al cargar (mejoraría ponerlo en un botón de "Activar Alertas", pero aquí es automático)
+        requestNotificationPermission();
+
         fetchLeads()
         checkUrgentMessage()
 
@@ -251,6 +257,10 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                     if (newData && !['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(newData.status)) {
                         const newLead = mapLeads([newData])[0]
                         setLeads(prev => [newLead, ...prev])
+                        
+                        // 🔥 NOTIFICACIÓN NATIVA + TOAST
+                        sendNativeNotification("¡Nuevo Lead Asignado! 🚀", `Te asignaron a ${newData.name}.`);
+                        
                         toast.success(`¡Nuevo Lead! ${newData.name}`, { 
                             description: "Hacé click para ver detalles", 
                             action: { label: "Ver", onClick: () => onLeadClick && onLeadClick(newData.id) } 
@@ -267,7 +277,21 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                         if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
                             setLeads(prev => prev.filter(l => l.id !== updated.id))
                         } else {
-                            setLeads(prev => prev.map(l => l.id === updated.id ? updated : l))
+                            // ✅ FIX: Si el lead ya existe, lo actualiza. Si NO existe (te lo acaban de asignar), lo AGREGA.
+                            setLeads(prev => {
+                                const exists = prev.some(l => l.id === updated.id)
+                                if (exists) {
+                                    return prev.map(l => l.id === updated.id ? updated : l)
+                                } else {
+                                    // 🔥 NOTIFICACIÓN NATIVA (SI ME LO ASIGNARON MIENTRAS ESTABA EN OTRA COSA)
+                                    sendNativeNotification("¡Lead Recibido! 📥", `${updated.name} apareció en tu tablero.`);
+                                    
+                                    toast.success(`¡Lead Asignado! ${updated.name}`, {
+                                        description: "Se agregó a tu tablero."
+                                    })
+                                    return [updated, ...prev]
+                                }
+                            })
                         }
                     }
                 }
@@ -281,6 +305,10 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 if (msg.target_role === 'seller' || msg.sender === 'Supervisión' || msg.sender === 'Administración') {
                     const { data: leadData } = await supabase.from('leads').select('agent_name, name').eq('id', msg.lead_id).single()
                     if (leadData && leadData.agent_name === CURRENT_USER) {
+                        
+                        // 🔥 NOTIFICACIÓN NATIVA DE MENSAJE
+                        sendNativeNotification(`Mensaje de ${msg.sender} 💬`, `${leadData.name}: ${msg.text}`);
+
                         toast.message(`Mensaje de ${msg.sender}`, {
                             description: `${leadData.name}: ${msg.text.substring(0, 30)}...`,
                             action: { label: "Responder", onClick: () => onLeadClick && onLeadClick(msg.lead_id) } 
@@ -297,6 +325,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 if(newData.is_blocking) {
                     setUrgentMessage(newData.message)
                     setAnnouncementId(newData.id)
+                    // 🔥 NOTIFICACIÓN NATIVA DE ANUNCIO
+                    sendNativeNotification("⚠️ Comunicado Urgente", newData.message);
                 }
             })
             .subscribe()
@@ -321,6 +351,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             const urgentLead = leads.find(l => l.scheduled_for && new Date(l.scheduled_for) <= now && !ignoredAlarmIds.includes(l.id));
             if (urgentLead && !alarmLead && !showConfirmCall) {
                 setAlarmLead(urgentLead);
+                // 🔥 NOTIFICACIÓN NATIVA DE AGENDA
+                sendNativeNotification("⏰ ¡Llamada Programada!", `Tenés que llamar a ${urgentLead.name} ahora.`);
             }
         };
         const intervalId = setInterval(checkAgendas, 15000); 
@@ -475,7 +507,64 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             
             {/* ... DIALOGS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
-            <WonLeadDialog open={isWonDialogOpen} onOpenChange={setIsWonDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if (!leadId) return; const { files, ...leadData } = data; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.filter(l => l.id !== leadId)); setIsWonDialogOpen(false); const payload: any = { status: 'vendido', last_update: new Date().toISOString(), quoted_price: leadData.price ? Number(leadData.price) : 0, quoted_prepaga: leadData.prepaga || null, quoted_plan: leadData.plan || null, notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes }; if (leadData.afiliado_number) payload.afiliado_number = leadData.afiliado_number; if (leadData.cuit) payload.cuit = leadData.cuit; if (leadData.aporte) payload.aporte = leadData.aporte; if (leadData.derivacion_aportes) payload.derivacion_aportes = leadData.derivacion_aportes; if (leadData.cant_capitas) payload.cant_capitas = Number(leadData.cant_capitas); const { error } = await supabase.from('leads').update(payload).eq('id', leadId); if (error) { console.error("Error confirmando venta:", error); alert("Hubo un error al guardar. Verificá los campos numéricos."); } else if (oldLead) { logHistory(leadId, oldLead.status, 'vendido') } }} />
+            
+            {/* ✅ FIX VENTA CONFIRMADA: Mapeo de campos completo para que Admin vea todo */}
+            <WonLeadDialog 
+                open={isWonDialogOpen} 
+                onOpenChange={setIsWonDialogOpen} 
+                onConfirm={async (data: any) => { 
+                    const leadId = leadProcessingId; 
+                    if (!leadId) return; 
+                    
+                    const { files, ...leadData } = data; 
+                    const oldLead = leads.find(l => l.id === leadId); 
+                    
+                    // Actualizar UI local
+                    setLeads(prev => prev.filter(l => l.id !== leadId)); 
+                    setIsWonDialogOpen(false); 
+
+                    // Preparar payload completo
+                    const payload: any = { 
+                        status: 'vendido', 
+                        last_update: new Date().toISOString(), 
+                        
+                        // Campos de Cotización (Visual)
+                        quoted_price: leadData.price ? Number(leadData.price) : 0, 
+                        quoted_prepaga: leadData.prepaga || null, 
+                        quoted_plan: leadData.plan || null, 
+
+                        // ✅ CAMPOS REALES (PARA ADMIN)
+                        full_price: leadData.price ? Number(leadData.price) : 0,
+                        price: leadData.price ? Number(leadData.price) : 0,
+                        prepaga: leadData.prepaga || null,
+                        plan: leadData.plan || null,
+                        
+                        // Campos Numéricos
+                        afiliado_number: leadData.afiliado_number || null,
+                        cuit: leadData.cuit || null,
+                        cbu: leadData.cbu || null, // Asegurar mapeo de CBU si existe
+                        
+                        // Campos Monetarios
+                        aportes: leadData.aporte ? Number(leadData.aporte) : 0,
+                        derivacion_aportes: leadData.derivacion_aportes || null,
+                        cant_capitas: leadData.cant_capitas ? Number(leadData.cant_capitas) : 1,
+
+                        // Notas
+                        notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes 
+                    }; 
+
+                    // ✅ GUARDAR ARCHIVOS (SI EXISTEN)
+                    const { error } = await supabase.from('leads').update(payload).eq('id', leadId); 
+                    
+                    if (error) { 
+                        console.error("Error confirmando venta:", error); 
+                        alert("Hubo un error al guardar. Verificá los campos numéricos."); 
+                    } else if (oldLead) { 
+                        logHistory(leadId, oldLead.status, 'vendido') 
+                    } 
+                }} 
+            />
+
             <QuotationDialog open={isQuoteDialogOpen} onOpenChange={setIsQuoteDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l)); setIsQuoteDialogOpen(false); await supabase.from('leads').update({ status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion') }} onCancel={() => setIsQuoteDialogOpen(false)} />
             <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
 

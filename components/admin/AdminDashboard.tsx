@@ -37,6 +37,9 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
+// --- IMPORTAR UTILIDAD DE NOTIFICACIONES ---
+import { sendNativeNotification, requestNotificationPermission } from "@/utils/notifications"
+
 // IMPORTAMOS TUS COMPONENTES
 import { AdminLeadFactory } from "@/components/admin/AdminLeadFactory"
 import { AdminMetrics } from "@/components/admin/AdminMetrics"
@@ -371,8 +374,18 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
 // --- DASHBOARD PRINCIPAL (COMPLETAMENTE INTEGRADO) ---
 export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const supabase = createClient()
-  const [view, setView] = useState("overview")
-  const [sidebarOpen, setSidebarOpen] = useState(true) // Estado para abrir/cerrar sidebar
+  
+  // ✅ 1. INICIALIZACIÓN INTELIGENTE (Lee la URL al cargar)
+  const [view, setView] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const tab = params.get('tab')
+      if (tab) return tab
+    }
+    return "overview"
+  })
+
+  const [sidebarOpen, setSidebarOpen] = useState(true) 
   const [incomingAlert, setIncomingAlert] = useState<any>(null)
   
   // ESTADO USUARIO
@@ -383,6 +396,20 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   // ESTADO NOTIFICACIONES
   const [notifications, setNotifications] = useState<any[]>([])
   const [isBellOpen, setIsBellOpen] = useState(false)
+
+  // ✅ 2. EFECTO DE PERSISTENCIA (Actualiza la URL al cambiar de vista)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (view === 'overview') {
+        params.delete('tab')
+      } else {
+        params.set('tab', view)
+      }
+      const newUrl = `${window.location.pathname}?${params.toString()}`
+      window.history.replaceState(null, '', newUrl)
+    }
+  }, [view])
 
   const handleSafeLogout = async () => {
     await supabase.auth.signOut()
@@ -396,6 +423,9 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   }
 
   useEffect(() => {
+    // ✅ 1. Pedir permiso al cargar
+    requestNotificationPermission();
+
     const initUserData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
@@ -425,17 +455,25 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     const globalChannel = supabase.channel("god_mode_global")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, (payload) => {
         const newLead = payload.new as any
-        if (newLead.status === 'nuevo') {
+        
+        // ✅ SOLO ALERTAR SI ES DE PUBLICIDAD (Sin dueño inicial)
+        // Si tiene 'agent_name' significa que lo creó una vendedora o se asignó manualmente
+        if (newLead.status === 'nuevo' && (!newLead.agent_name || newLead.agent_name === 'Sin Asignar')) {
             setIncomingAlert({
               section: "leads",
               name: newLead.name || "Nuevo Prospecto",
               source: newLead.source || "MetaAds",
               time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             })
+
+            // 🔥 NOTIFICACIÓN NATIVA
+            sendNativeNotification("¡Lead Ingresado!", `Nuevo dato desde ${newLead.source || "Web"}: ${newLead.name}`);
         }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
            setNotifications(prev => [payload.new, ...prev])
+           // Alerta nativa de notificaciones generales (opcional)
+           sendNativeNotification("Nueva Notificación", payload.new.title);
       })
       .subscribe()
 

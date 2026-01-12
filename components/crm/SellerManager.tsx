@@ -76,6 +76,8 @@ export function SellerManager({
   const currentUser = userName || "Vendedora"
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  
+  // ✅ 1. INICIALIZACIÓN INTELIGENTE (Lee la URL al cargar)
   const [currentView, setCurrentView] = useState<
     | "board"
     | "contacts"
@@ -87,7 +89,28 @@ export function SellerManager({
     | "wiki"
     | "focus"
     | "mysales"
-  >("board")
+  >(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const tab = params.get('tab')
+      if (tab) return tab as any
+    }
+    return "board"
+  })
+
+  // ✅ 2. EFECTO DE PERSISTENCIA (Actualiza la URL al cambiar de vista)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (currentView === 'board') {
+        params.delete('tab')
+      } else {
+        params.set('tab', currentView)
+      }
+      const newUrl = `${window.location.pathname}?${params.toString()}`
+      window.history.replaceState(null, '', newUrl)
+    }
+  }, [currentView])
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   
@@ -455,7 +478,7 @@ export function SellerManager({
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
           <Button
-            variant="ghost"
+            variant={ghost}
             className="w-full justify-start gap-3 mb-2 text-slate-500 hover:text-slate-800 dark:hover:text-white"
             onClick={() => setCurrentView("settings")}
           >

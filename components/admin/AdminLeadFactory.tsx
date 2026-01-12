@@ -10,11 +10,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle, Archive, Ban } from "lucide-react"
+import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle, Archive, Ban, User } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 import {
   Dialog,
@@ -104,8 +105,10 @@ export function AdminLeadFactory() {
   const [redistributionList, setRedistributionList] = useState<Lead[]>([])
   const [drawerLeads, setDrawerLeads] = useState<Lead[]>([])
 
-  // LISTA DE VENDEDORES (REAL DESDE DB)
-  const [agentsList, setAgentsList] = useState<string[]>([])
+  // ✅ LISTA DE VENDEDORES (Objetos completos para fotos)
+  const [agentsList, setAgentsList] = useState<{name: string, avatar: string}[]>([])
+  // ✅ ESTADO PARA MONITOR DIARIO
+  const [dailyAssignments, setDailyAssignments] = useState<Record<string, number>>({})
 
   // SELECCIÓN
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
@@ -131,12 +134,10 @@ export function AdminLeadFactory() {
   const [dupMap, setDupMap] = useState<Record<string, Lead>>({})
   const [dupLoading, setDupLoading] = useState(false)
 
-  // MODAL DUPLICADOS
+  // MODALES
   const [dupModalOpen, setDupModalOpen] = useState(false)
   const [dupLead, setDupLead] = useState<Lead | null>(null)
   const [origLead, setOrigLead] = useState<Lead | null>(null)
-
-  // 🚀 MODAL TRIAJE / VER CHAT (NUEVO)
   const [triageModalOpen, setTriageModalOpen] = useState(false)
   const [leadToTriage, setLeadToTriage] = useState<Lead | null>(null)
 
@@ -145,23 +146,87 @@ export function AdminLeadFactory() {
     fetchInbox()
     fetchGraveyardStats()
     fetchRealAgents() // ✅ CARGA REAL
+    fetchDailyStats() // ✅ Carga inicial de contadores
+
+    // ✅ SUSCRIPCIÓN REALTIME MEJORADA (Escucha TODO cambio en leads y en historial)
+    // Escuchamos 'lead_status_history' para actualizar el contador al instante
+    const historyChannel = supabase.channel('factory_history_listener')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_status_history' }, () => {
+            fetchDailyStats() 
+        })
+        .subscribe()
+
+    // Escuchamos 'leads' para actualizar la bandeja
+    const leadsChannel = supabase.channel('factory_leads_listener')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
+            fetchInbox()
+            fetchGraveyardStats()
+            if (activeDrawer) {
+                // fetchDrawerLeads(activeDrawer) -> Opcional
+            }
+        })
+        .subscribe()
+
+    return () => { 
+        supabase.removeChannel(historyChannel) 
+        supabase.removeChannel(leadsChannel) 
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ✅ 1. TRAER SOLO SELLERS REALES
+  // ✅ 1. TRAER SOLO SELLERS REALES CON FOTO
   const fetchRealAgents = async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('*') 
-        .eq('role', 'seller') // ✅ FILTRO POR ROL
+        .select('full_name, avatar_url, email, role') 
+        .or('role.eq.seller,role.eq.gestor') // ✅ FILTRO POR ROL
 
       if (data && data.length > 0) {
-          const realAgents = data.map((p: any) => p.username || p.full_name || p.nombre || p.name || p.email).filter(Boolean)
-          setAgentsList(realAgents)
+          const formatted = data.map((p: any) => ({
+              name: p.full_name || p.email,
+              avatar: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
+          })).sort((a,b) => a.name.localeCompare(b.name))
+          
+          setAgentsList(formatted)
       } else {
           console.error("No se encontraron sellers en la base.", error)
           setAgentsList([]) 
       }
+  }
+
+  // ✅ 2. CONTADORES DE ASIGNACIÓN DIARIA (LOGICA CRUCE TABLAS)
+  const fetchDailyStats = async () => {
+      const startOfDay = new Date()
+      startOfDay.setHours(0,0,0,0)
+
+      // ✅ SOLO BANDEJA: contamos asignaciones de HOY que vienen desde la bandeja (from_status = 'inbox')
+      // Para que esto funcione, cuando asignamos desde Bandeja guardamos en historial:
+      // from_status: 'inbox'  | to_status: 'nuevo' | agent_name: <vendedora destino>
+      const { data: historyData, error } = await supabase
+          .from('lead_status_history')
+          .select('agent_name')
+          .gte('changed_at', startOfDay.toISOString())
+          .eq('to_status', 'nuevo')
+          .eq('from_status', 'inbox')
+          .not('agent_name', 'is', null)
+
+      if (error) {
+          console.error(error)
+          setDailyAssignments({})
+          return
+      }
+
+      const counts: Record<string, number> = {}
+
+      if (historyData && historyData.length > 0) {
+          historyData.forEach((h: any) => {
+              const name = h.agent_name
+              if (!name) return
+              counts[name] = (counts[name] || 0) + 1
+          })
+      }
+
+      setDailyAssignments(counts)
   }
 
   // --- 🤖 MOTOR DE ASIGNACIÓN AUTOMÁTICA (ROUND ROBIN) ---
@@ -169,14 +234,14 @@ export function AdminLeadFactory() {
     let timeout: NodeJS.Timeout
 
     const processAutoAssign = async () => {
-        if (autoAssignEnabled && unassignedLeads.length > 0 && !loading && agentsList.length > 0 && agentsList[0] !== "Sin Vendedores") {
+        if (autoAssignEnabled && unassignedLeads.length > 0 && !loading && agentsList.length > 0) {
             
             const leadToAssign = unassignedLeads[0]
-            const agentToAssign = agentsList[nextAgentIdx] // ✅ Usamos la lista dinámica
+            const agentToAssign = agentsList[nextAgentIdx].name // ✅ Usamos el objeto
 
+            // Optimistic Update local
             const remainingLeads = unassignedLeads.slice(1)
             setUnassignedLeads(remainingLeads)
-            
             setNextAgentIdx((prev) => (prev + 1) % agentsList.length)
 
             await supabase.from('leads').update({
@@ -184,6 +249,15 @@ export function AdminLeadFactory() {
                 status: 'nuevo',
                 last_update: new Date().toISOString()
             }).eq('id', leadToAssign.id)
+            
+            // Forzamos la creación de historial para que el contador lo detecte
+            await supabase.from('lead_status_history').insert({
+                lead_id: leadToAssign.id,
+                from_status: 'inbox',
+                to_status: 'nuevo',
+                agent_name: agentToAssign,
+                changed_at: new Date().toISOString()
+            })
         }
     }
 
@@ -338,7 +412,7 @@ export function AdminLeadFactory() {
 
   const fetchDrawerLeads = async (category: string) => {
     if (category === "zombies") {
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from("leads")
             .select("*")
             .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
@@ -408,7 +482,19 @@ export function AdminLeadFactory() {
     const { error } = await supabase.from("leads").update(updates).in("id", selectedLeads)
 
     if (!error) {
-      alert(`✅ ÉXITO: Se asignaron ${selectedLeads.length} leads a ${targetAgent}.`)
+      // ✅ IMPORTANTE: CREAR HISTORIAL MANUALMENTE PARA EL CONTADOR
+      // Si el trigger de la base de datos no lo hace, lo hacemos aquí para asegurar que 'fetchDailyStats' lo vea.
+      const historyEntries = selectedLeads.map(id => ({
+          lead_id: id,
+          from_status: origin === 'inbox' ? 'inbox' : (origin === 'cementerio' ? 'perdido' : 'ingresado'), 
+          to_status: 'nuevo',
+          agent_name: origin === 'inbox' ? targetAgent : 'Admin', // El "Actor" del cambio
+          changed_at: new Date().toISOString()
+      }))
+      
+      // Intentamos insertar, si falla no es crítico para la asignación, pero sí para el contador
+      await supabase.from('lead_status_history').insert(historyEntries)
+
       setSelectedLeads([])
 
       if (origin === "inbox") fetchInbox()
@@ -447,11 +533,21 @@ export function AdminLeadFactory() {
   const handleAssignFromTriage = async (leadId: string) => {
       if(!targetAgent) return alert("Seleccioná un vendedor primero")
       setLoading(true)
+      
       await supabase.from('leads').update({
           agent_name: targetAgent,
           status: 'nuevo',
           last_update: new Date().toISOString()
       }).eq('id', leadId)
+
+      // Historial manual para el contador
+      await supabase.from('lead_status_history').insert({
+          lead_id: leadId,
+          from_status: 'inbox',
+          to_status: 'nuevo',
+          agent_name: targetAgent,
+          changed_at: new Date().toISOString()
+      })
       
       setTriageModalOpen(false)
       setLoading(false)
@@ -477,19 +573,14 @@ export function AdminLeadFactory() {
     if (!targetAgent) return alert("Elegí un destino arriba (Asignar a...).")
 
     setLoading(true)
-    const { error } = await supabase
-      .from("leads")
-      .update({ agent_name: targetAgent, last_update: new Date().toISOString() })
-      .eq("id", origLead.id)
+    await supabase.from("leads").update({ agent_name: targetAgent, last_update: new Date().toISOString() }).eq("id", origLead.id)
+    
+    // Historial
+    await supabase.from('lead_status_history').insert({
+        lead_id: origLead.id, from_status: origLead.status, to_status: 'nuevo', agent_name: 'Admin', changed_at: new Date().toISOString()
+    })
 
     setLoading(false)
-
-    if (error) {
-      console.error(error)
-      return alert("No se pudo reasignar el ORIGINAL.")
-    }
-
-    alert(`✅ ORIGINAL reasignado a ${targetAgent}.`)
     setDupModalOpen(false)
     fetchInbox()
   }
@@ -499,19 +590,14 @@ export function AdminLeadFactory() {
     if (!targetAgent) return alert("Elegí un destino arriba (Asignar a...).")
 
     setLoading(true)
-    const { error } = await supabase
-      .from("leads")
-      .update({ agent_name: targetAgent, last_update: new Date().toISOString() })
-      .eq("id", dupLead.id)
+    await supabase.from("leads").update({ agent_name: targetAgent, last_update: new Date().toISOString() }).eq("id", dupLead.id)
+    
+    // Historial
+    await supabase.from('lead_status_history').insert({
+        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: 'Admin', changed_at: new Date().toISOString()
+    })
 
     setLoading(false)
-
-    if (error) {
-      console.error(error)
-      return alert("No se pudo asignar el DUPLICADO.")
-    }
-
-    alert(`✅ DUPLICADO asignado a ${targetAgent}.`)
     setDupModalOpen(false)
     fetchInbox()
   }
@@ -521,19 +607,14 @@ export function AdminLeadFactory() {
     if (!origLead?.agent_name) return alert("El original no tiene dueño claro para copiar.")
 
     setLoading(true)
-    const { error } = await supabase
-      .from("leads")
-      .update({ agent_name: origLead.agent_name, last_update: new Date().toISOString() })
-      .eq("id", dupLead.id)
+    await supabase.from("leads").update({ agent_name: origLead.agent_name, last_update: new Date().toISOString() }).eq("id", dupLead.id)
+    
+    // Historial
+    await supabase.from('lead_status_history').insert({
+        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: 'Admin', changed_at: new Date().toISOString()
+    })
 
     setLoading(false)
-
-    if (error) {
-      console.error(error)
-      return alert("No se pudo asignar el duplicado al mismo dueño.")
-    }
-
-    alert(`✅ DUPLICADO enviado al mismo dueño del original (${origLead.agent_name}).`)
     setDupModalOpen(false)
     fetchInbox()
   }
@@ -591,7 +672,7 @@ export function AdminLeadFactory() {
             <span className="text-[10px] text-slate-500">
               {autoAssignEnabled ? (
                   // ✅ Muestra el usuario REAL
-                  <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500"/> Repartiendo a: {agentsList[nextAgentIdx]}</span>
+                  <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500"/> Repartiendo a: {agentsList[nextAgentIdx]?.name}</span>
               ) : "Los leads esperan en Bandeja."}
             </span>
           </div>
@@ -623,6 +704,39 @@ export function AdminLeadFactory() {
 
         {/* --- 1. BANDEJA DE ENTRADA --- */}
         <TabsContent value="inbox">
+          
+          {/* ✅ NUEVO: MONITOR DE DISTRIBUCIÓN DIARIA (Estilo Semáforo ACUMULATIVO) */}
+          {agentsList.length > 0 && (
+              <div className="mb-4 bg-white p-4 rounded-xl border shadow-sm animate-in fade-in slide-in-from-top-4">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <Activity className="h-4 w-4"/> Asignaciones Totales de Hoy
+                  </h4>
+                  <div className="flex flex-wrap gap-4">
+                      {agentsList.map((agent) => (
+                          <div key={agent.name} className="flex flex-col items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 min-w-[80px]">
+                              <div className="relative">
+                                <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                    <AvatarImage src={agent.avatar} />
+                                    <AvatarFallback>{agent.name[0]}</AvatarFallback>
+                                </Avatar>
+                                {/* Fueguito si tiene más de 5 leads asignados hoy */}
+                                {dailyAssignments[agent.name] > 5 && (
+                                    <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold px-1.5 rounded-full border border-white animate-pulse">🔥</div>
+                                )}
+                              </div>
+                              
+                              <div className="text-center">
+                                  <span className="text-[10px] font-bold text-slate-600 block truncate max-w-[80px]">{agent.name.split(' ')[0]}</span>
+                                  <div className={`mt-1 text-xs font-black px-2 py-0.5 rounded-full ${dailyAssignments[agent.name] > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
+                                      {dailyAssignments[agent.name] || 0}
+                                  </div>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
+
           <Card>
             <CardHeader className="pb-3 border-b bg-slate-50 flex flex-row justify-between items-center">
               <CardTitle>Leads Frescos (Sin Dueño)</CardTitle>
@@ -634,8 +748,8 @@ export function AdminLeadFactory() {
                   </SelectTrigger>
                   <SelectContent>
                     {agentsList.map((a) => (
-                      <SelectItem key={a} value={a}>
-                        {a}
+                      <SelectItem key={a.name} value={a.name}>
+                        {a.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -773,8 +887,8 @@ export function AdminLeadFactory() {
                     {/* ✅ SELECTOR DINÁMICO */}
                     <SelectContent>
                       {agentsList.map((a) => (
-                        <SelectItem key={a} value={a}>
-                          {a}
+                        <SelectItem key={a.name} value={a.name}>
+                          {a.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -827,9 +941,9 @@ export function AdminLeadFactory() {
                     </SelectTrigger>
                     {/* ✅ SELECTOR DINÁMICO (FILTRADO) */}
                     <SelectContent>
-                      {agentsList.filter((a) => a !== sourceAgent).map((a) => (
-                        <SelectItem key={a} value={a}>
-                          {a}
+                      {agentsList.filter((a) => a.name !== sourceAgent).map((a) => (
+                        <SelectItem key={a.name} value={a.name}>
+                          {a.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1024,8 +1138,8 @@ export function AdminLeadFactory() {
                     {/* ✅ SELECTOR DINÁMICO */}
                     <SelectContent>
                       {agentsList.map((a) => (
-                        <SelectItem key={a} value={a}>
-                          {a}
+                        <SelectItem key={a.name} value={a.name}>
+                          {a.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1144,7 +1258,7 @@ export function AdminLeadFactory() {
                         <Select value={targetAgent} onValueChange={setTargetAgent}>
                             <SelectTrigger className="bg-white"><SelectValue placeholder="Elegir Vendedor..." /></SelectTrigger>
                             <SelectContent>
-                                {agentsList.map((a) => (<SelectItem key={a} value={a}>{a}</SelectItem>))}
+                                {agentsList.map((a) => (<SelectItem key={a.name} value={a.name}>{a.name}</SelectItem>))}
                             </SelectContent>
                         </Select>
                         <Button size="icon" onClick={() => leadToTriage && handleAssignFromTriage(leadToTriage.id)} disabled={!targetAgent} className="bg-blue-600 hover:bg-blue-700 shadow-md shrink-0"><Zap className="h-4 w-4"/></Button>

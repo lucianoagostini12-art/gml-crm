@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Search, Download, Filter, Eye, Trash2, X, CalendarCheck, MessageSquare, StickyNote } from "lucide-react"
+import { Search, Download, Filter, Eye, Trash2, X, MessageSquare, StickyNote, RefreshCw, Database } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,17 +21,49 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Label } from "@/components/ui/label"
 
-export function OpsDatabase({ operations, onSelectOp }: any) {
+// Ignoramos la prop 'operations' para la data, pero mantenemos onSelectOp
+export function OpsDatabase({ onSelectOp }: any) {
     const supabase = createClient()
     const [searchTerm, setSearchTerm] = useState("")
     
-    // Estado local para manejo optimista
-    const [localOperations, setLocalOperations] = useState(operations)
+    // --- ESTADO DE DATOS PROPIO (GLOBAL) ---
+    // Ya no dependemos de lo que venga del padre, cargamos TODO aquí.
+    const [fullDatabase, setFullDatabase] = useState<any[]>([])
+    const [loading, setLoading] = useState(true)
 
-    // Sincronizar con props
+    // Sincronizar con Supabase directamente al montar
+    const fetchFullData = async () => {
+        setLoading(true)
+        // Traemos TODO sin excepción
+        const { data, error } = await supabase
+            .from('leads')
+            .select('*')
+            .order('created_at', { ascending: false })
+        
+        if (data) {
+            // Normalizamos datos si es necesario
+            setFullDatabase(data.map((l:any) => ({
+                id: l.id,
+                entryDate: l.created_at,
+                status: l.status ? l.status.toLowerCase() : 'desconocido',
+                clientName: l.client_name || l.name, // Ajuste por si usas campos distintos
+                dni: l.dni,
+                seller: l.agent_name,
+                prepaga: l.prepaga || l.quoted_prepaga || 'Sin Dato',
+                plan: l.plan || l.quoted_plan || 'General',
+                origen: l.source,
+                billing_period: l.billing_period,
+                chat: l.chat_history || [], // Asumiendo estructura
+                adminNotes: l.admin_notes || [],
+                history: l.history || []
+            })))
+        }
+        setLoading(false)
+    }
+
     useEffect(() => {
-        setLocalOperations(operations)
-    }, [operations])
+        fetchFullData()
+    }, [])
     
     // Estados para eliminación
     const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -41,25 +73,25 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
     // --- FILTROS AVANZADOS ---
     const [filterStatus, setFilterStatus] = useState("all")
     const [filterSeller, setFilterSeller] = useState("all")
-    const [filterPrepaga, setFilterPrepaga] = useState("all") // ✅ Nuevo
-    const [filterPlan, setFilterPlan] = useState("all")       // ✅ Nuevo
-    const [filterOrigin, setFilterOrigin] = useState("all")   // ✅ Nuevo
+    const [filterPrepaga, setFilterPrepaga] = useState("all") 
+    const [filterPlan, setFilterPlan] = useState("all")       
+    const [filterOrigin, setFilterOrigin] = useState("all")   
     
     const [filterDateStart, setFilterDateStart] = useState("")
     const [filterDateEnd, setFilterDateEnd] = useState("")
 
-    // --- GENERACIÓN DINÁMICA DE OPCIONES (Escanea los datos reales) ---
+    // --- GENERACIÓN DINÁMICA DE OPCIONES ---
     const { uniqueSellers, uniquePrepagas, uniquePlans, uniqueOrigins } = useMemo(() => {
         const sellers = new Set<string>()
         const prepagas = new Set<string>()
         const plans = new Set<string>()
         const origins = new Set<string>()
 
-        localOperations.forEach((op: any) => {
+        fullDatabase.forEach((op: any) => {
             if (op.seller) sellers.add(op.seller)
             if (op.prepaga) prepagas.add(op.prepaga)
             if (op.plan) plans.add(op.plan)
-            if (op.origen) origins.add(op.origen) // Asumiendo que viene como 'origen' o 'source'
+            if (op.origen) origins.add(op.origen.charAt(0).toUpperCase() + op.origen.slice(1))
         })
 
         return {
@@ -68,11 +100,14 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
             uniquePlans: Array.from(plans).sort(),
             uniqueOrigins: Array.from(origins).sort()
         }
-    }, [localOperations])
+    }, [fullDatabase])
 
-    // Función de colores (sin cambios visuales, solo lógica)
+    // Función de colores
     const getBadgeColor = (status: string) => {
-        switch (status) {
+        switch (status?.toLowerCase()) {
+            case 'nuevo': return "bg-slate-100 text-slate-600 border-slate-300" // Venta temprana
+            case 'contactado': return "bg-blue-50 text-blue-600 border-blue-200" // Venta temprana
+            case 'en gestion': return "bg-orange-50 text-orange-600 border-orange-200" // Venta temprana
             case 'ingresado': return "bg-slate-200 text-slate-800 border-slate-300"
             case 'precarga': return "bg-blue-100 text-blue-700 border-blue-200"
             case 'medicas': return "bg-purple-100 text-purple-700 border-purple-200"
@@ -80,7 +115,9 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
             case 'demoras': return "bg-indigo-100 text-indigo-700 border-indigo-200"
             case 'cumplidas': return "bg-emerald-100 text-emerald-700 border-emerald-200"
             case 'rechazado': return "bg-red-100 text-red-700 border-red-200"
-            default: return "bg-slate-100 text-slate-600"
+            case 'baja': return "bg-red-50 text-red-900 border-red-300"
+            case 'vendido': return "bg-cyan-100 text-cyan-800 border-cyan-200"
+            default: return "bg-slate-50 text-slate-500 border-slate-200"
         }
     }
 
@@ -91,69 +128,77 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         return date.toLocaleString('es-ES', { month: 'long', year: 'numeric' })
     }
 
+    // --- HELPER PARA STRING SEGURO ---
+    const safeStr = (val: any) => val ? String(val).toLowerCase() : ""
+
     // --- LÓGICA DE FILTRADO POTENCIADA ---
-    const filteredOps = localOperations.filter((op: any) => {
-        // 1. BUSCADOR PROFUNDO (Deep Search)
-        if (searchTerm) {
-            const searchLower = searchTerm.toLowerCase()
-            
-            // Construimos un string masivo con todo el contenido buscable
-            const chatContent = op.chat?.map((c: any) => c.text || c.message || "").join(" ") || ""
-            const notesContent = op.adminNotes?.map((n: any) => n.text || n.action || "").join(" ") || ""
-            const historyContent = op.history?.map((h: any) => h.action || "").join(" ") || ""
-            
-            const fullSearchString = `
-                ${op.clientName || ""} 
-                ${op.dni || ""} 
-                ${op.seller || ""} 
-                ${op.prepaga || ""} 
-                ${op.plan || ""} 
-                ${op.origen || ""} 
-                ${chatContent} 
-                ${notesContent} 
-                ${historyContent}
-            `.toLowerCase()
-            
-            if (!fullSearchString.includes(searchLower)) return false
-        }
+    const filteredOps = useMemo(() => {
+        return fullDatabase.filter((op: any) => {
+            // 1. FILTRO DE FECHAS (YYYY-MM-DD)
+            if (filterDateStart || filterDateEnd) {
+                if (!op.entryDate) return false
+                const opDateYMD = new Date(op.entryDate).toISOString().split('T')[0]
+                if (filterDateStart && opDateYMD < filterDateStart) return false
+                if (filterDateEnd && opDateYMD > filterDateEnd) return false
+            }
 
-        // 2. Filtros Select
-        if (filterStatus !== "all" && op.status !== filterStatus) return false
-        if (filterSeller !== "all" && op.seller !== filterSeller) return false
-        if (filterPrepaga !== "all" && op.prepaga !== filterPrepaga) return false
-        if (filterPlan !== "all" && op.plan !== filterPlan) return false
-        if (filterOrigin !== "all" && op.origen !== filterOrigin) return false
+            // 2. FILTROS SELECT
+            if (filterStatus !== "all" && op.status !== filterStatus) return false
+            if (filterSeller !== "all" && op.seller !== filterSeller) return false
+            if (filterPrepaga !== "all" && op.prepaga !== filterPrepaga) return false
+            if (filterPlan !== "all" && op.plan !== filterPlan) return false
+            if (filterOrigin !== "all") {
+                const opOrigin = safeStr(op.origen)
+                const filterOriginLower = safeStr(filterOrigin)
+                if (opOrigin !== filterOriginLower) return false
+            }
 
-        // 3. Filtro de Fechas (Robusto)
-        // Aseguramos que op.entryDate exista y sea un string YYYY-MM-DD válido para comparar
-        if (filterDateStart) {
-            if (!op.entryDate || op.entryDate < filterDateStart) return false
-        }
-        if (filterDateEnd) {
-            if (!op.entryDate || op.entryDate > filterDateEnd) return false
-        }
+            // 3. BUSCADOR GLOBAL
+            if (searchTerm) {
+                const searchLower = searchTerm.toLowerCase()
+                
+                const chatContent = op.chat?.map((c: any) => safeStr(c.text) + " " + safeStr(c.message)).join(" ") || ""
+                const notesContent = op.adminNotes?.map((n: any) => safeStr(n.text) + " " + safeStr(n.action)).join(" ") || ""
+                const historyContent = op.history?.map((h: any) => safeStr(h.action) + " " + safeStr(h.details)).join(" ") || ""
+                
+                const fullSearchString = `
+                    ${safeStr(op.id)}
+                    ${safeStr(op.clientName)} 
+                    ${safeStr(op.dni)} 
+                    ${safeStr(op.seller)} 
+                    ${safeStr(op.prepaga)} 
+                    ${safeStr(op.plan)} 
+                    ${safeStr(op.origen)} 
+                    ${safeStr(op.status)}
+                    ${chatContent} 
+                    ${notesContent} 
+                    ${historyContent}
+                `
+                
+                if (!fullSearchString.includes(searchLower)) return false
+            }
 
-        return true
-    })
+            return true
+        })
+    }, [fullDatabase, searchTerm, filterStatus, filterSeller, filterPrepaga, filterPlan, filterOrigin, filterDateStart, filterDateEnd])
 
     // --- EXPORTAR CSV ---
     const handleExportCSV = () => {
         if (filteredOps.length === 0) return alert("No hay datos para exportar")
 
-        const headers = ["ID", "Fecha Ingreso", "Mes Liquidado", "Cliente", "DNI", "Estado", "Prepaga", "Plan", "Vendedor", "Origen", "Admin", "Notas"]
+        const headers = ["ID", "Fecha Ingreso", "Mes Liquidado", "Cliente", "DNI", "Estado", "Prepaga", "Plan", "Vendedor", "Origen", "Notas"]
         
         const csvRows = filteredOps.map((op: any) => [
             op.id,
-            op.entryDate,
+            op.entryDate ? new Date(op.entryDate).toLocaleDateString() : "-",
             op.billing_period || "-", 
-            `"${op.clientName}"`,
-            op.dni,
+            `"${safeStr(op.clientName).toUpperCase()}"`,
+            op.dni || "-",
             op.status,
-            op.prepaga,
-            op.plan,
-            op.seller,
-            op.origen || "-", // Agregado Origen
-            op.operator || "Sin asignar",
+            op.prepaga || "-",
+            op.plan || "-",
+            op.seller || "-",
+            op.origen || "-", 
             `"${(op.history?.[0]?.action || "").replace(/"/g, '""')}"`
         ])
 
@@ -163,7 +208,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         const url = URL.createObjectURL(blob)
         const link = document.createElement("a")
         link.setAttribute("href", url)
-        link.setAttribute("download", `ventas_filtradas_${new Date().toISOString().split('T')[0]}.csv`)
+        link.setAttribute("download", `base_completa_${new Date().toISOString().split('T')[0]}.csv`)
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
@@ -177,13 +222,11 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
     const handleDelete = async () => {
         if (!deleteId) return
         setDeleting(true)
-        
         const { error } = await supabase.from('leads').delete().eq('id', deleteId)
-        
         if (error) {
             alert("Error al eliminar: " + error.message)
         } else {
-            setLocalOperations((prev: any[]) => prev.filter(op => op.id !== deleteId))
+            setFullDatabase((prev: any[]) => prev.filter(op => op.id !== deleteId))
             setIsDeleteOpen(false)
             setDeleteId(null)
         }
@@ -201,7 +244,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
         setSearchTerm('')
     }
 
-    const hasActiveFilters = filterStatus !== 'all' || filterSeller !== 'all' || filterPrepaga !== 'all' || filterPlan !== 'all' || filterOrigin !== 'all' || filterDateStart || filterDateEnd
+    const hasActiveFilters = filterStatus !== 'all' || filterSeller !== 'all' || filterPrepaga !== 'all' || filterPlan !== 'all' || filterOrigin !== 'all' || filterDateStart !== '' || filterDateEnd !== ''
 
     return (
         <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -209,12 +252,23 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
             <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-4">
                 <div className="flex justify-between items-center">
                     <div>
-                        <h2 className="text-2xl font-black text-slate-800">Base de Datos</h2>
-                        <p className="text-xs text-slate-500">Historial completo ({localOperations.length} registros). Filtrando {filteredOps.length} resultados.</p>
+                        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+                            Base de Datos Global
+                            <Database size={20} className="text-blue-500"/>
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-1">
+                            {loading ? "Cargando datos completos del sistema..." : `Acceso total: ${fullDatabase.length} registros.`}
+                            {!loading && filteredOps.length !== fullDatabase.length && <span className="ml-1 text-blue-600 font-bold">Filtrando {filteredOps.length} resultados.</span>}
+                        </p>
                     </div>
-                    <Button variant="outline" onClick={handleExportCSV} className="gap-2 text-xs font-bold border-slate-300 hover:bg-slate-100">
-                        <Download size={16}/> Exportar Lista
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={fetchFullData} disabled={loading} className="text-slate-500 hover:text-blue-600">
+                            <RefreshCw size={16} className={`${loading ? 'animate-spin' : ''} mr-2`}/> Actualizar
+                        </Button>
+                        <Button variant="outline" onClick={handleExportCSV} disabled={loading} className="gap-2 text-xs font-bold border-slate-300 hover:bg-slate-100">
+                            <Download size={16}/> Exportar
+                        </Button>
+                    </div>
                 </div>
 
                 <div className="flex gap-3">
@@ -225,16 +279,17 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                         </div>
                         <Input 
                             className="pl-10 bg-white border-slate-200 h-10 shadow-sm focus:bg-white transition-all font-medium focus:ring-2 focus:ring-blue-500/20" 
-                            placeholder="Buscar en todo: Cliente, DNI, Chat, Notas, Vendedor..." 
+                            placeholder="Buscar en TODO el sistema: ID, Cliente, Vendedor, Notas..." 
                             value={searchTerm}
                             onChange={e=>setSearchTerm(e.target.value)}
+                            disabled={loading}
                         />
                     </div>
 
                     {/* FILTROS AVANZADOS */}
                     <Popover>
                         <PopoverTrigger asChild>
-                            <Button variant="secondary" className={`border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-600 ${hasActiveFilters ? 'text-blue-600 border-blue-200 bg-blue-50' : ''}`}>
+                            <Button variant="secondary" disabled={loading} className={`border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-600 ${hasActiveFilters ? 'text-blue-600 border-blue-200 bg-blue-50' : ''}`}>
                                 <Filter size={16} className="mr-2"/> 
                                 {hasActiveFilters ? 'Filtros Activos' : 'Filtrar'}
                             </Button>
@@ -256,10 +311,14 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                         <Select value={filterStatus} onValueChange={setFilterStatus}>
                                             <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="all">Todos</SelectItem>
-                                                {['ingresado','precarga','medicas','legajo','demoras','cumplidas','rechazado'].map(s => (
-                                                    <SelectItem key={s} value={s} className="uppercase">{s}</SelectItem>
-                                                ))}
+                                                <SelectItem value="all">Todos (Ventas + Ops)</SelectItem>
+                                                <SelectItem value="nuevo">Nuevo</SelectItem>
+                                                <SelectItem value="contactado">Contactado</SelectItem>
+                                                <SelectItem value="en gestion">En Gestión</SelectItem>
+                                                <SelectItem value="ingresado">Ingresado</SelectItem>
+                                                <SelectItem value="cumplidas">Cumplidas</SelectItem>
+                                                <SelectItem value="rechazado">Rechazado</SelectItem>
+                                                <SelectItem value="baja">Baja</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -297,7 +356,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                     </div>
 
                                     <div className="space-y-1 col-span-2">
-                                        <Label className="text-[10px] text-slate-500 uppercase font-bold">Origen / Fuente</Label>
+                                        <Label className="text-[10px] text-slate-500 uppercase font-bold">Origen</Label>
                                         <Select value={filterOrigin} onValueChange={setFilterOrigin}>
                                             <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
                                             <SelectContent>
@@ -330,7 +389,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                             <TableRow>
                                 <TableHead className="w-[90px] font-bold text-slate-700 text-center">Acción</TableHead>
                                 <TableHead className="font-bold text-slate-700">Cliente</TableHead>
-                                <TableHead className="font-bold text-slate-700">DNI / CUIT</TableHead>
+                                <TableHead className="font-bold text-slate-700">DNI</TableHead>
                                 <TableHead className="font-bold text-slate-700">Detalle</TableHead>
                                 <TableHead className="font-bold text-slate-700">Origen</TableHead>
                                 <TableHead className="font-bold text-slate-700">Estado</TableHead>
@@ -340,7 +399,16 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredOps.map((op: any) => (
+                            {loading && (
+                                <TableRow>
+                                    <TableCell colSpan={9} className="text-center py-20 text-slate-400">
+                                        <RefreshCw className="animate-spin h-8 w-8 mx-auto mb-2 opacity-50"/>
+                                        Cargando base completa...
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                            
+                            {!loading && filteredOps.map((op: any) => (
                                 <TableRow key={op.id} className="hover:bg-slate-50 cursor-pointer transition-colors group border-b border-slate-100" onClick={() => onSelectOp(op)}>
                                     <TableCell className="flex gap-1 justify-center">
                                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50" title="Ver Detalle">
@@ -357,25 +425,24 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                         </Button>
                                     </TableCell>
                                     <TableCell>
-                                        <div className="font-bold text-slate-700 text-sm">{op.clientName}</div>
-                                        {/* Icono si tiene chat o notas */}
+                                        <div className="font-bold text-slate-700 text-sm">{op.clientName || "Sin Nombre"}</div>
                                         <div className="flex gap-1 mt-0.5">
                                             {op.chat?.length > 0 && <MessageSquare size={10} className="text-blue-400"/>}
                                             {op.adminNotes?.length > 0 && <StickyNote size={10} className="text-yellow-500"/>}
                                         </div>
                                     </TableCell>
-                                    <TableCell className="font-mono text-xs text-slate-500">{op.dni}</TableCell>
+                                    <TableCell className="font-mono text-xs text-slate-500">{op.dni || "-"}</TableCell>
                                     <TableCell>
                                         <Badge variant="outline" className="bg-white border-slate-200 text-slate-600 font-medium text-[10px]">
-                                            {op.prepaga} {op.plan !== 'General' ? op.plan : ''}
+                                            {op.prepaga || "S/D"} {op.plan && op.plan !== 'General' ? op.plan : ''}
                                         </Badge>
                                     </TableCell>
                                     <TableCell className="text-xs text-slate-500 truncate max-w-[100px]" title={op.origen}>
-                                        {op.origen}
+                                        {op.origen || "-"}
                                     </TableCell>
                                     <TableCell>
                                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${getBadgeColor(op.status)}`}>
-                                            {op.status}
+                                            {op.status || "Desconocido"}
                                         </span>
                                     </TableCell>
                                     
@@ -389,17 +456,22 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                                         )}
                                     </TableCell>
 
-                                    <TableCell className="text-xs text-slate-500 whitespace-nowrap">{op.entryDate}</TableCell>
-                                    <TableCell className="text-xs font-bold text-slate-600">{op.seller}</TableCell>
+                                    <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                                        {op.entryDate ? new Date(op.entryDate).toLocaleDateString() : "-"}
+                                    </TableCell>
+                                    <TableCell className="text-xs font-bold text-slate-600">{op.seller || "S/A"}</TableCell>
                                 </TableRow>
                             ))}
-                            {filteredOps.length === 0 && (
+                            {!loading && filteredOps.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={9} className="text-center py-12">
                                         <div className="flex flex-col items-center text-slate-400">
-                                            <Filter size={32} className="mb-2 opacity-50"/>
-                                            <p>No se encontraron resultados.</p>
-                                            <Button variant="link" onClick={clearFilters} className="text-blue-500">Limpiar Filtros</Button>
+                                            <Database size={32} className="mb-2 opacity-20"/>
+                                            <p className="font-medium text-slate-500">No se encontraron resultados.</p>
+                                            <p className="text-xs mb-4">Intenta ajustar los filtros o el término de búsqueda.</p>
+                                            <Button variant="outline" onClick={clearFilters} className="text-blue-600 border-blue-200 hover:bg-blue-50">
+                                                <RefreshCw size={14} className="mr-2"/> Limpiar Filtros
+                                            </Button>
                                         </div>
                                     </TableCell>
                                 </TableRow>
@@ -410,7 +482,7 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
             </div>
             
             <div className="p-2 border-t border-slate-100 bg-slate-50 text-[10px] text-center text-slate-400 font-medium">
-                Mostrando {filteredOps.length} registros de {localOperations.length} totales.
+                {loading ? "Sincronizando..." : `Visualizando ${filteredOps.length} registros de toda la base.`}
             </div>
 
             {/* MODAL BORRAR */}
@@ -418,10 +490,12 @@ export function OpsDatabase({ operations, onSelectOp }: any) {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle className="text-red-600 flex items-center gap-2">
-                            <Trash2 size={20}/> Confirmar Eliminación
+                            <Trash2 size={20}/> Confirmar Eliminación Global
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            ¿Estás seguro? Esta acción eliminará permanentemente la venta y todo su historial.
+                            Estás a punto de borrar un registro de la base de datos global.
+                            <br/>Se eliminará el historial, chat y métricas asociadas.
+                            <br/>Esta acción no se puede deshacer.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

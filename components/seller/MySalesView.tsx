@@ -35,6 +35,7 @@ import {
   UserPlus,
   ArrowRightLeft,
   Filter,
+  Users, // <--- Único import agregado
 } from "lucide-react"
 
 // ✅ Storage config
@@ -552,6 +553,12 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
 
                       <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
                         Plan: <span className="font-bold text-slate-700">{sale.plan}</span>
+                      </span>
+
+                      {/* ✅ AGREGADO: CÁPITAS */}
+                      <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3 flex items-center gap-1">
+                         <Users size={12} className="text-slate-400"/>
+                         <span className="font-bold text-slate-700">{sale.capitas || 1}</span>
                       </span>
 
                       {sale.sub_state && (

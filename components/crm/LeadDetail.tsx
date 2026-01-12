@@ -31,6 +31,7 @@ export interface Lead {
   full_price?: number
   price?: number
   intent?: 'high' | 'medium' | 'low'
+  chat?: any[] // ✅ Agregado para leer el historial del webhook
   [key: string]: any
 }
 
@@ -368,7 +369,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                 </div>
               </div>
 
-              {/* ✅ AQUI AGREGAMOS EL BLOQUE DE WATI (SOLO LECTURA) */}
+              {/* ✅ AQUI ESTÁ EL CAMBIO PRINCIPAL: LEE lead.chat del Webhook */}
               <Separator className="my-4"/>
               
               <div className="space-y-3">
@@ -380,24 +381,25 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   
                   <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
                       <div className="h-48 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
-                          {messages.length === 0 ? (
+                          {lead.chat && Array.isArray(lead.chat) && lead.chat.length > 0 ? (
+                              lead.chat.map((m: any, i: number) => (
+                                  <div key={i} className={`flex flex-col ${m.isMe || m.user === 'Bot' ? "items-end" : "items-start"}`}>
+                                      <div className={`px-3 py-2 rounded-xl max-w-[90%] text-xs shadow-sm border ${
+                                        m.isMe || m.user === 'Bot' 
+                                        ? "bg-blue-100 text-blue-900 border-blue-200 rounded-tr-none" 
+                                        : "bg-white text-slate-700 border-slate-200 rounded-tl-none"
+                                      }`}>
+                                          {m.text}
+                                      </div>
+                                      <span className="text-[9px] text-slate-400 mt-1 px-1">
+                                        {m.time || (m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '')}
+                                      </span>
+                                  </div>
+                              ))
+                          ) : (
                               <div className="h-full flex flex-col items-center justify-center text-slate-300">
                                   <p className="text-xs italic">Sin historial de chat</p>
                               </div>
-                          ) : (
-                              messages.map((m, i) => (
-                                  <div key={i} className={`flex flex-col ${m.sender !== 'supervisión' ? "items-start" : "hidden"}`}> 
-                                      {/* Solo mostramos mensajes que NO sean de supervisión para no duplicar */}
-                                      {m.sender !== 'supervisión' && (
-                                        <>
-                                          <div className={`px-3 py-2 rounded-xl max-w-[90%] text-xs shadow-sm border bg-white text-slate-700 border-slate-200 rounded-tl-none`}>
-                                              {m.text}
-                                          </div>
-                                          <span className="text-[9px] text-slate-400 mt-1 px-1">{m.sender}</span>
-                                        </>
-                                      )}
-                                  </div>
-                              ))
                           )}
                       </div>
                   </div>
@@ -411,9 +413,14 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   {lead.notes?.split("|||").reverse().map((notaStr: string, i: number) => {
                     const parts = notaStr.split("|")
                     const isFormatted = parts[0] === "SEP_NOTE"
-                    const fecha = isFormatted ? parts[1] : ""
-                    const asesora = isFormatted ? parts[2] : ""
-                    const texto = isFormatted ? parts[3] : notaStr
+                    
+                    // ⚠️ FILTRO DE LIMPIEZA: Si la nota no tiene formato SEP_NOTE, asumimos que es el mensaje crudo del webhook y lo ocultamos
+                    // para que no salga duplicado (ya que se muestra arriba en el Chat)
+                    if (!isFormatted) return null
+
+                    const fecha = parts[1]
+                    const asesora = parts[2]
+                    const texto = parts[3]
                     return (
                       <div key={i} className="flex flex-col gap-1 animate-in fade-in slide-in-from-top-1">
                         <div className="bg-slate-50 p-4 rounded-2xl rounded-tl-none border border-slate-100 shadow-sm relative">

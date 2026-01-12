@@ -154,6 +154,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     
     // Comunicado Urgente
     const [urgentMessage, setUrgentMessage] = useState<string | null>(null)
+    const [announcementId, setAnnouncementId] = useState<number | null>(null) // ✅ Nuevo ID para seguimiento
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
@@ -174,14 +175,44 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (data) setLeads(mapLeads(data))
     }
 
+    // ✅ NUEVA LÓGICA DE COMUNICADOS: Escucha la tabla central 'announcements'
     const checkUrgentMessage = async () => {
-        const { data } = await supabase.from('profiles').select('urgent_message').eq('full_name', CURRENT_USER).single()
-        if (data?.urgent_message) setUrgentMessage(data.urgent_message)
+        // Buscamos el anuncio bloqueante más reciente
+        const { data } = await supabase
+            .from('announcements')
+            .select('*')
+            .eq('is_blocking', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single()
+        
+        if (data) {
+            // Verificamos si ya fue leído por este usuario
+            const { data: read } = await supabase
+                .from('announcement_reads')
+                .select('*')
+                .eq('announcement_id', data.id)
+                .eq('user_name', CURRENT_USER)
+                .single()
+
+            if (!read) {
+                setUrgentMessage(data.message)
+                setAnnouncementId(data.id)
+            }
+        }
     }
 
     const dismissUrgentMessage = async () => {
-        await supabase.from('profiles').update({ urgent_message: null }).eq('full_name', CURRENT_USER)
+        if (announcementId) {
+            // Registramos la lectura
+            await supabase.from('announcement_reads').insert({
+                announcement_id: announcementId,
+                user_name: CURRENT_USER,
+                read_at: new Date().toISOString()
+            })
+        }
         setUrgentMessage(null)
+        setAnnouncementId(null)
     }
 
     const customCollisionDetection = (args: any) => {
@@ -259,11 +290,14 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             })
             .subscribe()
 
-        // Canal de Comunicados (Profiles)
-        const profileChannel = supabase.channel('kanban_profile_updates')
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `full_name=eq.${CURRENT_USER}` }, (payload) => {
+        // ✅ NUEVO CANAL: Escucha la tabla de Anuncios Globales
+        const announcementsChannel = supabase.channel('kanban_announcements')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, (payload) => {
                 const newData = payload.new as any
-                if(newData.urgent_message) setUrgentMessage(newData.urgent_message)
+                if(newData.is_blocking) {
+                    setUrgentMessage(newData.message)
+                    setAnnouncementId(newData.id)
+                }
             })
             .subscribe()
 
@@ -275,7 +309,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         return () => { 
             supabase.removeChannel(channel);
             supabase.removeChannel(chatChannel);
-            supabase.removeChannel(profileChannel);
+            supabase.removeChannel(announcementsChannel);
             stopAudio();
         }
     }, [CURRENT_USER])
@@ -384,8 +418,20 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         const isTryingToGoBack = colIdx(overCol) < colIdx(activeLead.status);
         if (['cotizacion', 'documentacion'].includes(activeLead.status) && isTryingToGoBack) return;
         if (overCol && overCol !== activeLead.status && ACTIVE_COLUMNS.some(c => c.id === overCol)) {
-            if (overCol === 'cotizacion') { setLeadProcessingId(active.id as string); setIsQuoteDialogOpen(true); return }
+            
+            // ✅ LÓGICA INTELIGENTE DE COTIZACIÓN (FIX)
+            if (overCol === 'cotizacion') { 
+                const hasQuote = (activeLead.quoted_price && activeLead.quoted_price > 0) || activeLead.quoted_plan
+                
+                if (!hasQuote) {
+                    setLeadProcessingId(active.id as string); 
+                    setIsQuoteDialogOpen(true); 
+                    return 
+                }
+            }
+
             if (overCol === 'documentacion') { setLeadProcessingId(active.id as string); setIsDocConfirmOpen(true); return }
+            
             setLeads(prev => prev.map(l => l.id === active.id ? { ...l, status: overCol } : l))
             await supabase.from('leads').update({ status: overCol.toLowerCase(), last_update: new Date().toISOString() }).eq('id', active.id)
             logHistory(active.id as string, activeLead.status, overCol)
@@ -427,7 +473,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </DragOverlay>
             </DndContext>
             
-            {/* ... DIALOGS (Lost, Won, Quote, Doc) SIN CAMBIOS ... */}
+            {/* ... DIALOGS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
             <WonLeadDialog open={isWonDialogOpen} onOpenChange={setIsWonDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if (!leadId) return; const { files, ...leadData } = data; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.filter(l => l.id !== leadId)); setIsWonDialogOpen(false); const payload: any = { status: 'vendido', last_update: new Date().toISOString(), quoted_price: leadData.price ? Number(leadData.price) : 0, quoted_prepaga: leadData.prepaga || null, quoted_plan: leadData.plan || null, notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes }; if (leadData.afiliado_number) payload.afiliado_number = leadData.afiliado_number; if (leadData.cuit) payload.cuit = leadData.cuit; if (leadData.aporte) payload.aporte = leadData.aporte; if (leadData.derivacion_aportes) payload.derivacion_aportes = leadData.derivacion_aportes; if (leadData.cant_capitas) payload.cant_capitas = Number(leadData.cant_capitas); const { error } = await supabase.from('leads').update(payload).eq('id', leadId); if (error) { console.error("Error confirmando venta:", error); alert("Hubo un error al guardar. Verificá los campos numéricos."); } else if (oldLead) { logHistory(leadId, oldLead.status, 'vendido') } }} />
             <QuotationDialog open={isQuoteDialogOpen} onOpenChange={setIsQuoteDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l)); setIsQuoteDialogOpen(false); await supabase.from('leads').update({ status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion') }} onCancel={() => setIsQuoteDialogOpen(false)} />
@@ -517,7 +563,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </DialogContent>
             </Dialog>
 
-            {/* ✅ 3. COMUNICADO URGENTE (BLOQUEANTE) */}
+            {/* ✅ 3. COMUNICADO URGENTE (BLOQUEANTE) - AHORA LEÍDO DE ANNOUNCEMENTS */}
             <Dialog open={!!urgentMessage} onOpenChange={() => {}}>
                 <DialogContent className="bg-red-600 border-none text-white max-w-lg shadow-[0_0_100px_rgba(220,38,38,0.5)]" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
                     <div className="flex flex-col items-center text-center p-6 gap-4">

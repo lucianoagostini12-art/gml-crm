@@ -15,7 +15,7 @@ import {
   HeartPulse, FileBadge, Layers, Lightbulb, ClipboardList, XCircle, Flame,
   User, Timer, DollarSign, Crosshair, HelpCircle, CalendarDays, Download,
   AlertTriangle, TrendingUp, BrainCircuit, Target, RefreshCw, Zap, Siren,
-  ArrowUp, ArrowDown
+  ArrowUp, ArrowDown, Users
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -39,6 +39,10 @@ type Lead = {
   quoted_price?: number | null
   source?: string | null
   loss_reason?: string | null
+  sold_at?: string | null
+  fecha_ingreso?: string | null
+  activation_date?: string | null
+  fecha_alta?: string | null
 }
 
 type StatusEvent = {
@@ -54,13 +58,13 @@ type AgentPulse = {
     name: string
     avatar: string
     lastSaleDate: Date | null
-    daysSinceSale: number
-    status: 'fire' | 'warning' | 'cold' | 'frozen'
+    businessDays: number // Días hábiles sin vender
+    status: 'green' | 'yellow' | 'red' | 'gray'
 }
 
 const AR_TZ = "America/Argentina/Buenos_Aires"
 
-// Horas que tu UI muestra en el heatmap
+// Horas para el heatmap
 const HEAT_HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const
 const HEAT_KEYS = ["h09", "h10", "h11", "h12", "h13", "h14", "h15", "h16", "h17", "h18"] as const
 
@@ -69,7 +73,6 @@ const DAY_LABELS = [
   { key: "Jueves", label: "Jue" }, { key: "Viernes", label: "Vie" }, { key: "Sábado", label: "Sáb" }
 ]
 
-// Normaliza statuses para evitar quilombos por mayúsculas/acentos
 const norm = (v: any) => String(v ?? "").trim().toLowerCase()
 
 function toISODate(d: Date) {
@@ -81,7 +84,28 @@ function safeDate(ts?: string | null) {
   return d && !Number.isNaN(d.getTime()) ? d : null
 }
 
-// Devuelve { weekday (es), hour } usando TZ Argentina
+// ✅ HELPER: FECHA DE VENTA (Prioridad: Fecha Ingreso > Sold At > Created At)
+// Esto asegura que tome la fecha real de la venta, no la última edición.
+const salesDateOf = (l: any) => l.fecha_ingreso || l.sold_at || l.activation_date || l.fecha_alta || l.created_at
+
+// ✅ HELPER: DÍAS HÁBILES (Sin Sábados ni Domingos)
+function getBusinessDaysDiff(startDate: Date, endDate: Date) {
+    if (startDate >= endDate) return 0;
+
+    let count = 0;
+    const curDate = new Date(startDate.getTime());
+    curDate.setHours(0,0,0,0);
+    const end = new Date(endDate.getTime());
+    end.setHours(0,0,0,0);
+
+    while (curDate < end) {
+        curDate.setDate(curDate.getDate() + 1);
+        const dayOfWeek = curDate.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) count++; // 0 = Domingo, 6 = Sábado
+    }
+    return count;
+}
+
 function getARWeekdayHour(iso: string): { weekday: string; hour: number } {
   const weekday = new Intl.DateTimeFormat("es-AR", { timeZone: AR_TZ, weekday: "long" }).format(new Date(iso))
   const hourStr = new Intl.DateTimeFormat("es-AR", { timeZone: AR_TZ, hour: "2-digit", hour12: false }).format(new Date(iso))
@@ -107,8 +131,8 @@ function speedStatus(avgMin: number) {
 }
 
 const CLOSED_STATUSES = new Set(["vendido", "perdido", "cumplidas", "rechazado", "rechazados"])
-// Estados positivos para ventas
-const SALE_STATUSES = ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'vendido']
+// ✅ ESTADOS QUE CUENTAN COMO VENTA (Comercial + Admin)
+const SALE_STATUSES = ["vendido", "precarga", "medicas", "legajo", "demoras", "cumplidas", "finalizada", "ingresado"]
 
 export function AdminMetrics() {
   const supabase = createClient()
@@ -127,15 +151,20 @@ export function AdminMetrics() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  // 1. CARGA INICIAL DE AGENTES REALES
+  // 1. CARGA DE AGENTES (Vendedores y Gestores)
   useEffect(() => {
     const loadAgents = async () => {
-        const { data } = await supabase.from('profiles').select('*').or('role.eq.seller,role.eq.gestor')
+        const { data } = await supabase.from('profiles').select('*')
         if (data) {
-            setAgentsList(data.map(p => ({
+            const sellers = data.filter((p: any) => {
+                const r = (p.role || "").toLowerCase()
+                return r === 'seller' || r === 'gestor' || r === 'vendedor'
+            })
+            
+            setAgentsList(sellers.map(p => ({
                 name: p.full_name || p.email,
                 avatar: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
-            })).sort((a,b) => a.name.localeCompare(b.name)))
+            })).sort((a: any, b: any) => a.name.localeCompare(b.name)))
         }
     }
     loadAgents()
@@ -170,7 +199,6 @@ export function AdminMetrics() {
     return "bg-slate-100 text-slate-400"
   }
 
-  // Helper para Tooltips fáciles
   const InfoTooltip = ({ text }: { text: string }) => (
     <Popover>
         <PopoverTrigger><HelpCircle className="h-3.5 w-3.5 text-slate-400 cursor-help hover:text-blue-500 transition-colors ml-1" /></PopoverTrigger>
@@ -181,15 +209,14 @@ export function AdminMetrics() {
   const fetchData = async () => {
     setLoading(true)
 
-    // A. FECHAS COMPARATIVAS (Mes Actual vs Mes Anterior)
+    // A. FECHAS
     const currentStart = new Date(`${dateStart}T00:00:00`)
     const currentEnd = new Date(`${dateEnd}T23:59:59`)
-    
     const diffTime = Math.abs(currentEnd.getTime() - currentStart.getTime());
     const prevEnd = new Date(currentStart.getTime() - 86400000); 
     const prevStart = new Date(prevEnd.getTime() - diffTime);
 
-    // B. QUERIES EN PARALELO
+    // B. QUERIES
     let leadsQuery = supabase.from("leads").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
     let prevLeadsQuery = supabase.from("leads").select("status, price, quoted_price").gte("created_at", prevStart.toISOString()).lte("created_at", prevEnd.toISOString())
     let historyQuery = supabase.from("lead_status_history").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
@@ -204,38 +231,59 @@ export function AdminMetrics() {
 
     const leads = (resLeads.data || []) as Lead[]
     const prevLeads = (resPrev.data || []) as any[]
-    const events = (resHistory.data || []) as StatusEvent[] // ✅ AQUI ESTABA EL ERROR: Variable renombrada correctamente a 'events'
+    const events = (resHistory.data || []) as StatusEvent[]
 
-    // --- CÁLCULO DE SEMÁFORO (TEAM PULSE) ---
-    // ✅ CORRECCION: Se calcula SIEMPRE, independientemente del filtro 'agent'
+    // --- 🚦 CÁLCULO DE SEMÁFORO (TEAM PULSE) ---
+    // 1. Traemos TODAS las ventas (sin filtro de fecha) para ver la última real
+    //    Seleccionamos fecha_ingreso y sold_at explícitamente
     const { data: allSales } = await supabase
         .from('leads')
-        .select('agent_name, created_at, status')
+        .select('agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at') 
         .in('status', SALE_STATUSES)
-        .order('created_at', { ascending: false })
-    
-    const pulseMap: AgentPulse[] = agentsList.map(a => {
-        const lastSale = allSales?.find((s:any) => s.agent_name === a.name)
-        const lastDate = lastSale ? new Date(lastSale.created_at) : null
         
-        let days = 999
-        if (lastDate) {
-            const diffTime = Math.abs(new Date().getTime() - lastDate.getTime())
-            days = Math.floor(diffTime / (1000 * 60 * 60 * 24)) 
-        }
+    if (agentsList.length > 0) {
+        const pulseMap: AgentPulse[] = agentsList.map(a => {
+            // Filtrar ventas de este agente
+            const mySales = (allSales || []).filter((s:any) => norm(s.agent_name) === norm(a.name))
+            
+            let lastDate: Date | null = null
+            
+            if (mySales.length > 0) {
+                // Ordenar por FECHA REAL DE VENTA (Priorizando fecha_ingreso) descendente
+                mySales.sort((x:any, y:any) => {
+                    const dx = new Date(salesDateOf(x)).getTime()
+                    const dy = new Date(salesDateOf(y)).getTime()
+                    return dy - dx
+                })
+                const latestSale = mySales[0]
+                const dRaw = salesDateOf(latestSale)
+                if (dRaw) lastDate = new Date(dRaw)
+            }
+            
+            let businessDays = 999
+            if (lastDate) {
+                const now = new Date(); 
+                businessDays = getBusinessDaysDiff(lastDate, now)
+            }
 
-        let status: AgentPulse['status'] = 'frozen'
-        if (days <= 1) status = 'fire'      
-        else if (days <= 3) status = 'warning' 
-        else if (days <= 7) status = 'cold'    
-        
-        return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, daysSinceSale: days, status }
-    })
-    setTeamPulse(pulseMap.sort((a,b) => a.daysSinceSale - b.daysSinceSale))
-    
+            let status: AgentPulse['status'] = 'gray'
+            if (businessDays <= 1) status = 'green'      // Hoy o Ayer (Hábil)
+            else if (businessDays === 2) status = 'yellow' // 2 Días hábiles
+            else if (businessDays >= 3) status = 'red'     // 3 o más
 
-    // --- CÁLCULOS REALES ---
-    const counts: Record<string, number> = { nuevo: 0, contactado: 0, cotizacion: 0, ingresado: 0, precarga: 0, medicas: 0, legajo: 0, demoras: 0, cumplidas: 0, rechazado: 0, documentacion: 0 }
+            if (businessDays === 999) status = 'gray'
+
+            return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, businessDays, status }
+        })
+        setTeamPulse(pulseMap.sort((a,b) => a.businessDays - b.businessDays))
+    }
+
+    // --- CÁLCULOS MÉTRICAS ---
+    const counts: Record<string, number> = { 
+        nuevo: 0, contactado: 0, cotizacion: 0, ingresado: 0, 
+        precarga: 0, medicas: 0, legajo: 0, demoras: 0, 
+        cumplidas: 0, rechazado: 0, documentacion: 0, vendido: 0 
+    }
     let totalRevenue = 0
 
     leads.forEach((l) => {
@@ -246,7 +294,6 @@ export function AdminMetrics() {
       if (counts[s] !== undefined) counts[s]++
       else if (SALE_STATUSES.includes(s)) counts['ingresado']++ 
 
-      // Sumar al total si es venta o cotización
       if (SALE_STATUSES.includes(s) || s === 'cotizacion') {
         totalRevenue += Number(l.price) || Number(l.quoted_price) || 0
       }
@@ -256,7 +303,6 @@ export function AdminMetrics() {
     const activeLeads = counts.contactado + counts.cotizacion + counts.documentacion
     const salesCount = SALE_STATUSES.reduce((acc, s) => acc + (counts[s] || 0), 0)
 
-    // --- COMPARATIVAS (TRENDS) ---
     const prevSalesCount = prevLeads.filter((l:any) => SALE_STATUSES.includes(norm(l.status))).length
     const prevRevenue = prevLeads.reduce((acc: number, l:any) => {
         return acc + (SALE_STATUSES.includes(norm(l.status)) || norm(l.status) === 'cotizacion' ? (l.price || l.quoted_price || 0) : 0)
@@ -274,26 +320,21 @@ export function AdminMetrics() {
     const rpl = totalLeads > 0 ? Math.round(totalRevenue / totalLeads).toString() : "0"
     const strikeRate = totalLeads > 0 ? ((salesCount / totalLeads) * 100).toFixed(1) : "0.0"
 
-    // --- VELOCIDAD REAL ---
+    // --- VELOCIDAD ---
     const firstEventByLead = new Map<string, string>()
-    // ✅ AQUI SE USABA 'EVENTS' QUE ANTES SE LLAMABA 'HISTORY'. AHORA ESTA DEFINIDO.
     for (const ev of events) {
       if (!firstEventByLead.has(ev.lead_id)) firstEventByLead.set(ev.lead_id, ev.changed_at)
     }
 
-    let speedSum = 0
-    let speedSample = 0
-
+    let speedSum = 0; let speedSample = 0
     leads.forEach((l) => {
       const created = safeDate(l.created_at)
       if (!created) return
       const fc = safeDate(l.first_contact_at) || safeDate(firstEventByLead.get(l.id) || null)
       if (!fc) return
       const diffMin = Math.max(0, Math.round((fc.getTime() - created.getTime()) / 60000))
-      speedSum += diffMin
-      speedSample++
+      speedSum += diffMin; speedSample++
     })
-
     const speedValue = speedSample > 0 ? Math.round(speedSum / speedSample) : 0
     const speedSt = speedStatus(speedValue)
 
@@ -307,14 +348,12 @@ export function AdminMetrics() {
       const diffDays = Math.ceil(Math.abs(now.getTime() - lastUp.getTime()) / (1000 * 60 * 60 * 24))
       return diffDays > 2
     }).length
-
     const stagnantPercent = totalLeads > 0 ? Math.floor((stagnantCount / totalLeads) * 100) : 0
 
-    // --- HEATMAP REAL ---
+    // --- HEATMAP ---
     const heatMap = heatMapBase.map((row) => ({ ...row }))
     const heatMapIndex = new Map<string, any>()
     heatMap.forEach((r) => heatMapIndex.set(r.day, r))
-
     for (const ev of events) {
       const { weekday, hour } = getARWeekdayHour(ev.changed_at)
       const label = mapWeekdayToLabel(weekday)
@@ -335,7 +374,6 @@ export function AdminMetrics() {
       return { day: `Día ${i + 1}`, iso, value: 0 }
     })
     const dailyMap = new Map(dailyBuckets.map((b) => [b.iso, b]))
-
     for (const ev of events) {
       const iso = String(ev.changed_at).slice(0, 10)
       const bucket = dailyMap.get(iso)
@@ -346,7 +384,6 @@ export function AdminMetrics() {
     // --- RADAR & COACH ---
     const performanceFactor = salesCount > 5 ? 1 : 0.5
     const insistenciaScore = Math.min(100, Math.round((events.length / (totalLeads || 1)) * 20))
-
     const radarData = [
       { subject: "Velocidad", A: speedValue === 0 ? 0 : Math.max(0, Math.min(100, Math.round(100 - (speedValue / 60) * 100))), fullMark: 100 },
       { subject: "Cierre", A: Math.min(100, Number(strikeRate) * 2), fullMark: 100 },
@@ -354,13 +391,11 @@ export function AdminMetrics() {
       { subject: "Ticket", A: totalRevenue > 500000 ? 90 : totalRevenue > 0 ? 60 : 0, fullMark: 100 },
       { subject: "Volumen", A: Math.min(100, totalLeads / 2), fullMark: 100 },
     ]
-
     let coachAdvice = "Ritmo constante. Seguir monitoreando métricas de cierre."
     if (Number(strikeRate) > 15) coachAdvice = "💎 EXCELENTE CIERRE: El equipo está convirtiendo muy bien. Priorizar calidad sobre cantidad."
     if (stagnantPercent > 30) coachAdvice = "⚠️ ALERTA STOCK: Muchos leads dormidos (>48hs). Recomendación: Día de limpieza de base."
     if (totalLeads > 0 && salesCount === 0) coachAdvice = "📉 FOCO: Hay leads pero no hay cierres. Revisar guión, calidad de base y seguimiento."
 
-    // --- FUNNEL ---
     const funnelData = [
       { name: "Total Datos", value: totalLeads, fill: "#94a3b8" },
       { name: "Contactados", value: counts.contactado + counts.cotizacion + salesCount, fill: "#3b82f6" },
@@ -368,18 +403,16 @@ export function AdminMetrics() {
       { name: "Cierres", value: salesCount, fill: "#10b981" },
     ]
 
-    // --- AUDIT STEPS ---
     const auditSteps = [
       { label: "INGRESADO", count: counts.ingresado, icon: FolderInput, color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-200" },
       { label: "PRECARGA", count: counts.precarga, icon: FileText, color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
       { label: "MÉDICAS", count: counts.medicas, icon: HeartPulse, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200" },
       { label: "LEGAJO", count: counts.legajo, icon: FileBadge, color: "text-yellow-600", bg: "bg-yellow-50", border: "border-yellow-200" },
       { label: "DEMORAS", count: counts.demoras, icon: AlertTriangle, color: "text-indigo-600", bg: "bg-indigo-50", border: "border-indigo-200" },
-      { label: "CUMPLIDAS", count: counts.cumplidas, icon: CheckCircle2, color: "text-white", bg: "bg-green-500 shadow-md transform scale-105", border: "border-green-600" },
+      { label: "CUMPLIDAS", count: counts.cumplidas + counts.vendido, icon: CheckCircle2, color: "text-white", bg: "bg-green-500 shadow-md transform scale-105", border: "border-green-600" },
       { label: "RECHAZADOS", count: counts.rechazado, icon: AlertOctagon, color: "text-white", bg: "bg-red-500 shadow-md", border: "border-red-600" },
     ]
 
-    // --- CONVERSION SOURCE ---
     const sourceAgg = new Map<string, { datos: number; ventas: number }>()
     leads.forEach((l) => {
       const src = String(l.source ?? "Desconocido").trim()
@@ -387,44 +420,31 @@ export function AdminMetrics() {
       sourceAgg.get(src)!.datos += 1
       if (SALE_STATUSES.includes(norm(l.status))) sourceAgg.get(src)!.ventas += 1
     })
-
-    const conversionBySource = Array.from(sourceAgg.entries())
-      .sort((a, b) => b[1].datos - a[1].datos)
-      .slice(0, 8)
-      .map(([name, v], idx) => {
-        const tasa = v.datos > 0 ? Math.round((v.ventas / v.datos) * 100) : 0
-        const palette = ["#f59e0b", "#8b5cf6", "#3b82f6", "#10b981", "#ef4444", "#64748b", "#eab308", "#22c55e"]
-        return { name, datos: v.datos, ventas: v.ventas, tasa, color: palette[idx % palette.length] }
-      })
-
-    // --- LOSS REASONS ---
-    const lossAgg = new Map<string, number>()
-    leads.forEach((l) => {
-      const lr = String(l.loss_reason ?? "").trim()
-      if (!lr) return
-      if (!["perdido", "rechazado"].includes(norm(l.status))) return
-      lossAgg.set(lr, (lossAgg.get(lr) || 0) + 1)
+    const conversionBySource = Array.from(sourceAgg.entries()).sort((a, b) => b[1].datos - a[1].datos).slice(0, 8).map(([name, v], idx) => {
+      const tasa = v.datos > 0 ? Math.round((v.ventas / v.datos) * 100) : 0
+      const palette = ["#f59e0b", "#8b5cf6", "#3b82f6", "#10b981", "#ef4444", "#64748b", "#eab308", "#22c55e"]
+      return { name, datos: v.datos, ventas: v.ventas, tasa, color: palette[idx % palette.length] }
     })
 
-    const lossReasons = Array.from(lossAgg.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([name, value], idx) => {
-        const palette = ["#ef4444", "#f97316", "#eab308", "#64748b", "#8b5cf6", "#3b82f6", "#10b981", "#0ea5e9"]
-        return { name, value, fill: palette[idx % palette.length] }
-      })
+    const lossAgg = new Map<string, number>()
+    leads.forEach((l) => {
+      const lr = String(l.loss_reason ?? "").trim(); if (!lr) return; if (!["perdido", "rechazado"].includes(norm(l.status))) return
+      lossAgg.set(lr, (lossAgg.get(lr) || 0) + 1)
+    })
+    const lossReasons = Array.from(lossAgg.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value], idx) => {
+      const palette = ["#ef4444", "#f97316", "#eab308", "#64748b", "#8b5cf6", "#3b82f6", "#10b981", "#0ea5e9"]
+      return { name, value, fill: palette[idx % palette.length] }
+    })
 
-    // --- PACING ---
     const monthDays = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
     const timePct = Math.round((today.getDate() / monthDays) * 100)
     const goal = Math.ceil(salesCount * 1.5) || 10
     const goalPct = goal > 0 ? Math.round((salesCount / goal) * 100) : 0
     const pacingStatus = goalPct >= timePct ? "ontrack" : "behind"
 
-    // ✅ SET METRICS (ESTRUCTURA CORREGIDA)
     setMetrics({
-      sales: { count: salesCount, trend: salesTrend },     // Agrupado
-      revenue: { total: totalRevenue, trend: revTrend },   // Agrupado
+      sales: { count: salesCount, trend: salesTrend },     
+      revenue: { total: totalRevenue, trend: revTrend },   
       inventory: { newLeads: counts.nuevo, activeLeads, sales: salesCount, goal },
       killerMetrics: { speed: { value: speedValue, status: speedSt, sample: speedSample }, rpl, strikeRate },
       advanced: { radar: radarData, coach: coachAdvice, daily },
@@ -440,20 +460,17 @@ export function AdminMetrics() {
     setLoading(false)
   }
 
+  // ✅ CORRECCIÓN FINAL: 'agentsList' en dependencias asegura que el semáforo se calcule
   useEffect(() => {
     fetchData()
-  }, [agent, dateStart, dateEnd])
+    const channel = supabase.channel('admin_metrics_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchData()).subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [agent, dateStart, dateEnd, agentsList])
 
-  const handleExport = () => {
-    alert(`📥 GENERANDO REPORTE EXCEL...\n\n📅 Período: ${dateStart} al ${dateEnd}\n👤 Filtro: ${agent.toUpperCase()}\n\nEl archivo se está descargando.`)
-  }
+  const handleExport = () => { alert(`📥 GENERANDO REPORTE EXCEL...\n\n📅 Período: ${dateStart} al ${dateEnd}\n👤 Filtro: ${agent.toUpperCase()}\n\nEl archivo se está descargando.`) }
 
   if (!metrics) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <RefreshCw className="animate-spin mr-2" /> Cargando Tablero...
-      </div>
-    )
+    return <div className="flex h-full items-center justify-center"><RefreshCw className="animate-spin mr-2" /> Cargando Tablero...</div>
   }
 
   return (
@@ -518,28 +535,73 @@ export function AdminMetrics() {
         </div>
       </div>
 
-      {/* --- SEMÁFORO (TEAM PULSE) --- */}
-      {/* ✅ CORRECCIÓN: Se muestra SIEMPRE si hay datos, sin importar el filtro de agente */}
+      {/* --- 🚦 SEMÁFORO (TEAM PULSE) --- */}
       {teamPulse.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4 animate-in slide-in-from-top-4 duration-500">
-              {teamPulse.map((p, i) => (
-                  <Card key={i} className={`border-l-4 shadow-sm relative overflow-hidden transition-all hover:scale-105 cursor-default ${p.status === 'fire' ? 'border-l-pink-500 bg-pink-50/30' : p.status === 'warning' ? 'border-l-yellow-400 bg-yellow-50/30' : 'border-l-slate-300 bg-slate-50/50 grayscale'}`}>
-                      <CardContent className="p-3 flex items-center gap-3">
-                          <div className="relative">
-                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm"><AvatarImage src={p.avatar} /><AvatarFallback>{p.name[0]}</AvatarFallback></Avatar>
-                              {p.status === 'fire' && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm"><Flame size={12} className="text-pink-500 fill-pink-500 animate-pulse"/></div>}
-                              {p.status === 'warning' && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm"><AlertTriangle size={12} className="text-yellow-500 fill-yellow-500"/></div>}
+          <Card className="border-none shadow-sm bg-white mb-6 animate-in fade-in slide-in-from-top-4 duration-700">
+              <CardHeader className="pb-3 border-b border-slate-100">
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                      <CardTitle className="text-sm font-black uppercase text-slate-600 flex items-center gap-2">
+                          <Users className="h-4 w-4"/> Pulso de Ventas (Tiempo real)
+                      </CardTitle>
+                      <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-400">
+                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500 shadow-sm shadow-green-200"></div> Hoy/Ayer (Hábil)</span>
+                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-yellow-400 shadow-sm shadow-yellow-200"></div> 2 Días</span>
+                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500 shadow-sm shadow-red-200"></div> +3 Días</span>
+                      </div>
+                  </div>
+              </CardHeader>
+              <CardContent className="p-4 pt-6">
+                  <div className="flex flex-wrap gap-6 justify-center">
+                      {teamPulse.map((p, i) => (
+                          <div key={i} className="flex flex-col items-center gap-2 group cursor-help relative">
+                              {/* Círculo indicador de estado */}
+                              <div className={`
+                                  relative p-1 rounded-full border-4 transition-all duration-300
+                                  ${p.status === 'green' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)] scale-110 z-10' : 
+                                    p.status === 'yellow' ? 'border-yellow-400' : 
+                                    p.status === 'red' ? 'border-red-500 grayscale-[0.3] hover:grayscale-0' : 'border-slate-200 grayscale opacity-50'}
+                              `}>
+                                  <Avatar className="h-12 w-12 border-2 border-white bg-slate-100">
+                                      <AvatarImage src={p.avatar} />
+                                      <AvatarFallback className="font-bold text-slate-400">{p.name[0]}</AvatarFallback>
+                                  </Avatar>
+                                  
+                                  {/* Iconos de estado */}
+                                  {p.status === 'green' && (
+                                      <div className="absolute -bottom-1 -right-1 bg-green-500 text-white rounded-full p-1 border-2 border-white shadow-sm animate-pulse">
+                                          <Zap size={10} fill="currentColor"/>
+                                      </div>
+                                  )}
+                                  {p.status === 'red' && (
+                                      <div className="absolute -bottom-1 -right-1 bg-red-500 text-white rounded-full p-1 border-2 border-white shadow-sm">
+                                          <Siren size={10} fill="currentColor"/>
+                                      </div>
+                                  )}
+                              </div>
+                              
+                              <span className="text-[10px] font-bold text-slate-600 max-w-[80px] truncate text-center leading-tight">
+                                  {p.name}
+                              </span>
+                              
+                              {/* TOOLTIP FLOTANTE */}
+                              <div className="absolute bottom-full mb-3 bg-slate-900 text-white text-[10px] py-1.5 px-3 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap z-50 -translate-y-1 group-hover:translate-y-0">
+                                  {p.businessDays === 999 
+                                      ? "Sin ventas recientes" 
+                                      : p.businessDays === 0 
+                                          ? "🔥 ¡Venta HOY!" 
+                                          : `Hace ${p.businessDays} días hábiles`
+                                  }
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
+                              </div>
                           </div>
-                          <div>
-                              <p className="text-xs font-black text-slate-700 truncate max-w-[100px]" title={p.name}>{p.name}</p>
-                              <p className="text-[10px] font-medium text-slate-500">{p.daysSinceSale === 0 ? "Venta HOY 🔥" : p.daysSinceSale === 1 ? "Venta ayer" : `Hace ${p.daysSinceSale} días`}</p>
-                          </div>
-                      </CardContent>
-                  </Card>
-              ))}
-          </div>
+                      ))}
+                  </div>
+              </CardContent>
+          </Card>
       )}
 
+      {/* ... RESTO DE COMPONENTES ... */}
+      
       <Tabs defaultValue="commercial" className="w-full">
         <TabsList className="grid w-full max-w-[400px] grid-cols-2 h-10 mb-6 bg-slate-100 p-1 rounded-lg">
           <TabsTrigger value="commercial" className="text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-700 shadow-sm rounded-md">📊 Gestión Comercial</TabsTrigger>
@@ -580,7 +642,6 @@ export function AdminMetrics() {
                         <InfoTooltip text="Suma del valor (Price o Quoted Price) de todas las ventas cerradas en el período." />
                     </div>
                     <div className="flex items-end gap-3">
-                        {/* ✅ AHORA SÍ: Usamos metrics.revenue.total */}
                         <span className="text-4xl font-black text-green-400">$ {parseInt(metrics.revenue.total).toLocaleString()}</span>
                         <Badge variant="secondary" className={`mb-1.5 border-0 ${metrics.revenue.trend.dir === 'up' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>
                             {metrics.revenue.trend.dir === 'up' ? <ArrowUp size={10} className="mr-1"/> : <ArrowDown size={10} className="mr-1"/>}

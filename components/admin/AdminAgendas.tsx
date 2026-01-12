@@ -16,26 +16,28 @@ export function AdminAgendas() {
     const supabase = createClient()
     const [loading, setLoading] = useState(true)
     const [tasks, setTasks] = useState<any[]>([])
+    
+    // ✅ CAMBIO: Estado para lista dinámica de agentes
+    const [agentsList, setAgentsList] = useState<string[]>([])
+
     const [selectedAgent, setSelectedAgent] = useState("all")
     const [targetAgent, setTargetAgent] = useState("")
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
     const [selectedTasks, setSelectedTasks] = useState<string[]>([])
 
-    const AGENTS = ["Maca", "Gonza", "Sofi", "Lucas", "Brenda", "Cami"]
-
-    // --- CARGA DE DATOS REALES ---
+    // --- CARGA DE DATOS REALES (Leads + Agentes) ---
     const fetchAgendas = async () => {
         setLoading(true)
-        // Buscamos leads que tengan fecha de agenda programada
-        const { data, error } = await supabase
+        
+        // 1. Cargar Agendas
+        const { data: leadsData } = await supabase
             .from('leads')
             .select('*')
             .not('scheduled_for', 'is', null)
             .order('scheduled_for', { ascending: true })
 
-        if (data) {
-            // Mapeamos los datos para que coincidan con la estructura visual de tu tabla
-            const mappedTasks = data.map(l => {
+        if (leadsData) {
+            const mappedTasks = leadsData.map((l: any) => {
                 const schedDate = new Date(l.scheduled_for)
                 return {
                     id: l.id,
@@ -49,11 +51,32 @@ export function AdminAgendas() {
             })
             setTasks(mappedTasks)
         }
+
         setLoading(false)
+    }
+
+    // ✅ NUEVO: Cargar lista de agentes reales desde Profiles
+    const fetchAgents = async () => {
+        const { data } = await supabase.from('profiles').select('full_name, role')
+        if (data) {
+            // Filtramos solo los roles comerciales para que no salgan admins ni ficticios
+            const realAgents = data
+                .filter((p: any) => {
+                    const r = (p.role || "").toLowerCase()
+                    return r === 'seller' || r === 'gestor' || r === 'vendedor'
+                })
+                .map((p: any) => p.full_name)
+                .filter(Boolean)
+                .sort()
+            
+            setAgentsList(realAgents)
+        }
     }
 
     useEffect(() => {
         fetchAgendas()
+        fetchAgents() // ✅ Llamamos a la carga de agentes
+
         const channel = supabase.channel('agendas_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchAgendas())
             .subscribe()
@@ -106,13 +129,15 @@ export function AdminAgendas() {
                 <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm">
                     <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-fit font-bold text-slate-600 border-none shadow-none" />
                     <div className="h-6 w-px bg-slate-200 mx-1"></div>
+                    
+                    {/* ✅ FILTRO DINÁMICO */}
                     <Select value={selectedAgent} onValueChange={setSelectedAgent}>
                         <SelectTrigger className="w-[150px] border-none shadow-none font-bold">
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">👀 Todas</SelectItem>
-                            {AGENTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                            {agentsList.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
@@ -125,10 +150,13 @@ export function AdminAgendas() {
                     </CardTitle>
                     <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-slate-400 mr-1 uppercase">{selectedTasks.length} seleccionadas</span>
+                        
+                        {/* ✅ SELECTOR DINÁMICO PARA REASIGNAR */}
                         <Select value={targetAgent} onValueChange={setTargetAgent}>
                             <SelectTrigger className="w-[160px] h-8 text-xs font-bold"><SelectValue placeholder="Pasar a..." /></SelectTrigger>
-                            <SelectContent>{AGENTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
+                            <SelectContent>{agentsList.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
                         </Select>
+                        
                         <Button size="sm" variant="secondary" className="h-8 font-bold text-xs" onClick={handleReassign} disabled={selectedTasks.length === 0 || !targetAgent}>
                             <ArrowRightLeft className="h-3 w-3 mr-2"/> Reasignar
                         </Button>

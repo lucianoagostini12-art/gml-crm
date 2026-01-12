@@ -27,7 +27,8 @@ import {
   ChevronDown,
   ChevronRight,
   Menu,
-  Calendar
+  Calendar,
+  Trophy // ✅ Importado para el ícono de Ranking
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -50,6 +51,8 @@ import { AdminConfig } from "@/components/admin/AdminConfig"
 import { AdminCommissions } from "@/components/admin/AdminCommissions"
 import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
+// ✅ IMPORTAMOS EL NUEVO COMPONENTE
+import { AdminRanking } from "@/components/admin/AdminRanking"
 
 // --- COMPONENTE DE VISIÓN GLOBAL CON FILTRO DE MES ---
 function AdminOverview() {
@@ -281,6 +284,8 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                     <div className="space-y-1 animate-in slide-in-from-top-1">
                         <SidebarBtn active={view === 'team'} onClick={() => setView('team')} icon={<Users size={20} className="text-blue-400"/>} label="Equipo" />
                         <SidebarBtn active={view === 'metrics'} onClick={() => setView('metrics')} icon={<BarChart4 size={20} className="text-purple-400"/>} label="Analítica" />
+                        {/* ✅ NUEVO BOTÓN DE RANKING */}
+                        <SidebarBtn active={view === 'ranking'} onClick={() => setView('ranking')} icon={<Trophy size={20} className="text-yellow-500"/>} label="Ranking" />
                         <SidebarBtn active={view === 'commissions'} onClick={() => setView('commissions')} icon={<Banknote size={20} className="text-green-400"/>} label="Liquidación" />
                     </div>
                 )}
@@ -480,6 +485,8 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           {view === "conteo" && <AdminConteo />}
           {view === "leads" && <AdminLeadFactory />}
           {view === "metrics" && <AdminMetrics />}
+          {/* ✅ RENDER DEL NUEVO COMPONENTE */}
+          {view === "ranking" && <AdminRanking />}
           {view === "team" && <AdminTeam />}
           {view === "logs" && <AdminLogs />}
           {view === "agendas" && <AdminAgendas />}

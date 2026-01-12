@@ -475,10 +475,8 @@ export function OpsModal({
         await updateField('notes', updatedNotes)
         
         // ✅ NOTIFICACIÓN: Nota agregada
-        // 1. Si yo NO soy el vendedor, notificar al vendedor
-        if (localOp.agent_name && localOp.agent_name !== currentUser) {
-             sendNotification(localOp.agent_name, "📝 Nota Nueva", `${currentUser} agregó una nota en ${localOp.name}`, "info")
-        }
+        // ⛔ SE ELIMINÓ LA NOTIFICACIÓN AL VENDEDOR (agent_name) PARA QUE SOLO LE LLEGUE A OPS
+
         // 2. Si yo NO soy el operador asignado, notificar al operador
         if (localOp.operator && localOp.operator !== currentUser) {
              sendNotification(localOp.operator, "📝 Nota Interna", `${currentUser} agregó una nota en ${localOp.name}`, "info")

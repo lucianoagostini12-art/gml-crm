@@ -1,13 +1,14 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useMemo } from "react"
 import { createClient } from "@/lib/supabase" 
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { MoreHorizontal, Flame, Skull, Headset, CalendarClock, Phone, Activity, Clock } from "lucide-react"
+import { MoreHorizontal, Flame, Skull, Headset, CalendarClock, Phone, Activity, Clock, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 // --- TIPOS ---
 export type Lead = {
@@ -46,18 +47,15 @@ const intentStyles = {
   low: "border-l-[3px] border-l-rose-500 hover:ring-1 hover:ring-rose-500/20",
 }
 
-// ✅ CAMBIO DE COLORES SOLICITADO
+// ✅ COLORES
 const getQuoteStyles = (prepaga?: string) => {
     const p = prepaga || ""
-    
     if (p.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
     if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
     if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
     if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
     if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
     if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
-    
-    // Default fallback
     return "bg-slate-50 dark:bg-[#3A3B3C] border-slate-100 text-slate-800"
 }
 
@@ -73,6 +71,9 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
   // ✅ ESTADOS
   const [wppTemplates, setWppTemplates] = useState<any[]>([])
   const [agentAvatar, setAgentAvatar] = useState<string | null>(null)
+  
+  // ✅ ESTADO PARA TOOLTIP
+  const [isNoteOpen, setIsNoteOpen] = useState(false)
 
   // ✅ CARGA DE DATOS (Plantillas + Avatar Vendedor)
   useEffect(() => {
@@ -94,6 +95,27 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
     }
     init()
   }, [lead.agent])
+
+  // ✅ MEMO: FILTRO DE NOTAS (Solo manuales, excluye SISTEMA)
+  const sellerNotes = useMemo(() => {
+      if (!lead.notes) return []
+      
+      return lead.notes.split('|||')
+          .map(noteStr => {
+              const parts = noteStr.split('|')
+              // Formato esperado: SEP_NOTE|Fecha|Autor|Texto
+              if (parts[0] === 'SEP_NOTE' && parts.length >= 4) {
+                  return {
+                      date: parts[1],
+                      author: parts[2],
+                      text: parts[3]
+                  }
+              }
+              return null
+          })
+          .filter(n => n !== null && n.author !== 'SISTEMA') // 🚫 EXCLUYE SISTEMA
+          .reverse() // Muestra las más recientes arriba
+  }, [lead.notes])
 
   // Lógica de "Dato Quemado"
   let callColor = "text-slate-500 hover:text-slate-700 hover:bg-slate-50 border-slate-200 dark:border-slate-700 dark:text-slate-400"
@@ -246,7 +268,45 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
             </Button>
         </div>
 
-        <div className="flex justify-end pt-0.5">
+        <div className="flex justify-end items-center pt-0.5">
+             
+             {/* ✅ 1. ICONO FLOTANTE DE NOTAS USANDO POPOVER (SOLUCIÓN CORTE) */}
+             {sellerNotes.length > 0 && (
+                 <div className="mr-2">
+                     <Popover open={isNoteOpen} onOpenChange={setIsNoteOpen}>
+                        <PopoverTrigger asChild>
+                            <div 
+                                className="bg-amber-50 text-amber-600 hover:bg-amber-100 p-1 rounded-full cursor-help transition-colors border border-amber-100 relative"
+                                onMouseEnter={() => setIsNoteOpen(true)}
+                                onMouseLeave={() => setIsNoteOpen(false)}
+                            >
+                                <MessageSquare className="h-3 w-3" />
+                            </div>
+                        </PopoverTrigger>
+                        <PopoverContent 
+                            className="w-56 bg-slate-800 text-white border-slate-700 p-3 shadow-2xl z-50 pointer-events-none" 
+                            side="top" 
+                            align="end"
+                            onOpenAutoFocus={(e) => e.preventDefault()} // Evita que robe el foco
+                            onCloseAutoFocus={(e) => e.preventDefault()}
+                        >
+                             <div className="flex items-center gap-1.5 mb-2 border-b border-slate-700 pb-1.5">
+                                 <MessageSquare className="h-3 w-3 text-amber-400" />
+                                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Notas de Venta</span>
+                             </div>
+                             <div className="flex flex-col gap-2 max-h-[120px] overflow-y-auto custom-scrollbar">
+                                 {sellerNotes.map((note: any, i: number) => (
+                                     <div key={i} className="text-[10px] leading-snug">
+                                         <span className="text-slate-400 font-bold block text-[9px] mb-0.5">{note.date.split(' ')[0]}</span>
+                                         <span className="text-slate-200">{note.text}</span>
+                                     </div>
+                                 ))}
+                             </div>
+                        </PopoverContent>
+                     </Popover>
+                 </div>
+             )}
+
              <div className="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
                 <span className="text-[7px] text-slate-400 font-black uppercase tracking-wider">{lead.agent}</span>
                 <Avatar className="h-3 w-3 border border-slate-100">

@@ -477,13 +477,14 @@ export function SellerManager({
         </nav>
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
-          <Button
-            variant={ghost}
-            className="w-full justify-start gap-3 mb-2 text-slate-500 hover:text-slate-800 dark:hover:text-white"
-            onClick={() => setCurrentView("settings")}
-          >
-            <Settings className="h-4 w-4" /> Config
-          </Button>
+  <Button
+    variant="ghost"
+    className="w-full justify-start gap-3 mb-2 text-slate-500 hover:text-slate-800 dark:hover:text-white"
+    onClick={() => setCurrentView("settings")}
+  >
+    <Settings className="h-4 w-4" /> Config
+  </Button>
+
 
           <div className="flex items-center gap-3 justify-between">
             <div className="flex items-center gap-2">

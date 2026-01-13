@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase"
 import { Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js"
 
 // --- IMPORTACIONES DE PANELES ---
 import { LoginView } from "@/components/auth/LoginView"
@@ -37,16 +38,18 @@ export default function Home() {
     checkSession()
 
     // 2. Escuchar cambios de estado (Login / Logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) {
-        fetchProfile(session.user.id)
-      } else {
-        setRole(null)
-        setUserName("")
-        setLoading(false)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        setSession(session)
+        if (session) {
+          fetchProfile(session.user.id)
+        } else {
+          setRole(null)
+          setUserName("")
+          setLoading(false)
+        }
       }
-    })
+    )
 
     return () => subscription.unsubscribe()
   }, [])

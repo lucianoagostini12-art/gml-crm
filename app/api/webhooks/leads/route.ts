@@ -7,35 +7,32 @@ const API_SECRET = "gml_crm_secret_key_2024"
 // Helper simple (queda por compatibilidad)
 const cleanText = (t: string) => t?.toLowerCase().trim() || ""
 
-// ✅ NUEVO: normalizador fuerte (saca tildes, signos, emojis, espacios raros)
+// ✅ normalizador fuerte (saca tildes, signos, emojis, espacios raros)
 const normalizeText = (input: any) => {
   return String(input || "")
     .toLowerCase()
     .trim()
-    .normalize("NFD") // separa acentos
-    .replace(/[\u0300-\u036f]/g, "") // borra acentos
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\r\n\t]+/g, " ")
-    // deja letras/números/espacios (afuera emojis y signos)
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
 }
 
-// ✅ NUEVO: matcher universal por matchType
+// ✅ matcher universal por matchType
 const matchRule = (inputRaw: any, rule: any) => {
   const input = normalizeText(inputRaw)
   const trigger = normalizeText(rule?.trigger)
   const type = rule?.matchType || "contains"
 
   if (!trigger) return false
-
   if (type === "exact") return input === trigger
   if (type === "starts_with") return input.startsWith(trigger)
-  // default contains
-  return input.includes(trigger)
+  return input.includes(trigger) // contains
 }
 
-// ✅ NUEVO: normaliza a "canon" 10 dígitos (AR) para dedupe
+// ✅ normaliza a "canon" 10 dígitos (AR) para dedupe
 const normalizePhoneCanon = (raw: any) => {
   const d = String(raw || "").replace(/\D+/g, "")
   if (!d) return null
@@ -63,37 +60,23 @@ export async function POST(request: Request) {
     // 1) VERIFICACIÓN DE SEGURIDAD
     const url = new URL(request.url)
     const apiKey = url.searchParams.get("key")
-
     if (apiKey !== API_SECRET) {
       return NextResponse.json({ error: "Acceso denegado" }, { status: 401 })
     }
 
-    // 2) LEER DATOS Y EVITAR ERRORES DE TEST DE WATI
+    // 2) LEER BODY (y evitar test)
     const body = await request.json()
-
-    console.log(
-      "📥 Webhook Entrante:",
-      JSON.stringify({
-        waId: body.waId,
-        text: body.text,
-        referral: body.referral,
-        sourceId: body.sourceId,
-        sourceUrl: body.sourceUrl,
-        interactiveTitle: body.interactiveButtonReply?.title,
-        listTitle: body.listReply?.title,
-      })
-    )
 
     if (body.waId === "senderPhone" || body.info === "test_notification") {
       return NextResponse.json({ message: "Test WATI recibido OK" }, { status: 200 })
     }
 
-    // 3) RECUPERAR EL MENSAJE REAL (como texto “humano”)
+    // 3) MENSAJE REAL
     let finalMessage = body.text || ""
     if (body.interactiveButtonReply?.title) finalMessage = `[Botón]: ${body.interactiveButtonReply.title}`
     else if (body.listReply?.title) finalMessage = `[Lista]: ${body.listReply.title}`
 
-    // ✅ candidatos para “primer mensaje”
+    // candidatos (para que “primer mensaje” matchee aunque venga con formatos)
     const textCandidates = [
       body.text || "",
       body.interactiveButtonReply?.title || "",
@@ -101,7 +84,7 @@ export async function POST(request: Request) {
       finalMessage || "",
     ].filter(Boolean)
 
-    // 4) DATOS BÁSICOS DEL CLIENTE
+    // 4) DATOS CLIENTE
     let phone = ""
     let name = "Desconocido"
 
@@ -116,65 +99,93 @@ export async function POST(request: Request) {
 
     if (!phone) return NextResponse.json({ message: "Ignored: No valid phone" }, { status: 200 })
 
-    // ✅ ACÁ estaba el bug: phoneCanon no existía
     const phoneCanon = normalizePhoneCanon(phone)
 
+    // Logs cortos para debug (no te llena el server)
+    console.log(
+      "📥 WATI:",
+      JSON.stringify({
+        phone,
+        phoneCanon,
+        msg: String(finalMessage || "").slice(0, 80),
+        referral: body.referral,
+        sourceId: body.sourceId,
+      })
+    )
+
     // =====================================================================
-    // 5) 🧠 MOTOR DE REGLAS DINÁMICO (Híbrido)
+    // 5) 🧠 MOTOR DE REGLAS
     // =====================================================================
 
     let detectedSource = body.source || "WATI / Bot"
     let detectedPrepaga: string | null = null
 
-    // A) Obtener reglas desde system_config
-    const { data: configData } = await supabase
+    // A) Obtener reglas desde system_config (robusto)
+    const { data: configData, error: configErr } = await supabase
       .from("system_config")
       .select("value")
       .eq("key", "message_source_rules")
-      .single()
+      .maybeSingle()
 
-    const rules = configData?.value || []
+    if (configErr) {
+      console.error("❌ Error leyendo system_config(message_source_rules):", configErr)
+    }
 
-    // ✅ copia defensiva para no mutar el array original
+    let rules: any[] = []
+    const rawVal: any = configData?.value
+
+    if (Array.isArray(rawVal)) {
+      rules = rawVal
+    } else if (typeof rawVal === "string") {
+      try {
+        const parsed = JSON.parse(rawVal)
+        if (Array.isArray(parsed)) rules = parsed
+        else if (parsed?.rules && Array.isArray(parsed.rules)) rules = parsed.rules
+      } catch (e) {
+        console.error("❌ No se pudo parsear message_source_rules:", e)
+      }
+    } else if (rawVal?.rules && Array.isArray(rawVal.rules)) {
+      rules = rawVal.rules
+    }
+
     const sortedRules = Array.isArray(rules)
       ? [...rules].sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))
       : []
 
+    console.log("🧩 Rules cargadas:", sortedRules.length)
+
     let matchedRule: any = null
 
-    // B) Estrategia 1: Referral/SourceId (Meta)
+    // B) Referral/SourceId (Meta)
     const metaReferralRaw = body.referral || body.sourceId || ""
-
     if (String(metaReferralRaw || "").trim()) {
-      // respeta matchType
       matchedRule = sortedRules.find((r: any) => matchRule(metaReferralRaw, r)) || null
-
       if (!matchedRule) {
         detectedSource = `Meta Ads (${String(metaReferralRaw).trim()})`
       }
     }
 
-    // C) Estrategia 2: Texto (primer mensaje real)
-    if (!matchedRule) {
+    // C) Texto (primer mensaje)
+    if (!matchedRule && sortedRules.length > 0) {
       for (const rule of sortedRules) {
-        let isMatch = false
+        let ok = false
         for (const candidate of textCandidates) {
           if (matchRule(candidate, rule)) {
-            isMatch = true
+            ok = true
             break
           }
         }
-        if (isMatch) {
+        if (ok) {
           matchedRule = rule
           break
         }
       }
     }
 
-    // D) Aplicar resultado
-    if (matchedRule?.source) {
-      detectedSource = matchedRule.source
-    }
+    // D) Aplicar rule
+    if (matchedRule?.source) detectedSource = matchedRule.source
+
+    console.log("🏷️ Match:", JSON.stringify({ matched: !!matchedRule, detectedSource }))
 
     // E) Deducción inversa prepaga
     const sourceLower = cleanText(detectedSource)
@@ -188,10 +199,9 @@ export async function POST(request: Request) {
     else if (sourceLower.includes("ampf")) detectedPrepaga = "AMPF"
 
     // =====================================================================
-    // 6) GESTIÓN DE LEADS (Insertar o Actualizar)
+    // 6) LEADS: Buscar + Update/Insert (por phone_canon)
     // =====================================================================
 
-    // Buscar por phone_canon cuando exista; fallback a phone
     let existingLead: any = null
 
     if (phoneCanon) {
@@ -213,27 +223,26 @@ export async function POST(request: Request) {
     const now = new Date().toISOString()
     const timeString = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
 
-    // CASO A: YA EXISTE -> ACTUALIZAR
+    // A) UPDATE
     if (existingLead) {
       let currentChat = existingLead.chat
       if (typeof currentChat === "string") {
-        try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
+        try {
+          currentChat = JSON.parse(currentChat)
+        } catch {
+          currentChat = []
+        }
       }
       if (!Array.isArray(currentChat)) currentChat = []
 
-      const newChatMsg = {
-        user: "Cliente",
-        text: finalMessage,
-        time: timeString,
-        isMe: false,
-      }
+      const newChatMsg = { user: "Cliente", text: finalMessage, time: timeString, isMe: false }
 
       const updates: any = {
         chat: [...currentChat, newChatMsg],
         last_update: now,
       }
 
-      // ✅ completar canon si faltaba
+      // completar canon si faltaba
       if (!existingLead.phone_canon && phoneCanon) updates.phone_canon = phoneCanon
 
       // completar prepaga si faltaba
@@ -244,11 +253,16 @@ export async function POST(request: Request) {
         updates.source = detectedSource
       }
 
-      await supabase.from("leads").update(updates).eq("id", existingLead.id)
+      const { error: updErr } = await supabase.from("leads").update(updates).eq("id", existingLead.id)
+      if (updErr) {
+        console.error("❌ Error update lead:", updErr)
+        return NextResponse.json({ error: updErr.message }, { status: 500 })
+      }
+
       return NextResponse.json({ success: true, action: "updated", source: detectedSource }, { status: 200 })
     }
 
-    // CASO B: NUEVO LEAD -> CREAR
+    // B) INSERT
     const newLeadData: any = {
       name,
       phone,
@@ -263,11 +277,10 @@ export async function POST(request: Request) {
       last_update: now,
     }
 
-    const { error } = await supabase.from("leads").insert(newLeadData)
-
-    if (error) {
-      console.error("Error DB:", error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    const { error: insErr } = await supabase.from("leads").insert(newLeadData)
+    if (insErr) {
+      console.error("❌ Error insert lead:", insErr)
+      return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
 
     return NextResponse.json({ success: true, action: "created", source: detectedSource }, { status: 200 })

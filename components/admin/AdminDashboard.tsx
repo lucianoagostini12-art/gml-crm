@@ -28,7 +28,9 @@ import {
   ChevronRight,
   Menu,
   Calendar,
-  Trophy // ✅ Importado para el ícono de Ranking
+  Trophy,
+  MessageCircle,
+  FileText
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -54,18 +56,14 @@ import { AdminConfig } from "@/components/admin/AdminConfig"
 import { AdminCommissions } from "@/components/admin/AdminCommissions"
 import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
-// ✅ IMPORTAMOS EL NUEVO COMPONENTE
 import { AdminRanking } from "@/components/admin/AdminRanking"
 
-// --- COMPONENTE DE VISIÓN GLOBAL CON FILTRO DE MES ---
+// --- COMPONENTE DE VISIÓN GLOBAL ---
 function AdminOverview() {
   const supabase = createClient()
   const [stats, setStats] = useState({ entered: 0, completed: 0, compliance: 0 })
   const [activities, setActivities] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  
-  // ✅ NUEVO: Estado para el filtro de mes (YYYY-MM o 'all')
-  // Iniciamos con el mes actual por defecto
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7))
 
   const fetchDashboardData = async () => {
@@ -73,7 +71,6 @@ function AdminOverview() {
     const { data: leads } = await supabase.from("leads").select("*").order("last_update", { ascending: false })
 
     if (leads) {
-      // ✅ APLICAR FILTRO DE MES
       let filteredLeads = leads
       if (selectedMonth !== 'all') {
           filteredLeads = leads.filter((l: any) => l.created_at?.startsWith(selectedMonth))
@@ -84,8 +81,6 @@ function AdminOverview() {
       const rate = entered > 0 ? Math.round((completed / entered) * 100) : 0
       setStats({ entered, completed, compliance: rate })
 
-      // Actividad reciente (siempre mostramos la última actividad global, independiente del filtro, para ver que el sistema vive)
-      // O si preferís filtrar también la actividad, cambiá 'leads' por 'filteredLeads' abajo.
       const recent = leads.slice(0, 15).map((l: any) => ({
         time: l.last_update ? new Date(l.last_update).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--",
         agent: l.agent_name || l.operator || "Sistema",
@@ -103,12 +98,9 @@ function AdminOverview() {
       .channel("admin_live_updates")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => fetchDashboardData())
       .subscribe()
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [selectedMonth]) // ✅ Se recarga cuando cambia el mes
+    return () => { supabase.removeChannel(channel) }
+  }, [selectedMonth])
 
-  // Generar opciones de meses (últimos 12)
   const getMonthOptions = () => {
       const options = []
       const today = new Date()
@@ -128,7 +120,6 @@ function AdminOverview() {
           Torre de Control 📡 {loading && <RefreshCw className="animate-spin h-5 w-5 text-slate-400" />}
         </h2>
         
-        {/* ✅ FILTRO DE MES Y BOTÓN REFRESH */}
         <div className="flex items-center gap-2">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
                 <SelectTrigger className="w-[180px] h-9 bg-white border-slate-300 text-slate-700 font-bold">
@@ -187,15 +178,7 @@ function AdminOverview() {
                       {act.agent}
                     </span>
                     :
-                    <span
-                      className={
-                        act.type === "good"
-                          ? "text-green-400 font-bold ml-2"
-                          : act.type === "bad"
-                          ? "text-red-400 ml-2"
-                          : "text-slate-300 ml-2"
-                      }
-                    >
+                    <span className={act.type === "good" ? "text-green-400 font-bold ml-2" : act.type === "bad" ? "text-red-400 ml-2" : "text-slate-300 ml-2"}>
                       {act.action}
                     </span>
                   </div>
@@ -209,20 +192,11 @@ function AdminOverview() {
   )
 }
 
-// --- SIDEBAR UNIFICADO ESTILO OPS ---
-function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifications, markAllRead, isBellOpen, setIsBellOpen }: any) {
-    const [sections, setSections] = useState({
-        gestion: true,
-        equipo: true,
-        sistema: true,
-        comunicacion: true
-    })
+// --- SIDEBAR ---
+function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifications, markAllRead, isBellOpen, setIsBellOpen, handleNotificationClick }: any) {
+    const [sections, setSections] = useState({ gestion: true, equipo: true, sistema: true, comunicacion: true })
+    const toggleSection = (key: keyof typeof sections) => setSections(prev => ({ ...prev, [key]: !prev[key] }))
 
-    const toggleSection = (key: keyof typeof sections) => {
-        setSections(prev => ({ ...prev, [key]: !prev[key] }))
-    }
-
-    // Componente Botón Sidebar
     const SidebarBtn = ({ active, onClick, icon, label, isSubItem = false, colorClass = "text-slate-400" }: any) => (
         <button 
             onClick={onClick} 
@@ -236,40 +210,23 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
         </button>
     )
 
-    // Componente Header Sección
     const SectionHeader = ({ label, sectionKey }: { label: string, sectionKey: keyof typeof sections }) => {
         if (!open) return <div className="border-t border-slate-800 my-2 mx-2"></div>
         return (
-            <div 
-                className="flex items-center justify-between px-3 py-2 cursor-pointer text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-slate-300 transition-colors mt-2"
-                onClick={() => toggleSection(sectionKey)}
-            >
-                {label}
-                {sections[sectionKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+            <div className="flex items-center justify-between px-3 py-2 cursor-pointer text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-slate-300 transition-colors mt-2" onClick={() => toggleSection(sectionKey)}>
+                {label} {sections[sectionKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
             </div>
         )
     }
 
     return (
         <aside className={`${open ? 'w-[240px]' : 'w-[70px]'} transition-all duration-300 bg-[#0F172A] text-white flex flex-col shrink-0 z-50 shadow-2xl border-r border-slate-800 h-screen sticky top-0`}>
-            {/* HEADER */}
             <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
-                {open ? (
-                    <span className="font-black text-xl tracking-tighter text-white flex items-center gap-1">
-                        GML <span className="text-blue-500">SUPERVISIÓN</span>
-                    </span>
-                ) : (
-                    <span className="font-black text-xl text-blue-500">G</span>
-                )}
-                <Button variant="ghost" size="icon" onClick={() => setOpen(!open)} className="text-slate-400 hover:text-white h-8 w-8 ml-auto hover:bg-slate-800">
-                    <PanelLeftClose size={18}/>
-                </Button>
+                {open ? <span className="font-black text-xl tracking-tighter text-white flex items-center gap-1">GML <span className="text-blue-500">SUPERVISIÓN</span></span> : <span className="font-black text-xl text-blue-500">G</span>}
+                <Button variant="ghost" size="icon" onClick={() => setOpen(!open)} className="text-slate-400 hover:text-white h-8 w-8 ml-auto hover:bg-slate-800"><PanelLeftClose size={18}/></Button>
             </div>
 
-            {/* NAV SCROLLABLE */}
             <nav className="p-3 space-y-1 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
-                
-                {/* 1. GESTIÓN OPERATIVA */}
                 <SectionHeader label="Gestión" sectionKey="gestion" />
                 {(open ? sections.gestion : true) && (
                     <div className="space-y-1 animate-in slide-in-from-top-1">
@@ -280,20 +237,15 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                         <SidebarBtn active={view === 'agendas'} onClick={() => setView('agendas')} icon={<CalendarDays size={20} className="text-blue-500"/>} label="Agendas" />
                     </div>
                 )}
-
-                {/* 2. EQUIPO Y FINANZAS */}
                 <SectionHeader label="Equipo & Finanzas" sectionKey="equipo" />
                 {(open ? sections.equipo : true) && (
                     <div className="space-y-1 animate-in slide-in-from-top-1">
                         <SidebarBtn active={view === 'team'} onClick={() => setView('team')} icon={<Users size={20} className="text-blue-400"/>} label="Equipo" />
                         <SidebarBtn active={view === 'metrics'} onClick={() => setView('metrics')} icon={<BarChart4 size={20} className="text-purple-400"/>} label="Analítica" />
-                        {/* ✅ NUEVO BOTÓN DE RANKING */}
                         <SidebarBtn active={view === 'ranking'} onClick={() => setView('ranking')} icon={<Trophy size={20} className="text-yellow-500"/>} label="Ranking" />
                         <SidebarBtn active={view === 'commissions'} onClick={() => setView('commissions')} icon={<Banknote size={20} className="text-green-400"/>} label="Liquidación" />
                     </div>
                 )}
-
-                {/* 3. COMUNICACIÓN */}
                 <SectionHeader label="Comunicación" sectionKey="comunicacion" />
                 {(open ? sections.comunicacion : true) && (
                     <div className="space-y-1 animate-in slide-in-from-top-1">
@@ -301,8 +253,6 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                         <SidebarBtn active={view === 'resources'} onClick={() => setView('resources')} icon={<BookOpen size={20} className="text-yellow-400"/>} label="Recursos" />
                     </div>
                 )}
-
-                {/* 4. SISTEMA */}
                 <SectionHeader label="Sistema" sectionKey="sistema" />
                 {(open ? sections.sistema : true) && (
                     <div className="space-y-1 animate-in slide-in-from-top-1">
@@ -313,9 +263,7 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                     </div>
                 )}
 
-                {/* FOOTER */}
                 <div className="mt-auto pt-4 pb-2 border-t border-slate-800 space-y-2">
-                    {/* NOTIFICACIONES EN FOOTER (Si está colapsado, se ve el ícono con punto rojo) */}
                     <Popover open={isBellOpen} onOpenChange={setIsBellOpen}>
                         <PopoverTrigger asChild>
                             <button className={`w-full flex items-center ${open ? 'justify-start px-3' : 'justify-center'} py-2 rounded-md text-xs font-medium transition-all duration-200 text-slate-400 hover:bg-slate-800 hover:text-white relative`}>
@@ -334,7 +282,7 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                             <div className="max-h-[300px] overflow-y-auto">
                                 {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
                                     notifications.map((n: any) => (
-                                        <div key={n.id} className="p-3 border-b hover:bg-slate-50 transition-colors last:border-0">
+                                        <div key={n.id} onClick={() => handleNotificationClick(n)} className="p-3 border-b hover:bg-slate-50 transition-colors last:border-0 cursor-pointer">
                                             <div className="flex items-start gap-3">
                                                 <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 shrink-0"></div>
                                                 <div>
@@ -350,7 +298,6 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                         </PopoverContent>
                     </Popover>
 
-                    {/* PERFIL DE USUARIO */}
                     <div className={`flex items-center gap-3 px-2 py-2 rounded-xl bg-slate-800/50 border border-slate-800 mx-1 transition-all ${open ? 'justify-start' : 'justify-center'}`}>
                         <Avatar className="h-9 w-9 ring-2 ring-blue-500/30">
                             <AvatarImage src={userData.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userData.name}`} className="object-cover" />
@@ -363,7 +310,6 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                             </div>
                         )}
                     </div>
-
                     <SidebarBtn onClick={onLogout} icon={<LogOut size={18} className="text-red-400"/>} label="Cerrar Sesión" />
                 </div>
             </nav>
@@ -371,11 +317,10 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
     )
 }
 
-// --- DASHBOARD PRINCIPAL (COMPLETAMENTE INTEGRADO) ---
+// --- DASHBOARD PRINCIPAL ---
 export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const supabase = createClient()
   
-  // ✅ 1. INICIALIZACIÓN INTELIGENTE (Lee la URL al cargar)
   const [view, setView] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
@@ -388,16 +333,13 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [sidebarOpen, setSidebarOpen] = useState(true) 
   const [incomingAlert, setIncomingAlert] = useState<any>(null)
   
-  // ESTADO USUARIO
   const [userData, setUserData] = useState<{ name: string; email: string; avatar?: string; role?: string }>({
     name: "Cargando...", email: "", avatar: undefined, role: "Admin"
   })
 
-  // ESTADO NOTIFICACIONES
   const [notifications, setNotifications] = useState<any[]>([])
   const [isBellOpen, setIsBellOpen] = useState(false)
 
-  // ✅ 2. EFECTO DE PERSISTENCIA (Actualiza la URL al cambiar de vista)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
@@ -422,8 +364,39 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     if (ids.length > 0) await supabase.from('notifications').update({ read: true }).in('id', ids)
   }
 
+  // ✅ CLICK EN NOTIFICACIÓN DE LA CAMPANITA
+  const handleNotificationClick = async (n: any) => {
+      // 1. Navegación inteligente
+      if (n.title?.includes("Lead Ingresado") || n.body?.includes("Nuevo dato")) {
+          setView('leads')
+      } else if (n.title?.includes("Cotización")) {
+          setView('conteo') // O leads, según prefieras
+      } else {
+          setView('team') // Asumimos mensaje interno
+      }
+      
+      setIsBellOpen(false) // Cerrar popover
+
+      // 2. Marcar como leído
+      if (!n.read) {
+          const newNotifs = notifications.filter(item => item.id !== n.id)
+          setNotifications(newNotifs)
+          await supabase.from('notifications').update({ read: true }).eq('id', n.id)
+      }
+  }
+
+  // ✅ CLICK EN TOAST FLOTANTE
+  const handleAlertClick = () => {
+      if (!incomingAlert) return
+      
+      if (incomingAlert.type === 'lead') setView('leads')
+      if (incomingAlert.type === 'quote') setView('conteo') // O leads
+      if (incomingAlert.type === 'msg') setView('team')
+
+      setIncomingAlert(null)
+  }
+
   useEffect(() => {
-    // ✅ 1. Pedir permiso al cargar
     requestNotificationPermission();
 
     const initUserData = async () => {
@@ -452,57 +425,93 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
     initUserData()
 
-    const globalChannel = supabase.channel("god_mode_global")
+    // 📡 CANAL DE ESCUCHA QUIRÚRGICO (FILTRO ESTRICTO)
+    const globalChannel = supabase.channel("god_mode_global_filtered")
+      
+      // 1. DATO INGRESADO (INSERT Nuevo Lead sin asignar)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, (payload) => {
         const newLead = payload.new as any
         
-        // ✅ SOLO ALERTAR SI ES DE PUBLICIDAD (Sin dueño inicial)
-        // Si tiene 'agent_name' significa que lo creó una vendedora o se asignó manualmente
         if (newLead.status === 'nuevo' && (!newLead.agent_name || newLead.agent_name === 'Sin Asignar')) {
             setIncomingAlert({
-              section: "leads",
+              type: "lead",
+              title: "¡DATO INGRESADO!",
+              icon: <Sparkles className="h-3 w-3" />,
+              color: "text-emerald-400 border-l-emerald-500",
               name: newLead.name || "Nuevo Prospecto",
-              source: newLead.source || "MetaAds",
+              info: newLead.source || "MetaAds",
               time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             })
-
-            // 🔥 NOTIFICACIÓN NATIVA
-            sendNativeNotification("¡Lead Ingresado!", `Nuevo dato desde ${newLead.source || "Web"}: ${newLead.name}`);
+            sendNativeNotification("¡Lead Ingresado!", `Nuevo dato desde ${newLead.source || "Web"}: ${newLead.name}`, true);
         }
       })
+
+      // 2. COTIZACIÓN REALIZADA (UPDATE status a 'cotizacion')
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "leads" }, (payload) => {
+          const newData = payload.new as any
+          const oldData = payload.old as any
+
+          if (newData.status === 'cotizacion' && oldData.status !== 'cotizacion') {
+              setIncomingAlert({
+                  type: "quote",
+                  title: "¡COTIZACIÓN!",
+                  icon: <FileText className="h-3 w-3" />,
+                  color: "text-yellow-400 border-l-yellow-500",
+                  name: newData.name,
+                  info: `Vendedor: ${newData.agent_name}`,
+                  time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              })
+              sendNativeNotification("Cotización Nueva", `${newData.agent_name} cotizó a ${newData.name}`, true);
+          }
+      })
+
+      // 3. MENSAJES INTERNOS (INSERT en notifications para Admin)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
-           setNotifications(prev => [payload.new, ...prev])
-           // Alerta nativa de notificaciones generales (opcional)
-           sendNativeNotification("Nueva Notificación", payload.new.title);
+           const notif = payload.new as any;
+           // Filtro estricto: Solo si es para Admin o Administración
+           if (notif.user_name === 'Administración' || notif.user_name === userData.name) {
+               setNotifications(prev => [notif, ...prev])
+               
+               setIncomingAlert({
+                   type: "msg",
+                   title: "MENSAJE INTERNO",
+                   icon: <MessageCircle className="h-3 w-3" />,
+                   color: "text-blue-400 border-l-blue-500",
+                   name: notif.title,
+                   info: notif.body,
+                   time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+               })
+
+               sendNativeNotification("Mensaje Interno", notif.title, true);
+           }
       })
       .subscribe()
 
     return () => { supabase.removeChannel(globalChannel) }
-  }, [])
+  }, [userData.name])
 
   return (
     <div className="flex h-screen w-full bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative overflow-hidden">
       
-      {/* ALERTA FLOTANTE */}
+      {/* ALERTA FLOTANTE UNIFICADA */}
       {incomingAlert && (
-        <div className="fixed z-[9999] bottom-6 right-6 animate-in slide-in-from-right-full cursor-pointer" onClick={() => {setView("leads"); setIncomingAlert(null)}}>
-          <div className="bg-slate-900 text-white rounded-xl shadow-2xl border-l-4 border-l-emerald-500 p-4 w-80 hover:bg-slate-800 transition-colors">
+        <div className="fixed z-[9999] bottom-6 right-6 animate-in slide-in-from-right-full cursor-pointer" onClick={handleAlertClick}>
+          <div className={`bg-slate-900 text-white rounded-xl shadow-2xl border-l-4 p-4 w-80 hover:bg-slate-800 transition-colors ${incomingAlert.color}`}>
             <div className="flex justify-between items-center mb-2">
-              <h4 className="font-black text-emerald-400 text-xs tracking-widest uppercase flex items-center gap-2">
-                <Sparkles className="h-3 w-3" /> ¡DATO INGRESADO!
+              <h4 className={`font-black text-xs tracking-widest uppercase flex items-center gap-2 ${incomingAlert.color.split(' ')[0]}`}>
+                {incomingAlert.icon} {incomingAlert.title}
               </h4>
               <button className="text-slate-500 hover:text-white" onClick={(e) => {e.stopPropagation(); setIncomingAlert(null)}}><X className="h-4 w-4"/></button>
             </div>
-            <p className="font-bold text-lg">{incomingAlert.name}</p>
+            <p className="font-bold text-lg truncate">{incomingAlert.name}</p>
             <div className="flex justify-between items-center mt-2">
-                <span className="text-xs text-slate-400">{incomingAlert.source}</span>
+                <span className="text-xs text-slate-400 truncate max-w-[180px]">{incomingAlert.info}</span>
                 <span className="text-xs font-mono text-slate-500">{incomingAlert.time}</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* SIDEBAR NUEVO UNIFICADO */}
       <AdminSidebar 
         open={sidebarOpen} 
         setOpen={setSidebarOpen} 
@@ -514,16 +523,15 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         markAllRead={markAllRead}
         isBellOpen={isBellOpen}
         setIsBellOpen={setIsBellOpen}
+        handleNotificationClick={handleNotificationClick}
       />
 
-      {/* CONTENIDO PRINCIPAL */}
       <main className="flex-1 h-full overflow-hidden bg-slate-50 dark:bg-slate-950 relative">
         <ScrollArea className="h-full w-full">
           {view === "overview" && <AdminOverview />}
           {view === "conteo" && <AdminConteo />}
           {view === "leads" && <AdminLeadFactory />}
           {view === "metrics" && <AdminMetrics />}
-          {/* ✅ RENDER DEL NUEVO COMPONENTE */}
           {view === "ranking" && <AdminRanking />}
           {view === "team" && <AdminTeam />}
           {view === "logs" && <AdminLogs />}

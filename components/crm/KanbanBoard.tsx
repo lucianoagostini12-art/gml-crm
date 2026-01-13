@@ -27,7 +27,8 @@ import { LostLeadDialog } from "@/components/seller/LostLeadDialog"
 import { WonLeadDialog } from "@/components/seller/WonLeadDialog" 
 import { QuotationDialog } from "@/components/seller/QuotationDialog"
 
-const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3"
+// ✅ SONIDO PROFESIONAL (Software Interface Start)
+const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/2574/2574-preview.mp3"
 
 const ACTIVE_COLUMNS = [
     { id: "nuevo", title: "Sin Trabajar 📥", color: "bg-slate-100 dark:bg-[#18191A] border dark:border-[#3E4042]" },
@@ -157,7 +158,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     
     // Comunicado Urgente
     const [urgentMessage, setUrgentMessage] = useState<string | null>(null)
-    const [announcementId, setAnnouncementId] = useState<number | null>(null) // ✅ Nuevo ID para seguimiento
+    const [announcementId, setAnnouncementId] = useState<number | null>(null) 
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
@@ -178,26 +179,11 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (data) setLeads(mapLeads(data))
     }
 
-    // ✅ NUEVA LÓGICA DE COMUNICADOS: Escucha la tabla central 'announcements'
+    // ✅ LÓGICA DE COMUNICADOS
     const checkUrgentMessage = async () => {
-        // Buscamos el anuncio bloqueante más reciente
-        const { data } = await supabase
-            .from('announcements')
-            .select('*')
-            .eq('is_blocking', true)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single()
-        
+        const { data } = await supabase.from('announcements').select('*').eq('is_blocking', true).order('created_at', { ascending: false }).limit(1).single()
         if (data) {
-            // Verificamos si ya fue leído por este usuario
-            const { data: read } = await supabase
-                .from('announcement_reads')
-                .select('*')
-                .eq('announcement_id', data.id)
-                .eq('user_name', CURRENT_USER)
-                .single()
-
+            const { data: read } = await supabase.from('announcement_reads').select('*').eq('announcement_id', data.id).eq('user_name', CURRENT_USER).single()
             if (!read) {
                 setUrgentMessage(data.message)
                 setAnnouncementId(data.id)
@@ -207,12 +193,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     const dismissUrgentMessage = async () => {
         if (announcementId) {
-            // Registramos la lectura
-            await supabase.from('announcement_reads').insert({
-                announcement_id: announcementId,
-                user_name: CURRENT_USER,
-                read_at: new Date().toISOString()
-            })
+            await supabase.from('announcement_reads').insert({ announcement_id: announcementId, user_name: CURRENT_USER, read_at: new Date().toISOString() })
         }
         setUrgentMessage(null)
         setAnnouncementId(null)
@@ -232,100 +213,138 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         return closestCorners(args);
     };
 
-    // --- STOP AUDIO HELPER ---
     const stopAudio = () => {
-        if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-        }
+        if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
     }
 
     useEffect(() => {
-        // ✅ 1. Solicitar permiso al cargar (mejoraría ponerlo en un botón de "Activar Alertas", pero aquí es automático)
         requestNotificationPermission();
-
         fetchLeads()
         checkUrgentMessage()
 
-        // Canal de Leads (Cambios)
-        const channel = supabase.channel('kanban_realtime_vfinal')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, (payload) => {
+        // --- ⚡ 1. CANAL DE LEADS (FILTRADO SOLO PARA MÍ) ---
+        const leadsChannel = supabase.channel('kanban_leads_vfinal')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, async (payload) => {
                 const newData = payload.new as any;
+                const oldData = payload.old as any;
                 
-                // Notificaciones Inteligentes
-                if (payload.eventType === 'INSERT') {
-                    if (newData && !['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(newData.status)) {
-                        const newLead = mapLeads([newData])[0]
-                        setLeads(prev => [newLead, ...prev])
-                        
-                        // 🔥 NOTIFICACIÓN NATIVA + TOAST
-                        sendNativeNotification("¡Nuevo Lead Asignado! 🚀", `Te asignaron a ${newData.name}.`);
-                        
-                        toast.success(`¡Nuevo Lead! ${newData.name}`, { 
-                            description: "Hacé click para ver detalles", 
-                            action: { label: "Ver", onClick: () => onLeadClick && onLeadClick(newData.id) } 
-                        })
-                    }
-                } else if (payload.eventType === 'UPDATE') {
-                    if (newData) {
-                        const updated = mapLeads([newData])[0]
-                        
-                        if (['ingresado', 'precarga', 'medicas', 'legajo', 'cumplidas', 'vendido'].includes(updated.status)) {
-                             toast.info(`¡Movimiento en Venta! ${updated.name}`, { description: `Pasó a: ${updated.status.toUpperCase()}` })
-                        }
+                // A) NUEVO DATO EN 'SIN TRABAJAR' (Req #1)
+                if (payload.eventType === 'INSERT' && newData.status === 'nuevo') {
+                    const newLead = mapLeads([newData])[0]
+                    setLeads(prev => [newLead, ...prev])
+                    
+                    const title = "¡Nuevo Lead! 📥";
+                    const body = `Te asignaron a ${newData.name}.`;
 
-                        if (['perdido', 'vendido', 'rechazado', 'cumplidas', 'ingresado'].includes(updated.status)) {
-                            setLeads(prev => prev.filter(l => l.id !== updated.id))
-                        } else {
-                            // ✅ FIX: Si el lead ya existe, lo actualiza. Si NO existe (te lo acaban de asignar), lo AGREGA.
-                            setLeads(prev => {
-                                const exists = prev.some(l => l.id === updated.id)
-                                if (exists) {
-                                    return prev.map(l => l.id === updated.id ? updated : l)
-                                } else {
-                                    // 🔥 NOTIFICACIÓN NATIVA (SI ME LO ASIGNARON MIENTRAS ESTABA EN OTRA COSA)
-                                    sendNativeNotification("¡Lead Recibido! 📥", `${updated.name} apareció en tu tablero.`);
-                                    
-                                    toast.success(`¡Lead Asignado! ${updated.name}`, {
-                                        description: "Se agregó a tu tablero."
-                                    })
-                                    return [updated, ...prev]
-                                }
-                            })
-                        }
+                    // Notificación Completa (Toast + Nativa + Sonido)
+                    sendNativeNotification(title, body);
+                    toast.success(title, { description: body, action: { label: "Ver", onClick: () => onLeadClick && onLeadClick(newData.id) } })
+
+                    // ✅ GUARDAR EN DB PARA LA CAMPANITA
+                    await supabase.from('notifications').insert({
+                        user_name: CURRENT_USER,
+                        title: title,
+                        body: body,
+                        type: 'lead_assigned',
+                        lead_id: newData.id,
+                        read: false
+                    });
+                } 
+                
+                // B) CAMBIO DE ESTADO EN MYSALESVIEW (Req #4)
+                if (payload.eventType === 'UPDATE' && newData) {
+                    const updated = mapLeads([newData])[0]
+                    
+                    // Si sigue en el tablero, actualizarlo
+                    if (['nuevo', 'contactado', 'cotizacion', 'documentacion'].includes(updated.status)) {
+                        setLeads(prev => {
+                            const exists = prev.some(l => l.id === updated.id)
+                            return exists ? prev.map(l => l.id === updated.id ? updated : l) : [updated, ...prev]
+                        })
+                    } else {
+                        // Si se fue a otra etapa (vendido, perdido, etc), sacarlo
+                        setLeads(prev => prev.filter(l => l.id !== updated.id))
+                    }
+
+                    // DETECTOR DE CAMBIO DE ESTADO (De Legajo a Medicas, etc)
+                    // Solo si cambió el status y es uno de los estados de OPS
+                    const opsStages = ['precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'vendido'];
+                    
+                    if (oldData && newData.status !== oldData.status && opsStages.includes(newData.status)) {
+                        const title = "Movimiento en Venta 🔄";
+                        const body = `${newData.name} pasó a: ${newData.status.toUpperCase()}`;
+
+                        sendNativeNotification(title, body);
+                        toast.info(title, { description: body })
+
+                        // ✅ GUARDAR EN DB PARA LA CAMPANITA
+                        await supabase.from('notifications').insert({
+                            user_name: CURRENT_USER,
+                            title: title,
+                            body: body,
+                            type: 'lead_stage_change',
+                            lead_id: newData.id,
+                            read: false
+                        });
                     }
                 }
             })
             .subscribe()
         
-        // Canal de Mensajes (Admin/Ops)
+        // --- ⚡ 2. CANAL DE CHATS (Req #2) ---
         const chatChannel = supabase.channel('kanban_messages')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages' }, async (payload) => {
                 const msg = payload.new as any
-                if (msg.target_role === 'seller' || msg.sender === 'Supervisión' || msg.sender === 'Administración') {
+                
+                // Solo si NO soy yo quien mandó el mensaje
+                if (msg.sender !== CURRENT_USER) {
+                    // Verificar si el lead es mío (Doble chequeo)
                     const { data: leadData } = await supabase.from('leads').select('agent_name, name').eq('id', msg.lead_id).single()
+                    
                     if (leadData && leadData.agent_name === CURRENT_USER) {
-                        
-                        // 🔥 NOTIFICACIÓN NATIVA DE MENSAJE
-                        sendNativeNotification(`Mensaje de ${msg.sender} 💬`, `${leadData.name}: ${msg.text}`);
+                        const title = `Mensaje de ${msg.sender} 💬`;
+                        const body = `${leadData.name}: ${msg.text}`;
 
-                        toast.message(`Mensaje de ${msg.sender}`, {
-                            description: `${leadData.name}: ${msg.text.substring(0, 30)}...`,
-                            action: { label: "Responder", onClick: () => onLeadClick && onLeadClick(msg.lead_id) } 
-                        })
+                        sendNativeNotification(title, body);
+                        toast.message(title, { description: body, action: { label: "Responder", onClick: () => onLeadClick && onLeadClick(msg.lead_id) } })
+
+                        // ✅ GUARDAR EN DB PARA LA CAMPANITA
+                        await supabase.from('notifications').insert({
+                            user_name: CURRENT_USER,
+                            title: title,
+                            body: body,
+                            type: 'chat_message',
+                            lead_id: msg.lead_id,
+                            read: false
+                        });
                     }
                 }
             })
             .subscribe()
 
-        // ✅ NUEVO CANAL: Escucha la tabla de Anuncios Globales
+        // --- ⚡ 3. CANAL DE NOTIFICACIONES ADMIN (Req #3) ---
+        // Escucha la tabla de notificaciones para ver si Admin me mandó algo
+        const notifChannel = supabase.channel('kanban_notifications_direct')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_name=eq.${CURRENT_USER}` }, (payload) => {
+                const n = payload.new as any;
+                // Evitamos duplicar lo que acabamos de generar nosotros (los 'lead_assigned', 'chat_message', etc)
+                // Solo queremos lo que venga de ADMIN manual
+                const autoTypes = ['lead_assigned', 'lead_stage_change', 'chat_message'];
+                
+                if (!autoTypes.includes(n.type)) {
+                    sendNativeNotification(n.title, n.body);
+                    toast.info(n.title, { description: n.body });
+                }
+            })
+            .subscribe()
+
+        // ANUNCIOS GLOBALES
         const announcementsChannel = supabase.channel('kanban_announcements')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, (payload) => {
                 const newData = payload.new as any
                 if(newData.is_blocking) {
                     setUrgentMessage(newData.message)
                     setAnnouncementId(newData.id)
-                    // 🔥 NOTIFICACIÓN NATIVA DE ANUNCIO
                     sendNativeNotification("⚠️ Comunicado Urgente", newData.message);
                 }
             })
@@ -337,8 +356,9 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         }
         
         return () => { 
-            supabase.removeChannel(channel);
+            supabase.removeChannel(leadsChannel);
             supabase.removeChannel(chatChannel);
+            supabase.removeChannel(notifChannel);
             supabase.removeChannel(announcementsChannel);
             stopAudio();
         }
@@ -351,7 +371,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             const urgentLead = leads.find(l => l.scheduled_for && new Date(l.scheduled_for) <= now && !ignoredAlarmIds.includes(l.id));
             if (urgentLead && !alarmLead && !showConfirmCall) {
                 setAlarmLead(urgentLead);
-                // 🔥 NOTIFICACIÓN NATIVA DE AGENDA
                 sendNativeNotification("⏰ ¡Llamada Programada!", `Tenés que llamar a ${urgentLead.name} ahora.`);
             }
         };
@@ -508,81 +527,60 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             {/* ... DIALOGS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
             
-            {/* ✅ FIX REAL: guardamos lo que manda WonLeadDialog (columnas reales) */}
+            {/* ✅ FIX VENTA CONFIRMADA: Mapeo de campos completo para que Admin vea todo */}
             <WonLeadDialog 
                 open={isWonDialogOpen} 
-                onOpenChange={setIsWonDialogOpen}
-                leadId={leadProcessingId || ""} // ✅ ÚNICO CAMBIO: Pasamos leadId para upload real
+                onOpenChange={setIsWonDialogOpen} 
                 onConfirm={async (data: any) => { 
-                    const leadId = leadProcessingId
-                    if (!leadId) return
+                    const leadId = leadProcessingId; 
+                    if (!leadId) return; 
                     
-                    const nowIso = new Date().toISOString()
+                    const { files, ...leadData } = data; 
+                    const oldLead = leads.find(l => l.id === leadId); 
+                    
+                    // Actualizar UI local
+                    setLeads(prev => prev.filter(l => l.id !== leadId)); 
+                    setIsWonDialogOpen(false); 
 
-                    // Helpers seguros (no rompen nada)
-                    const toNum = (v: any) => {
-                        if (v === null || v === undefined || v === "") return 0
-                        const n = Number(v)
-                        return Number.isFinite(n) ? n : 0
-                    }
-                    const stripUndef = (obj: any) => Object.fromEntries(Object.entries(obj).filter(([,v]) => v !== undefined))
+                    // Preparar payload completo
+                    const payload: any = { 
+                        status: 'vendido', 
+                        last_update: new Date().toISOString(), 
+                        
+                        // Campos de Cotización (Visual)
+                        quoted_price: leadData.price ? Number(leadData.price) : 0, 
+                        quoted_prepaga: leadData.prepaga || null, 
+                        quoted_plan: leadData.plan || null, 
 
-                    const { files, ...leadData } = (data || {})
-                    const oldLead = leads.find(l => l.id === leadId)
+                        // ✅ CAMPOS REALES (PARA ADMIN)
+                        full_price: leadData.price ? Number(leadData.price) : 0,
+                        price: leadData.price ? Number(leadData.price) : 0,
+                        prepaga: leadData.prepaga || null,
+                        plan: leadData.plan || null,
+                        
+                        // Campos Numéricos
+                        afiliado_number: leadData.afiliado_number || null,
+                        cuit: leadData.cuit || null,
+                        cbu: leadData.cbu || null, // Asegurar mapeo de CBU si existe
+                        
+                        // Campos Monetarios
+                        aportes: leadData.aporte ? Number(leadData.aporte) : 0,
+                        derivacion_aportes: leadData.derivacion_aportes || null,
+                        cant_capitas: leadData.cant_capitas ? Number(leadData.cant_capitas) : 1,
 
-                    // UI local: lo sacamos del tablero (va a Ops)
-                    setLeads(prev => prev.filter(l => l.id !== leadId))
-                    setIsWonDialogOpen(false)
+                        // Notas
+                        notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes 
+                    }; 
 
-                    /**
-                     * IMPORTANTÍSIMO:
-                     * - NO forzamos status="vendido"
-                     * - NO usamos price/aporte/cant_capitas/etc (nombres viejos)
-                     * - Guardamos el objeto que arma WonLeadDialog (nombres reales de tu tabla)
-                     */
-                    const payloadBase: any = {
-                        ...leadData,
-                        last_update: nowIso,
-                    }
-
-                    // quoted_* para visual (por si querés métricas / historial visual)
-                    const qPrice = payloadBase.full_price != null ? toNum(payloadBase.full_price) : (payloadBase.quoted_price != null ? toNum(payloadBase.quoted_price) : 0)
-                    const qPrep = payloadBase.prepaga ?? payloadBase.quoted_prepaga ?? null
-                    const qPlan = payloadBase.plan ?? payloadBase.quoted_plan ?? null
-
-                    const payload: any = {
-                        ...payloadBase,
-                        quoted_price: qPrice,
-                        quoted_prepaga: qPrep,
-                        quoted_plan: qPlan,
-
-                        // Normalizamos números típicos si vinieran como string
-                        full_price: payloadBase.full_price != null ? toNum(payloadBase.full_price) : undefined,
-                        aportes: payloadBase.aportes != null ? toNum(payloadBase.aportes) : undefined,
-                        descuento: payloadBase.descuento != null ? toNum(payloadBase.descuento) : undefined,
-                        total_a_pagar: payloadBase.total_a_pagar != null ? toNum(payloadBase.total_a_pagar) : undefined,
-                        capitas: payloadBase.capitas != null ? Math.max(0, parseInt(String(payloadBase.capitas), 10) || 0) : undefined,
-                    }
-
-                    // Notes: si el wizard mandó notes, apendizamos sin romper (no pisamos)
-                    if (leadData?.notes) {
-                        const prev = (oldLead?.notes || "").toString()
-                        payload.notes = prev ? `${prev}\n${leadData.notes}` : leadData.notes
-                    }
-
-                    const finalPayload = stripUndef(payload)
-
-                    const { error } = await supabase.from('leads').update(finalPayload).eq('id', leadId)
-
+                    // ✅ GUARDAR ARCHIVOS (SI EXISTEN)
+                    const { error } = await supabase.from('leads').update(payload).eq('id', leadId); 
+                    
                     if (error) { 
-                        console.error("Error confirmando venta:", error)
-                        alert(`Hubo un error al guardar: ${error.message}`)
-                        // (No reponemos el lead en UI para no mezclar estados)
+                        console.error("Error confirmando venta:", error); 
+                        alert("Hubo un error al guardar. Verificá los campos numéricos."); 
                     } else if (oldLead) { 
-                        // historia: del status actual a lo que mandó el wizard (normalmente 'ingresado')
-                        const toStatus = (finalPayload.status || 'ingresado').toString()
-                        logHistory(leadId, oldLead.status, toStatus)
-                    }
+                        logHistory(leadId, oldLead.status, 'vendido') 
+                    } 
                 }} 
             />
 

@@ -322,13 +322,11 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             .subscribe()
 
         // --- 3. CANAL DE NOTIFICACIONES ADMIN (Req #3) ---
-        // Escucha la tabla de notificaciones para ver si Admin me mandó algo
         const notifChannel = supabase.channel('kanban_notifications_direct')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_name=eq.${CURRENT_USER}` }, (payload) => {
                 const n = payload.new as any;
                 const autoTypes = ['lead_assigned', 'lead_stage_change', 'chat_message'];
                 
-                // Evitamos duplicar lo que acabamos de generar nosotros (los 'lead_assigned', 'chat_message', etc)
                 if (!autoTypes.includes(n.type)) {
                     sendNativeNotification(n.title, n.body);
                     toast.info(n.title, { description: n.body });
@@ -438,18 +436,13 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         setAlarmLead(null);
     }
 
-    // ✅ FUNCIÓN DE APLAZAR (RESTAURADA)
     const handleSnooze = async () => {
         if (!alarmLead) return;
         stopAudio();
         const leadId = alarmLead.id;
         const newTime = new Date(new Date().getTime() + 10 * 60000).toISOString();
-        
-        // Actualizar localmente
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: newTime } : l));
         setAlarmLead(null); 
-        
-        // Actualizar en DB
         await supabase.from('leads').update({ scheduled_for: newTime, last_update: new Date().toISOString() }).eq('id', leadId);
         toast.success("Alarma aplazada 10 minutos 💤");
     }
@@ -467,11 +460,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         const isTryingToGoBack = colIdx(overCol) < colIdx(activeLead.status);
         if (['cotizacion', 'documentacion'].includes(activeLead.status) && isTryingToGoBack) return;
         if (overCol && overCol !== activeLead.status && ACTIVE_COLUMNS.some(c => c.id === overCol)) {
-            
-            // ✅ LÓGICA INTELIGENTE DE COTIZACIÓN (FIX)
             if (overCol === 'cotizacion') { 
                 const hasQuote = (activeLead.quoted_price && activeLead.quoted_price > 0) || activeLead.quoted_plan
-                
                 if (!hasQuote) {
                     setLeadProcessingId(active.id as string); 
                     setIsQuoteDialogOpen(true); 
@@ -492,8 +482,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     return (
         <div className="flex flex-col h-full relative overflow-hidden bg-slate-50/50">
-            {/* SIN TOOLBAR - LIMPIO */}
-
             <DndContext sensors={sensors} collisionDetection={customCollisionDetection} onDragStart={(e) => setActiveId(e.active.id as string)} onDragEnd={handleDragEnd}>
                 <div className="flex-1 flex gap-6 overflow-x-auto p-8 h-full items-start">
                     {ACTIVE_COLUMNS.map((col) => (
@@ -525,61 +513,75 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             {/* ... DIALOGS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
             
-            {/* ✅ FIX VENTA CONFIRMADA: AGREGADO leadId */}
+            {/* ✅ FIX REAL (restaurado): guardamos EXACTO lo que manda WonLeadDialog */}
             <WonLeadDialog 
                 open={isWonDialogOpen} 
                 onOpenChange={setIsWonDialogOpen}
-                leadId={leadProcessingId || ""} // ✅ FIX: Prop faltante agregada
+                leadId={leadProcessingId || ""} 
                 onConfirm={async (data: any) => { 
-                    const leadId = leadProcessingId; 
-                    if (!leadId) return; 
+                    const leadId = leadProcessingId
+                    if (!leadId) return
                     
-                    const { files, ...leadData } = data; 
-                    const oldLead = leads.find(l => l.id === leadId); 
-                    
-                    // Actualizar UI local
-                    setLeads(prev => prev.filter(l => l.id !== leadId)); 
-                    setIsWonDialogOpen(false); 
+                    const nowIso = new Date().toISOString()
 
-                    // Preparar payload completo
-                    const payload: any = { 
-                        status: 'vendido', 
-                        last_update: new Date().toISOString(), 
-                        
-                        // Campos de Cotización (Visual)
-                        quoted_price: leadData.price ? Number(leadData.price) : 0, 
-                        quoted_prepaga: leadData.prepaga || null, 
-                        quoted_plan: leadData.plan || null, 
+                    // Helpers seguros
+                    const toNum = (v: any) => {
+                        if (v === null || v === undefined || v === "") return 0
+                        const n = Number(v)
+                        return Number.isFinite(n) ? n : 0
+                    }
+                    const stripUndef = (obj: any) => Object.fromEntries(Object.entries(obj).filter(([,v]) => v !== undefined))
 
-                        // ✅ CAMPOS REALES (PARA ADMIN)
-                        full_price: leadData.price ? Number(leadData.price) : 0,
-                        price: leadData.price ? Number(leadData.price) : 0,
-                        prepaga: leadData.prepaga || null,
-                        plan: leadData.plan || null,
-                        
-                        // Campos Numéricos
-                        afiliado_number: leadData.afiliado_number || null,
-                        cuit: leadData.cuit || null,
-                        cbu: leadData.cbu || null, // Asegurar mapeo de CBU si existe
-                        
-                        // Campos Monetarios
-                        aportes: leadData.aporte ? Number(leadData.aporte) : 0,
-                        derivacion_aportes: leadData.derivacion_aportes || null,
-                        cant_capitas: leadData.cant_capitas ? Number(leadData.cant_capitas) : 1,
+                    const { files, ...leadData } = (data || {})
+                    const oldLead = leads.find(l => l.id === leadId)
 
-                        // Notas
-                        notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes 
-                    }; 
+                    // UI local: lo sacamos del tablero (va a Ops)
+                    setLeads(prev => prev.filter(l => l.id !== leadId))
+                    setIsWonDialogOpen(false)
 
-                    // ✅ GUARDAR ARCHIVOS (SI EXISTEN)
-                    const { error } = await supabase.from('leads').update(payload).eq('id', leadId); 
-                    
+                    // Base: no inventamos columnas, guardamos lo que viene del dialog
+                    const payloadBase: any = {
+                        ...leadData,
+                        last_update: nowIso,
+                    }
+
+                    // quoted_* visual
+                    const qPrice = payloadBase.full_price != null ? toNum(payloadBase.full_price) : (payloadBase.quoted_price != null ? toNum(payloadBase.quoted_price) : 0)
+                    const qPrep = payloadBase.prepaga ?? payloadBase.quoted_prepaga ?? null
+                    const qPlan = payloadBase.plan ?? payloadBase.quoted_plan ?? null
+
+                    const payload: any = {
+                        ...payloadBase,
+                        quoted_price: qPrice,
+                        quoted_prepaga: qPrep,
+                        quoted_plan: qPlan,
+
+                        // Normalizamos números si vinieran como string
+                        full_price: payloadBase.full_price != null ? toNum(payloadBase.full_price) : undefined,
+                        aportes: payloadBase.aportes != null ? toNum(payloadBase.aportes) : undefined,
+                        descuento: payloadBase.descuento != null ? toNum(payloadBase.descuento) : undefined,
+                        total_a_pagar: payloadBase.total_a_pagar != null ? toNum(payloadBase.total_a_pagar) : undefined,
+                        capitas: payloadBase.capitas != null ? Math.max(0, parseInt(String(payloadBase.capitas), 10) || 0) : undefined,
+                    }
+
+                    // Notes: apendizamos sin romper
+                    if (leadData?.notes) {
+                        const prev = (oldLead?.notes || "").toString()
+                        payload.notes = prev ? `${prev}\n${leadData.notes}` : leadData.notes
+                    }
+
+                    const finalPayload = stripUndef(payload)
+
+                    const { error } = await supabase.from('leads').update(finalPayload).eq('id', leadId)
+
                     if (error) { 
-                        console.error("Error confirmando venta:", error); 
-                        alert("Hubo un error al guardar. Verificá los campos numéricos."); 
+                        console.error("Error confirmando venta:", error)
+                        // ✅ MOSTRAR EL ERROR REAL (así dejamos de adivinar)
+                        alert(`Hubo un error al guardar: ${error.message}`)
                     } else if (oldLead) { 
-                        logHistory(leadId, oldLead.status, 'vendido') 
-                    } 
+                        const toStatus = (finalPayload.status || 'ingresado').toString()
+                        logHistory(leadId, oldLead.status, toStatus)
+                    }
                 }} 
             />
 
@@ -605,7 +607,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             {/* ✅ 1. POP-UP PROFESIONAL DE ALARMA + SNOOZE */}
             <Dialog open={!!alarmLead} onOpenChange={(open) => !open && handleManageNow()}>
                 <DialogContent className="max-w-[400px] border-0 shadow-2xl p-0 overflow-hidden bg-white" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} aria-describedby="alarm-desc">
-                    
                     <div className="bg-[#1e3a8a] p-6 text-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-cyan-300"></div>
                         <div className="bg-white/10 p-3 rounded-full w-fit mx-auto mb-3 backdrop-blur-sm animate-[pulse_2s_infinite]">
@@ -633,7 +634,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                             >
                                 GESTIONAR AHORA
                             </Button>
-                            {/* ✅ BOTÓN SNOOZE (APLAZAR) - CON ÍCONO CLOCK SEGURO */}
                             <Button 
                                 onClick={handleSnooze}
                                 variant="outline"
@@ -646,7 +646,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </DialogContent>
             </Dialog>
 
-            {/* ✅ 2. DIÁLOGO DE CONFIRMACIÓN (Al tocar la campanita roja) */}
+            {/* ✅ 2. DIÁLOGO DE CONFIRMACIÓN */}
             <Dialog open={!!showConfirmCall} onOpenChange={() => setShowConfirmCall(null)}>
                 <DialogContent className="sm:max-w-md border-0 shadow-2xl bg-white rounded-2xl" aria-describedby="confirm-desc">
                     <DialogHeader className="text-center pb-2 pt-4">
@@ -670,7 +670,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 </DialogContent>
             </Dialog>
 
-            {/* ✅ 3. COMUNICADO URGENTE (BLOQUEANTE) - AHORA LEÍDO DE ANNOUNCEMENTS */}
+            {/* ✅ 3. COMUNICADO URGENTE */}
             <Dialog open={!!urgentMessage} onOpenChange={() => {}}>
                 <DialogContent className="bg-red-600 border-none text-white max-w-lg shadow-[0_0_100px_rgba(220,38,38,0.5)]" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
                     <div className="flex flex-col items-center text-center p-6 gap-4">

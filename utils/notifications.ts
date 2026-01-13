@@ -1,7 +1,7 @@
 // utils/notifications.ts
 
 // ✅ Corregido el .mp3 que faltaba
-const ALERT_SOUND = "https://assets.mixkit.co/active_storage/sfx/571/571-preview.mp3" 
+const ALERT_SOUND = "https://assets.mixkit.co/active_storage/sfx/2574/2574-preview.mp3" 
 
 /**
  * Solicita permiso al usuario para enviar notificaciones.

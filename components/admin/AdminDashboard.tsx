@@ -58,6 +58,13 @@ import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
 import { AdminRanking } from "@/components/admin/AdminRanking"
 
+// --- FORMATO DE HORA CORREGIDO (ARGENTINA) ---
+const formatTime = (dateString: string) => {
+    if (!dateString) return "--:--"
+    const date = new Date(dateString)
+    return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 // --- COMPONENTE DE VISIÓN GLOBAL ---
 function AdminOverview() {
   const supabase = createClient()
@@ -82,7 +89,7 @@ function AdminOverview() {
       setStats({ entered, completed, compliance: rate })
 
       const recent = leads.slice(0, 15).map((l: any) => ({
-        time: l.last_update ? new Date(l.last_update).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--",
+        time: formatTime(l.last_update), // ✅ HORA CORREGIDA
         agent: l.agent_name || l.operator || "Sistema",
         action: `${l.status?.toUpperCase()} - ${l.name}`,
         type: l.status?.toLowerCase() === "cumplidas" ? "good" : l.status?.toLowerCase() === "perdido" ? "bad" : "neutral",
@@ -288,7 +295,7 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                                                 <div>
                                                     <h5 className="text-xs font-bold text-slate-800">{n.title}</h5>
                                                     <p className="text-[10px] text-slate-500 mt-0.5">{n.body}</p>
-                                                    <span className="text-[9px] text-slate-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                                    <span className="text-[9px] text-slate-400 mt-1 block">{formatTime(n.created_at)}</span> {/* ✅ HORA CORREGIDA */}
                                                 </div>
                                             </div>
                                         </div>
@@ -364,20 +371,17 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     if (ids.length > 0) await supabase.from('notifications').update({ read: true }).in('id', ids)
   }
 
-  // ✅ CLICK EN NOTIFICACIÓN DE LA CAMPANITA
   const handleNotificationClick = async (n: any) => {
-      // 1. Navegación inteligente
       if (n.title?.includes("Lead Ingresado") || n.body?.includes("Nuevo dato")) {
           setView('leads')
       } else if (n.title?.includes("Cotización")) {
-          setView('conteo') // O leads, según prefieras
+          setView('conteo') 
       } else {
-          setView('team') // Asumimos mensaje interno
+          setView('team') 
       }
       
-      setIsBellOpen(false) // Cerrar popover
+      setIsBellOpen(false) 
 
-      // 2. Marcar como leído
       if (!n.read) {
           const newNotifs = notifications.filter(item => item.id !== n.id)
           setNotifications(newNotifs)
@@ -385,12 +389,11 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       }
   }
 
-  // ✅ CLICK EN TOAST FLOTANTE
   const handleAlertClick = () => {
       if (!incomingAlert) return
       
       if (incomingAlert.type === 'lead') setView('leads')
-      if (incomingAlert.type === 'quote') setView('conteo') // O leads
+      if (incomingAlert.type === 'quote') setView('conteo') 
       if (incomingAlert.type === 'msg') setView('team')
 
       setIncomingAlert(null)
@@ -403,14 +406,25 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const { data: profile } = await supabase.from('profiles').select('full_name, avatar_url, role').eq('id', user.id).single()
+        
+        const userName = profile?.full_name || user.email?.split("@")[0] || "Admin";
+
         setUserData({
-          name: profile?.full_name || user.email?.split("@")[0] || "Admin",
+          name: userName,
           email: user.email || "",
           avatar: profile?.avatar_url, 
           role: profile?.role || "Admin God"
         })
 
-        const { data: notifs } = await supabase.from('notifications').select('*').eq('read', false).order('created_at', { ascending: false }).limit(20)
+        // ✅ FILTRO QUIRÚRGICO INICIAL: Solo 'Administración' O 'Mi Nombre'
+        const { data: notifs } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('read', false)
+            .or(`user_name.eq.Administración,user_name.eq.${userName}`) // <--- ESTA ERA LA FUGA
+            .order('created_at', { ascending: false })
+            .limit(20)
+
         if(notifs) setNotifications(notifs)
 
         const profileChannel = supabase.channel("admin_profile_changes")
@@ -425,10 +439,9 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
     initUserData()
 
-    // 📡 CANAL DE ESCUCHA QUIRÚRGICO (FILTRO ESTRICTO)
     const globalChannel = supabase.channel("god_mode_global_filtered")
       
-      // 1. DATO INGRESADO (INSERT Nuevo Lead sin asignar)
+      // 1. DATO INGRESADO
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, (payload) => {
         const newLead = payload.new as any
         
@@ -440,13 +453,13 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               color: "text-emerald-400 border-l-emerald-500",
               name: newLead.name || "Nuevo Prospecto",
               info: newLead.source || "MetaAds",
-              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }), // ✅ HORA FIX
             })
             sendNativeNotification("¡Lead Ingresado!", `Nuevo dato desde ${newLead.source || "Web"}: ${newLead.name}`, true);
         }
       })
 
-      // 2. COTIZACIÓN REALIZADA (UPDATE status a 'cotizacion')
+      // 2. COTIZACIÓN REALIZADA
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "leads" }, (payload) => {
           const newData = payload.new as any
           const oldData = payload.old as any
@@ -459,16 +472,16 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   color: "text-yellow-400 border-l-yellow-500",
                   name: newData.name,
                   info: `Vendedor: ${newData.agent_name}`,
-                  time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                  time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }) // ✅ HORA FIX
               })
               sendNativeNotification("Cotización Nueva", `${newData.agent_name} cotizó a ${newData.name}`, true);
           }
       })
 
-      // 3. MENSAJES INTERNOS (INSERT en notifications para Admin)
+      // 3. MENSAJES INTERNOS (SOLO ADMIN)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
            const notif = payload.new as any;
-           // Filtro estricto: Solo si es para Admin o Administración
+           // Filtro estricto
            if (notif.user_name === 'Administración' || notif.user_name === userData.name) {
                setNotifications(prev => [notif, ...prev])
                
@@ -479,7 +492,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                    color: "text-blue-400 border-l-blue-500",
                    name: notif.title,
                    info: notif.body,
-                   time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                   time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }) // ✅ HORA FIX
                })
 
                sendNativeNotification("Mensaje Interno", notif.title, true);

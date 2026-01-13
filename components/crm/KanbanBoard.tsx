@@ -27,7 +27,7 @@ import { LostLeadDialog } from "@/components/seller/LostLeadDialog"
 import { WonLeadDialog } from "@/components/seller/WonLeadDialog" 
 import { QuotationDialog } from "@/components/seller/QuotationDialog"
 
-// ✅ SONIDO PROFESIONAL (Software Interface Start)
+// ✅ SONIDO PROFESIONAL
 const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/2574/2574-preview.mp3"
 
 const ACTIVE_COLUMNS = [
@@ -179,7 +179,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (data) setLeads(mapLeads(data))
     }
 
-    // ✅ LÓGICA DE COMUNICADOS
     const checkUrgentMessage = async () => {
         const { data } = await supabase.from('announcements').select('*').eq('is_blocking', true).order('created_at', { ascending: false }).limit(1).single()
         if (data) {
@@ -217,12 +216,13 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
     }
 
+    // ✅ EFECTO BLINDADO DE NOTIFICACIONES
     useEffect(() => {
         requestNotificationPermission();
         fetchLeads()
         checkUrgentMessage()
 
-        // --- ⚡ 1. CANAL DE LEADS (FILTRADO SOLO PARA MÍ) ---
+        // --- 1. CANAL DE LEADS (Solo mis datos) ---
         const leadsChannel = supabase.channel('kanban_leads_vfinal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, async (payload) => {
                 const newData = payload.new as any;
@@ -267,7 +267,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                     }
 
                     // DETECTOR DE CAMBIO DE ESTADO (De Legajo a Medicas, etc)
-                    // Solo si cambió el status y es uno de los estados de OPS
                     const opsStages = ['precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'vendido'];
                     
                     if (oldData && newData.status !== oldData.status && opsStages.includes(newData.status)) {
@@ -291,7 +290,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             })
             .subscribe()
         
-        // --- ⚡ 2. CANAL DE CHATS (Req #2) ---
+        // --- 2. CANAL DE CHATS (Req #2) ---
         const chatChannel = supabase.channel('kanban_messages')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages' }, async (payload) => {
                 const msg = payload.new as any
@@ -322,15 +321,14 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             })
             .subscribe()
 
-        // --- ⚡ 3. CANAL DE NOTIFICACIONES ADMIN (Req #3) ---
+        // --- 3. CANAL DE NOTIFICACIONES ADMIN (Req #3) ---
         // Escucha la tabla de notificaciones para ver si Admin me mandó algo
         const notifChannel = supabase.channel('kanban_notifications_direct')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_name=eq.${CURRENT_USER}` }, (payload) => {
                 const n = payload.new as any;
-                // Evitamos duplicar lo que acabamos de generar nosotros (los 'lead_assigned', 'chat_message', etc)
-                // Solo queremos lo que venga de ADMIN manual
                 const autoTypes = ['lead_assigned', 'lead_stage_change', 'chat_message'];
                 
+                // Evitamos duplicar lo que acabamos de generar nosotros (los 'lead_assigned', 'chat_message', etc)
                 if (!autoTypes.includes(n.type)) {
                     sendNativeNotification(n.title, n.body);
                     toast.info(n.title, { description: n.body });
@@ -527,10 +525,11 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             {/* ... DIALOGS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
             
-            {/* ✅ FIX VENTA CONFIRMADA: Mapeo de campos completo para que Admin vea todo */}
+            {/* ✅ FIX VENTA CONFIRMADA: AGREGADO leadId */}
             <WonLeadDialog 
                 open={isWonDialogOpen} 
-                onOpenChange={setIsWonDialogOpen} 
+                onOpenChange={setIsWonDialogOpen}
+                leadId={leadProcessingId || ""} // ✅ FIX: Prop faltante agregada
                 onConfirm={async (data: any) => { 
                     const leadId = leadProcessingId; 
                     if (!leadId) return; 

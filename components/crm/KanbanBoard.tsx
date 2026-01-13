@@ -508,60 +508,81 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             {/* ... DIALOGS ... */}
             <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
             
-            {/* ✅ FIX VENTA CONFIRMADA: Mapeo de campos completo para que Admin vea todo */}
+            {/* ✅ FIX REAL: guardamos lo que manda WonLeadDialog (columnas reales) */}
             <WonLeadDialog 
                 open={isWonDialogOpen} 
-                onOpenChange={setIsWonDialogOpen} 
+                onOpenChange={setIsWonDialogOpen}
+                leadId={leadProcessingId || ""} // ✅ ÚNICO CAMBIO: Pasamos leadId para upload real
                 onConfirm={async (data: any) => { 
-                    const leadId = leadProcessingId; 
-                    if (!leadId) return; 
+                    const leadId = leadProcessingId
+                    if (!leadId) return
                     
-                    const { files, ...leadData } = data; 
-                    const oldLead = leads.find(l => l.id === leadId); 
-                    
-                    // Actualizar UI local
-                    setLeads(prev => prev.filter(l => l.id !== leadId)); 
-                    setIsWonDialogOpen(false); 
+                    const nowIso = new Date().toISOString()
 
-                    // Preparar payload completo
-                    const payload: any = { 
-                        status: 'vendido', 
-                        last_update: new Date().toISOString(), 
-                        
-                        // Campos de Cotización (Visual)
-                        quoted_price: leadData.price ? Number(leadData.price) : 0, 
-                        quoted_prepaga: leadData.prepaga || null, 
-                        quoted_plan: leadData.plan || null, 
+                    // Helpers seguros (no rompen nada)
+                    const toNum = (v: any) => {
+                        if (v === null || v === undefined || v === "") return 0
+                        const n = Number(v)
+                        return Number.isFinite(n) ? n : 0
+                    }
+                    const stripUndef = (obj: any) => Object.fromEntries(Object.entries(obj).filter(([,v]) => v !== undefined))
 
-                        // ✅ CAMPOS REALES (PARA ADMIN)
-                        full_price: leadData.price ? Number(leadData.price) : 0,
-                        price: leadData.price ? Number(leadData.price) : 0,
-                        prepaga: leadData.prepaga || null,
-                        plan: leadData.plan || null,
-                        
-                        // Campos Numéricos
-                        afiliado_number: leadData.afiliado_number || null,
-                        cuit: leadData.cuit || null,
-                        cbu: leadData.cbu || null, // Asegurar mapeo de CBU si existe
-                        
-                        // Campos Monetarios
-                        aportes: leadData.aporte ? Number(leadData.aporte) : 0,
-                        derivacion_aportes: leadData.derivacion_aportes || null,
-                        cant_capitas: leadData.cant_capitas ? Number(leadData.cant_capitas) : 1,
+                    const { files, ...leadData } = (data || {})
+                    const oldLead = leads.find(l => l.id === leadId)
 
-                        // Notas
-                        notes: leadData.notes ? (oldLead?.notes || "") + `\n[VENTA]: ${leadData.notes}` : oldLead?.notes 
-                    }; 
+                    // UI local: lo sacamos del tablero (va a Ops)
+                    setLeads(prev => prev.filter(l => l.id !== leadId))
+                    setIsWonDialogOpen(false)
 
-                    // ✅ GUARDAR ARCHIVOS (SI EXISTEN)
-                    const { error } = await supabase.from('leads').update(payload).eq('id', leadId); 
-                    
+                    /**
+                     * IMPORTANTÍSIMO:
+                     * - NO forzamos status="vendido"
+                     * - NO usamos price/aporte/cant_capitas/etc (nombres viejos)
+                     * - Guardamos el objeto que arma WonLeadDialog (nombres reales de tu tabla)
+                     */
+                    const payloadBase: any = {
+                        ...leadData,
+                        last_update: nowIso,
+                    }
+
+                    // quoted_* para visual (por si querés métricas / historial visual)
+                    const qPrice = payloadBase.full_price != null ? toNum(payloadBase.full_price) : (payloadBase.quoted_price != null ? toNum(payloadBase.quoted_price) : 0)
+                    const qPrep = payloadBase.prepaga ?? payloadBase.quoted_prepaga ?? null
+                    const qPlan = payloadBase.plan ?? payloadBase.quoted_plan ?? null
+
+                    const payload: any = {
+                        ...payloadBase,
+                        quoted_price: qPrice,
+                        quoted_prepaga: qPrep,
+                        quoted_plan: qPlan,
+
+                        // Normalizamos números típicos si vinieran como string
+                        full_price: payloadBase.full_price != null ? toNum(payloadBase.full_price) : undefined,
+                        aportes: payloadBase.aportes != null ? toNum(payloadBase.aportes) : undefined,
+                        descuento: payloadBase.descuento != null ? toNum(payloadBase.descuento) : undefined,
+                        total_a_pagar: payloadBase.total_a_pagar != null ? toNum(payloadBase.total_a_pagar) : undefined,
+                        capitas: payloadBase.capitas != null ? Math.max(0, parseInt(String(payloadBase.capitas), 10) || 0) : undefined,
+                    }
+
+                    // Notes: si el wizard mandó notes, apendizamos sin romper (no pisamos)
+                    if (leadData?.notes) {
+                        const prev = (oldLead?.notes || "").toString()
+                        payload.notes = prev ? `${prev}\n${leadData.notes}` : leadData.notes
+                    }
+
+                    const finalPayload = stripUndef(payload)
+
+                    const { error } = await supabase.from('leads').update(finalPayload).eq('id', leadId)
+
                     if (error) { 
-                        console.error("Error confirmando venta:", error); 
-                        alert("Hubo un error al guardar. Verificá los campos numéricos."); 
+                        console.error("Error confirmando venta:", error)
+                        alert(`Hubo un error al guardar: ${error.message}`)
+                        // (No reponemos el lead en UI para no mezclar estados)
                     } else if (oldLead) { 
-                        logHistory(leadId, oldLead.status, 'vendido') 
-                    } 
+                        // historia: del status actual a lo que mandó el wizard (normalmente 'ingresado')
+                        const toStatus = (finalPayload.status || 'ingresado').toString()
+                        logHistory(leadId, oldLead.status, toStatus)
+                    }
                 }} 
             />
 

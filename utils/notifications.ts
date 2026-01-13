@@ -1,6 +1,7 @@
 // utils/notifications.ts
 
-const ALERT_SOUND = "https://assets.mixkit.co/active_storage/sfx/571/571-preview.mp" // Un sonido de 'Ding' suave
+// ✅ Corregido el .mp3 que faltaba
+const ALERT_SOUND = "https://assets.mixkit.co/active_storage/sfx/571/571-preview.mp3" 
 
 /**
  * Solicita permiso al usuario para enviar notificaciones.
@@ -17,28 +18,33 @@ export async function requestNotificationPermission() {
 
 /**
  * Envía una notificación nativa del sistema operativo.
- * Funciona aunque el navegador esté minimizado.
+ * @param title Título de la notificación
+ * @param body Cuerpo del mensaje
+ * @param playSound (Opcional) Define si reproduce sonido. Por defecto es TRUE.
+ * En OpsManager usalo como false para que no se mezcle con la alarma.
  */
-export function sendNativeNotification(title: string, body: string) {
+export function sendNativeNotification(title: string, body: string, playSound: boolean = true) {
     if (typeof window === "undefined" || !("Notification" in window)) return;
 
     if (Notification.permission === "granted") {
         
-        // 1. Intentar reproducir sonido
-        try {
-            const audio = new Audio(ALERT_SOUND);
-            audio.volume = 0.6;
-            audio.play().catch(() => {}); // Ignora errores si el navegador bloquea el audio
-        } catch (e) {
-            // Fallo silencioso de audio
+        // 1. Reproducir sonido SOLO si playSound es true (Default: Sí)
+        if (playSound) {
+            try {
+                const audio = new Audio(ALERT_SOUND);
+                audio.volume = 0.6;
+                audio.play().catch(() => {}); // Ignora errores de autoplay
+            } catch (e) {
+                // Fallo silencioso de audio
+            }
         }
 
         // 2. Crear la notificación visual
         const notification = new Notification(title, {
             body: body,
-            // Si tienes un logo en public/logo.png o .ico, úsalo aquí. Si no, usa el default del navegador.
             icon: "/favicon.ico", 
-            silent: true, // Ponemos true porque manejamos el sonido nosotros manualmente arriba
+            // Ponemos silent: true nativo siempre, porque el sonido lo manejamos manualmente nosotros (arriba o en el componente)
+            silent: true, 
         });
 
         // 3. Al hacer click, traer la ventana al frente

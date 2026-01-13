@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 // 1. IMPORTAMOS SUPABASE
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
@@ -34,7 +34,10 @@ import { OpsSettings } from "./OpsSettings"
 import { OpsAnnouncements } from "./OpsAnnouncements" 
 import { OpsBilling } from "./OpsBilling" 
 import { OpsPostSale } from "./OpsPostSale"
-import { OpsHistory } from "./OpsHistory" // ✅ 1. IMPORTAMOS EL HISTORIAL
+import { OpsHistory } from "./OpsHistory"
+
+// SONIDO DE NOTIFICACIÓN
+const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3"
 
 interface OpsManagerProps { role: 'admin_god' | 'admin_common' | 'ops', userName: string }
 
@@ -42,8 +45,16 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const supabase = createClient()
     const [sidebarOpen, setSidebarOpen] = useState(true) 
     const [isLoading, setIsLoading] = useState(false)
+    const audioRef = useRef<HTMLAudioElement | null>(null)
+
+    // ✅ INICIALIZACIÓN DE AUDIO
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            audioRef.current = new Audio(ALARM_SOUND);
+        }
+    }, [])
     
-    // ✅ 1. INICIALIZACIÓN INTELIGENTE (Lee la URL al cargar para no volver al inicio)
+    // ✅ 1. INICIALIZACIÓN INTELIGENTE
     const [viewMode, setViewMode] = useState<'dashboard' | 'stage_list' | 'pool' | 'mine' | 'kanban' | 'agenda' | 'metrics' | 'chat' | 'database' | 'settings' | 'announcements' | 'billing' | 'post_sale' | 'history'>(() => {
         if (typeof window !== 'undefined') {
             const params = new URLSearchParams(window.location.search)
@@ -53,7 +64,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         return 'dashboard'
     })
 
-    // ✅ 2. EFECTO DE PERSISTENCIA (Actualiza la URL al cambiar de vista)
+    // ✅ 2. EFECTO DE PERSISTENCIA
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const params = new URLSearchParams(window.location.search)
@@ -114,7 +125,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const [confirmingRelease, setConfirmingRelease] = useState<Operation | null>(null)
     const [confirmingManualStatus, setConfirmingManualStatus] = useState<{op: Operation, newStatus: OpStatus} | null>(null)
     const [showCelebration, setShowCelebration] = useState(false)
-    const [toast, setToast] = useState<{msg: string, type: 'success'|'error'|'warning'} | null>(null)
+    const [toast, setToast] = useState<{msg: string, type: 'success'|'error'|'warning'|'info'} | null>(null)
 
     // --- CARGA MANUAL ---
     const [isManualLoadOpen, setIsManualLoadOpen] = useState(false)
@@ -125,7 +136,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         plan: "", 
         source: "", 
         specificSeller: "",
-        type: "alta" // 'alta' | 'pass'
+        type: "alta" 
     })
 
     // --- NOTIFICACIONES ---
@@ -138,6 +149,26 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const handleLogout = async () => {
         await supabase.auth.signOut()
         window.location.href = "/" 
+    }
+
+    // --- HELPER DE NOTIFICACIONES UNIFICADO ---
+    const notifyOPS = (title: string, body: string, type: 'success'|'info'|'warning' = 'info') => {
+        // 1. Toast Visual
+        showToast(title + ": " + body, type);
+        
+        // 2. Notificación Nativa del Navegador
+        sendNativeNotification(title, body);
+
+        // 3. Sonido
+        if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play().catch(e => console.log("Audio blocked:", e));
+        }
+    }
+
+    const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'success') => { 
+        setToast({ msg, type }); 
+        setTimeout(() => setToast(null), 5000) 
     }
 
     // --- CARGA DE DATOS ---
@@ -174,10 +205,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- NOTIFICACIONES ---
     const fetchNotifications = async () => {
+        // Escuchar notificaciones MÍAS, de "OPS" o de "Administración"
         const { data } = await supabase
             .from('notifications')
             .select('*')
-            .eq('user_name', userName) 
+            .or(`user_name.eq.${userName},user_name.eq.OPS,user_name.eq.Administración`) 
             .eq('read', false)
             .order('created_at', { ascending: false })
             .limit(20)
@@ -187,10 +219,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const markAllRead = async () => {
         const ids = notifications.map(n => n.id)
-        setNotifications([]) 
+        setNotifications([]) // Limpiar visualmente
         if (ids.length > 0) {
             await supabase.from('notifications').update({ read: true }).in('id', ids)
         }
+        showToast("Notificaciones limpiadas", 'success');
     }
 
     const handleNotificationClick = async (n: any) => {
@@ -200,16 +233,21 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
         
         if (n.lead_id) {
+            // Intentar encontrar la operación en la memoria local
             let targetOp = operations.find(o => o.id === n.lead_id)
+            
+            // Si no está (ej: recién vendida y no refrescada), buscarla en DB
             if (!targetOp) {
                 const { data } = await supabase.from('leads').select('*').eq('id', n.lead_id).single()
                 if (data) {
                     targetOp = { ...data, id: data.id, clientName: data.name, status: data.status } as any
                 }
             }
+
             if (targetOp) {
-                setSelectedOp(targetOp)
-                setIsBellOpen(false) 
+                setViewMode('pool'); // Ir a la vista general para ver el modal tranquilo
+                setSelectedOp(targetOp);
+                setIsBellOpen(false);
             }
         }
     }
@@ -297,7 +335,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     billing_price_override: op.billing_price_override,
                     billing_portfolio_override: op.billing_portfolio_override,
                     fecha_alta: op.fecha_alta,
-                    fecha_ingreso: op.fecha_ingreso
+                    fecha_ingreso: op.fecha_ingreso,
+                    post_sale_action: op.post_sale_action,
+                    post_sale_status: op.post_sale_status
                 }
             })
             setOperations(mappedOps)
@@ -306,7 +346,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }
 
     useEffect(() => {
-        // ✅ 1. Pedir permiso al cargar
+        // 1. Pedir permiso al cargar
         requestNotificationPermission();
 
         fetchProfiles()
@@ -315,28 +355,65 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         fetchOperations()
         fetchNotifications() 
         
-        const channel = supabase.channel('ops-realtime-manager')
+        // --- ⚡ EL OÍDO BIÓNICO DE OPS ⚡ ---
+        const channel = supabase.channel('ops-realtime-manager-global')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 const newData = payload.new as any
                 const oldData = payload.old as any
 
+                // 1. DETECTOR DE VENTA NUEVA (INSERT o UPDATE a vendido/ingresado)
                 if (
                     (payload.eventType === 'INSERT' && (newData.status === 'vendido' || newData.status === 'ingresado')) ||
-                    (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData.status !== newData.status)
+                    (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData?.status !== newData.status)
                 ) {
                     setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
+                    notifyOPS("¡Venta Nueva! 🚀", `${newData.agent_name} ingresó a ${newData.name}`, 'success');
+                }
+
+                // 2. DETECTOR DE CAMBIO DE ESTADO (Para flujo)
+                if (payload.eventType === 'UPDATE' && oldData && newData.status !== oldData.status && newData.status !== 'ingresado' && newData.status !== 'vendido') {
+                    // Ignoramos movimientos previos a la venta (nuevo->contactado)
+                    if (['precarga', 'medicas', 'legajo', 'cumplidas', 'rechazado', 'demoras'].includes(newData.status)) {
+                        notifyOPS("Movimiento de Estado", `${newData.name} pasó a ${newData.status.toUpperCase()}`);
+                    }
+                }
+
+                // 3. DETECTOR DE NOTAS NUEVAS (Evitar notificarse a uno mismo)
+                if (payload.eventType === 'UPDATE' && oldData && newData.notes !== oldData.notes) {
+                     // Solo avisar si la nota no contiene el timestamp actual (algo rudimentario pero funcional)
+                     // O simplemente avisar genérico
+                     notifyOPS("Nueva Nota 📝", `Se agregó información en ${newData.name}`);
+                }
+
+                // 4. DETECTOR DE POSVENTA
+                if (payload.eventType === 'UPDATE' && oldData && (newData.post_sale_action !== oldData.post_sale_action || newData.post_sale_status !== oldData.post_sale_status)) {
+                    notifyOPS("Novedad Posventa 🛠️", `${newData.name}: ${newData.post_sale_action} (${newData.post_sale_status})`, 'warning');
+                }
+
+                // 5. DETECTOR DE CHATS (Analizando el JSON de comments)
+                if (payload.eventType === 'UPDATE' && oldData) {
+                    const oldComments = typeof oldData.comments === 'string' ? JSON.parse(oldData.comments || '[]') : (oldData.comments || []);
+                    const newComments = typeof newData.comments === 'string' ? JSON.parse(newData.comments || '[]') : (newData.comments || []);
                     
-                    // 🔥 NOTIFICACIÓN NATIVA DE VENTA 🔥
-                    sendNativeNotification("¡Venta Nueva! 🚀", `${newData.agent_name} vendió un plan ${newData.plan} a ${newData.name}.`);
+                    if (newComments.length > oldComments.length) {
+                        const lastMsg = newComments[newComments.length - 1];
+                        // Si el mensaje NO es mío, avisar
+                        if (lastMsg.author !== userName) {
+                            notifyOPS("Nuevo Mensaje 💬", `${lastMsg.author}: ${lastMsg.text}`, 'info');
+                        }
+                    }
                 }
                 
+                // Refrescar lista visual
                 fetchOperations() 
             })
+            // Escuchar tabla notifications para alertas directas
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
-                if (payload.new.user_name === userName || role === 'admin_god') {
+                // Filtro: Si es para MÍ, o para OPS, o para ADMIN (si soy admin)
+                const target = payload.new.user_name;
+                if (target === userName || target === 'OPS' || (role.includes('admin') && target === 'Administración')) {
                     setNotifications(prev => [payload.new, ...prev])
-                    // 🔥 NOTIFICACIÓN NATIVA DE MENSAJE O ALERTA INTERNA
-                    sendNativeNotification("Nueva Notificación 🔔", payload.new.title || "Tenés un mensaje nuevo.");
+                    notifyOPS("Nueva Notificación 🔔", payload.new.title || "Tenés un mensaje nuevo.");
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {
@@ -377,8 +454,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (dateFilter.end && op.entryDate > dateFilter.end) return false
         return true
     })
-
-    const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000) }
 
     const updateOpInDb = async (id: string, updates: any) => {
         const currentOp = operations.find(o => o.id === id)
@@ -654,14 +729,14 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                             <PopoverContent className="w-80 p-0" align="end">
                                 <div className="p-3 border-b flex justify-between items-center bg-slate-50">
                                     <span className="text-xs font-bold text-slate-600">Notificaciones</span>
-                                    {unreadCount > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600" onClick={markAllRead}>Marcar leídas</Button>}
+                                    {unreadCount > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600 hover:text-red-500" onClick={markAllRead}>Limpiar Todo</Button>}
                                 </div>
                                 <div className="max-h-[300px] overflow-y-auto">
                                     {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
                                         notifications.map((n) => (
                                             <div 
                                                 key={n.id} 
-                                                onClick={() => handleNotificationClick(n)} // ✅ CLICK PARA LEER Y ABRIR
+                                                onClick={() => handleNotificationClick(n)} 
                                                 className={`p-3 border-b hover:bg-slate-50 transition-colors cursor-pointer ${!n.read ? 'bg-blue-50/50' : ''}`}
                                             >
                                                 <div className="flex items-start gap-3">
@@ -690,9 +765,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         <div className="w-full h-full bg-slate-100 p-4 overflow-hidden">
                             <OpsKanban 
                                 operations={filteredOps} 
-                                profiles={profiles} // ✅ Pasamos los perfiles para las fotos
+                                profiles={profiles} 
                                 onSelectOp={handleCardClick} 
-                                onStatusChange={(id: string, newStatus: string) => updateOpInDb(id, { status: newStatus })} // ✅ Función para guardar el Drag & Drop
+                                onStatusChange={(id: string, newStatus: string) => updateOpInDb(id, { status: newStatus })} 
                             />
                         </div>
                     ) : (
@@ -713,7 +788,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 {viewMode === 'chat' && (<OpsChat currentUser={userName} operations={operations} onViewSale={(op: any) => { setViewMode('pool'); setSelectedOp(op); }} />)}
                                 {viewMode === 'database' && <OpsDatabase operations={filteredOps} onSelectOp={handleCardClick} />}
                                 {viewMode === 'announcements' && <OpsAnnouncements />} 
-                                {viewMode === 'history' && role === 'admin_god' && <OpsHistory />} {/* ✅ 3. RENDERIZAMOS EL COMPONENTE */}
+                                {viewMode === 'history' && role === 'admin_god' && <OpsHistory />} 
                             </div>
                         </ScrollArea>
                     )}
@@ -745,13 +820,9 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             {/* --- MODAL ASIGNAR OPERADOR (ESTÉTICA PREMIUM MEJORADA) --- */}
             <Dialog open={!!assigningOp} onOpenChange={(open) => !open && setAssigningOp(null)}>
                 <DialogContent className="max-w-[600px] w-full p-0 overflow-hidden border-0 shadow-2xl rounded-3xl gap-0 bg-slate-50">
-                    {/* Header Premium */}
                     <div className="bg-slate-900 p-8 relative flex flex-col items-center justify-center text-center overflow-hidden">
-                        {/* Background Pattern */}
                         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-400 via-slate-900 to-slate-900"></div>
-
                         <button onClick={() => setAssigningOp(null)} className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors z-20"><X size={20}/></button>
-
                         <div className="relative z-10 h-16 w-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-900/50 rotate-3">
                             <ShieldCheck className="h-8 w-8 text-white"/>
                         </div>
@@ -759,7 +830,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         <DialogDescription className="relative z-10 text-blue-200 text-sm mt-1 font-medium">Seleccioná quien gestionará este caso.</DialogDescription>
                     </div>
 
-                    {/* Grid Premium */}
                     <div className="p-8 bg-slate-50 grid grid-cols-2 gap-4 max-h-[450px] overflow-y-auto">
                         {adminUsers.length > 0 ? adminUsers.map((u) => (
                             <div 
@@ -767,19 +837,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 onClick={() => confirmAssignment(u.full_name || u.email)} 
                                 className="group relative cursor-pointer bg-white border border-slate-200 hover:border-blue-500/50 rounded-2xl p-4 flex items-center gap-4 hover:shadow-xl hover:shadow-blue-900/5 transition-all duration-300 active:scale-[0.98]"
                             >
-                                {/* Avatar Fix: object-cover y tamaño fijo */}
                                 <div className="relative shrink-0">
                                     <Avatar className="h-14 w-14 border-2 border-slate-100 shadow-sm group-hover:border-blue-100 transition-colors">
-                                        <AvatarImage 
-                                            src={u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`} 
-                                            className="object-cover h-full w-full" // CLAVE: object-cover para que no se deforme
-                                        />
+                                        <AvatarImage src={u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`} className="object-cover h-full w-full" />
                                         <AvatarFallback className="bg-slate-800 text-white font-bold">{u.full_name?.[0] || 'U'}</AvatarFallback>
                                     </Avatar>
-                                    {/* Status Dot */}
                                     <div className="absolute bottom-0 right-0 h-3.5 w-3.5 bg-green-500 border-2 border-white rounded-full"></div>
                                 </div>
-                                
                                 <div className="flex flex-col min-w-0">
                                     <span className="font-bold text-slate-700 text-sm group-hover:text-blue-700 truncate transition-colors">
                                         {u.full_name || 'Usuario'}
@@ -788,8 +852,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                         {u.role === 'admin_god' ? 'Admin' : 'Operador'}
                                     </span>
                                 </div>
-
-                                {/* Arrow icon on hover */}
                                 <div className="absolute right-4 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-[-10px] group-hover:translate-x-0 text-blue-500">
                                     <Check size={18} strokeWidth={3} />
                                 </div>
@@ -804,7 +866,6 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 </DialogContent>
             </Dialog>
 
-            {/* --- MODAL DE CARGA MANUAL MEJORADO (ALTA VS PASS + ORIGENES Y VENDEDOR SIEMPRE) --- */}
             <Dialog open={isManualLoadOpen} onOpenChange={setIsManualLoadOpen}>
                 <DialogContent className="max-w-lg p-0 overflow-hidden border-0 shadow-2xl rounded-2xl gap-0">
                     <div className="bg-[#1e3a8a] p-6 text-white text-center transition-colors duration-300">
@@ -818,22 +879,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     </div>
                     
                     <div className="p-6 bg-white space-y-5">
-                        {/* SELECTOR DE TIPO (ALTA VS PASS) */}
                         <div className="flex bg-slate-100 p-1 rounded-lg">
-                            <button 
-                                onClick={() => setManualLoadData({...manualLoadData, type: 'alta'})}
-                                className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'alta' ? 'bg-white text-blue-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                ✨ Alta Nueva
-                            </button>
-                            <button 
-                                onClick={() => setManualLoadData({...manualLoadData, type: 'pass'})}
-                                className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'pass' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                🔄 Pass
-                            </button>
+                            <button onClick={() => setManualLoadData({...manualLoadData, type: 'alta'})} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'alta' ? 'bg-white text-blue-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>✨ Alta Nueva</button>
+                            <button onClick={() => setManualLoadData({...manualLoadData, type: 'pass'})} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'pass' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>🔄 Pass</button>
                         </div>
-
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Nombre Completo</Label><Input value={manualLoadData.clientName} onChange={e => setManualLoadData({...manualLoadData, clientName: e.target.value})} placeholder="Ej: Juan Pérez" className="h-9 text-slate-900"/></div>
                             <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">DNI / CUIL</Label><Input value={manualLoadData.dni} onChange={e => setManualLoadData({...manualLoadData, dni: e.target.value})} placeholder="Sin puntos" className="h-9 text-slate-900"/></div>
@@ -841,48 +890,28 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1">
                                 <Label className="text-xs font-bold text-slate-500 uppercase">Prepaga</Label>
-                                {/* SELECTOR REAL DESDE GLOBAL CONFIG */}
                                 <Select value={manualLoadData.prepaga} onValueChange={(v) => setManualLoadData({...manualLoadData, prepaga: v})}>
                                     <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger>
-                                    <SelectContent>
-                                        {globalConfig.prepagas.map((p: any) => <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>)}
-                                    </SelectContent>
+                                    <SelectContent>{globalConfig.prepagas.map((p: any) => <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>)}</SelectContent>
                                 </Select>
                             </div>
                             <div className="space-y-1">
                                 <Label className="text-xs font-bold text-slate-500 uppercase">Plan</Label>
-                                {/* SELECTOR REAL DEPENDIENTE DE PREPAGA */}
                                 <Select value={manualLoadData.plan} onValueChange={(v) => setManualLoadData({...manualLoadData, plan: v})}>
                                     <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger>
-                                    <SelectContent>
-                                        {(() => {
-                                            const selectedPrepagaData = globalConfig.prepagas.find((p: any) => p.name === manualLoadData.prepaga);
-                                            return (selectedPrepagaData?.plans || []).map((plan: string) => (
-                                                <SelectItem key={plan} value={plan}>{plan}</SelectItem>
-                                            ));
-                                        })()}
-                                    </SelectContent>
+                                    <SelectContent>{(() => { const selectedPrepagaData = globalConfig.prepagas.find((p: any) => p.name === manualLoadData.prepaga); return (selectedPrepagaData?.plans || []).map((plan: string) => (<SelectItem key={plan} value={plan}>{plan}</SelectItem>)); })()}</SelectContent>
                                 </Select>
                             </div>
                         </div>
-                        
                         <Separator className="bg-slate-100"/>
-                        
                         <div className="grid grid-cols-2 gap-4">
-                             {/* SELECCION DE ORIGEN (DESPLEGABLE SIEMPRE) */}
                             <div className="space-y-1">
                                 <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Megaphone size={12}/> Origen del Dato</Label>
                                 <Select value={manualLoadData.source} onValueChange={(v) => setManualLoadData({...manualLoadData, source: v})}>
                                     <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Ej: Google Ads..."/></SelectTrigger>
-                                    <SelectContent>
-                                        {globalConfig.origins.map((src) => (
-                                             <SelectItem key={src} value={src}>{src}</SelectItem>
-                                        ))}
-                                    </SelectContent>
+                                    <SelectContent>{globalConfig.origins.map((src) => (<SelectItem key={src} value={src}>{src}</SelectItem>))}</SelectContent>
                                 </Select>
                             </div>
-
-                             {/* SELECCION DE VENDEDOR (DESPLEGABLE SIEMPRE) */}
                             <div className="space-y-1">
                                 <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><User size={12}/> Vendedor Responsable</Label>
                                 <Select value={manualLoadData.specificSeller} onValueChange={(v) => setManualLoadData({...manualLoadData, specificSeller: v})}>
@@ -900,14 +929,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     </div>
                     <DialogFooter className="p-6 bg-slate-50 border-t border-slate-100">
                         <Button variant="ghost" onClick={() => setIsManualLoadOpen(false)} className="text-slate-500">Cancelar</Button>
-                        <Button className="bg-[#1e3a8a] hover:bg-blue-900 text-white w-32 font-bold shadow-md transition-colors" onClick={handleCreateManualSale}>
-                            {manualLoadData.type === 'alta' ? 'Cargar Venta' : 'Cargar Pass'}
-                        </Button>
+                        <Button className="bg-[#1e3a8a] hover:bg-blue-900 text-white w-32 font-bold shadow-md transition-colors" onClick={handleCreateManualSale}>{manualLoadData.type === 'alta' ? 'Cargar Venta' : 'Cargar Pass'}</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* DIÁLOGOS DE CONFIRMACIÓN (Sin cambios) */}
             <Dialog open={!!confirmingAdvance} onOpenChange={(open) => !open && setConfirmingAdvance(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-blue-100 p-3 rounded-full mb-2"><Sparkles className="h-8 w-8 text-blue-600 animate-pulse"/></div><DialogTitle className="text-xl">¡Avanzar Etapa!</DialogTitle><DialogDescription>¿Avanzar caso a la siguiente etapa?</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmAdvanceAction} className="bg-blue-600 hover:bg-blue-700 w-full">Confirmar Avance</Button></DialogFooter></DialogContent></Dialog>
             <Dialog open={!!confirmingBack} onOpenChange={(open) => !open && setConfirmingBack(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-orange-100 p-3 rounded-full mb-2"><Undo2 className="h-8 w-8 text-orange-600"/></div><DialogTitle className="text-xl">Retroceder</DialogTitle><DialogDescription>El caso volverá a la etapa anterior.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmBackAction} variant="secondary" className="w-full border-orange-200 text-orange-700">Confirmar Retroceso</Button></DialogFooter></DialogContent></Dialog>
             <Dialog open={!!confirmingRelease} onOpenChange={(open) => !open && setConfirmingRelease(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-red-100 p-3 rounded-full mb-2"><Lock className="h-8 w-8 text-red-600"/></div><DialogTitle className="text-xl">Liberar Caso</DialogTitle><DialogDescription>Dejará de estar asignado a vos.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmReleaseAction} variant="destructive" className="w-full">Liberar Ahora</Button></DialogFooter></DialogContent></Dialog>

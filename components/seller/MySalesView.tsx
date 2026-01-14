@@ -181,7 +181,7 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
       .from("leads")
       .select("*")
       .eq("agent_name", userName)
-      .not("status", "in", '("nuevo","contactado","cotizacion","perdido")')
+      .not("status", "in", '("nuevo","contactado","cotizacion","documentacion","perdido")')
       .order("last_update", { ascending: false })
 
     if (error) {

@@ -110,7 +110,9 @@ export function AdminPerformance() {
         })
 
         // Filtro Vendedora (Solo para las tarjetas de arriba)
-        let sellerData = null
+        // ✅ CORRECCIÓN AQUÍ: Agregamos ": any" para que TS no se queje
+        let sellerData: any = null 
+        
         if (selectedSellerId !== "all") {
             sellerData = sellers.find(s => s.id === selectedSellerId)
             if (sellerData) {
@@ -318,16 +320,16 @@ export function AdminPerformance() {
                         <Card className="shadow-sm hover:shadow-md transition-all md:col-span-2 bg-gradient-to-br from-blue-600 to-blue-800 text-white border-0">
                             <CardContent className="p-6 flex justify-between items-center h-full">
                                 <div>
-                                    <p className="text-blue-200 font-bold uppercase text-xs mb-1">Ventas</p>
+                                    <p className="text-blue-200 font-bold uppercase text-xs mb-1">Ventas Brutas</p>
                                     <div className="text-5xl font-black">{currentStats.totalSales}</div>
                                     <p className="text-xs text-blue-200 mt-2">Operaciones cerradas</p>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-blue-200 font-bold uppercase text-xs mb-1">Cumplidas</p>
+                                    <p className="text-blue-200 font-bold uppercase text-xs mb-1">Cumplidas (Neto)</p>
                                     <div className="text-4xl font-black text-green-300 flex items-center justify-end gap-2">
                                         <CheckCircle2 className="h-8 w-8"/> {currentStats.totalCompleted}
                                     </div>
-                                    <p className="text-xs text-blue-200 mt-2">Aprobadas por ADM</p>
+                                    <p className="text-xs text-blue-200 mt-2">Aprobadas por Ops</p>
                                 </div>
                             </CardContent>
                         </Card>
@@ -355,6 +357,7 @@ export function AdminPerformance() {
                             </CardContent>
                         </Card>
 
+                        {/* NUEVA MÉTRICA: VELOCIDAD */}
                         <Card className="shadow-sm hover:shadow-md transition-all">
                             <CardHeader className="pb-2"><CardTitle className="text-xs font-bold text-slate-400 uppercase tracking-wider flex gap-2"><Timer className="h-4 w-4 text-orange-500"/> Velocidad</CardTitle></CardHeader>
                             <CardContent>

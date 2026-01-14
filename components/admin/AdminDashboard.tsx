@@ -82,18 +82,39 @@ function AdminOverview() {
     const { data: leads } = await supabase.from("leads").select("*").order("last_update", { ascending: false })
 
     if (leads) {
-      // ✅ APLICAR FILTRO DE MES
-      let filteredLeads = leads
-      if (selectedMonth !== 'all') {
-          filteredLeads = leads.filter((l: any) => l.created_at?.startsWith(selectedMonth))
+      // ✅ APLICAR FILTRO DE MES (Ventas por FECHA_INGRESO | Cumplidas por BILLING_PERIOD aprobado)
+      const st = (v: any) => String(v ?? "").trim().toLowerCase()
+
+      const ingresoMonthOf = (l: any) => {
+        const fi = String(l?.fecha_ingreso ?? "").trim()
+        if (fi) return fi.slice(0, 7) // YYYY-MM
+        const sa = String(l?.sold_at ?? "").trim()
+        if (sa) return sa.slice(0, 7)
+        const ca = String(l?.created_at ?? "").trim()
+        return ca.slice(0, 7)
       }
 
-      const entered = filteredLeads.filter((l: any) => !["nuevo", "contactado", "perdido"].includes(l.status?.toLowerCase())).length
-      const completed = filteredLeads.filter((l: any) => l.status?.toLowerCase() === "cumplidas").length
+      // "Ventas Ingresadas" = desde que entró a OPS (ingresado y posteriores)
+      const isEnteredStatus = (s: string) =>
+        !["nuevo", "contactado", "cotizacion", "documentacion", "perdido"].includes(s)
+
+      const enteredLeads = leads.filter((l: any) => {
+        const month = ingresoMonthOf(l)
+        return isEnteredStatus(st(l.status)) && (selectedMonth === "all" || month === selectedMonth)
+      })
+
+      // "Cumplidas" = solo las que están aprobadas y con billing_period del mes
+      const completedLeads = leads.filter((l: any) => {
+        const bp = String(l?.billing_period ?? "").trim()
+        return st(l.status) === "cumplidas" && l?.billing_approved === true && (selectedMonth === "all" || bp === selectedMonth)
+      })
+
+      const entered = enteredLeads.length
+      const completed = completedLeads.length
       const rate = entered > 0 ? Math.round((completed / entered) * 100) : 0
       setStats({ entered, completed, compliance: rate })
 
-      // Actividad reciente (siempre mostramos la última actividad global para ver que el sistema vive)
+// Actividad reciente (siempre mostramos la última actividad global para ver que el sistema vive)
       const recent = leads.slice(0, 15).map((l: any) => ({
         time: formatTime(l.last_update), // ✅ HORA CORREGIDA
         agent: l.agent_name || l.operator || "Sistema",

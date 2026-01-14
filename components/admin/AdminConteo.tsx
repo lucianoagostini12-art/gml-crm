@@ -39,9 +39,18 @@ export function AdminConteo() {
   const norm = (v: any) => String(v ?? "").trim().toLowerCase()
 
   // ✅ LISTA DE ESTADOS QUE CUENTAN COMO VENTA
-  const SALE_STATUSES = ["vendido", "precarga", "medicas", "legajo", "demoras", "cumplidas", "finalizada"]
-
-  const startOfWeekMonday = (ref: Date) => {
+  const SALE_STATUSES = [
+  "ingresado",
+  "precarga",
+  "medicas",
+  "legajo",
+  "demoras",
+  "cumplidas",
+  "rechazado",
+  "vendido",
+  "finalizada",
+]
+const startOfWeekMonday = (ref: Date) => {
     const d = new Date(ref)
     const day = d.getDay()
     const diffToMonday = day === 0 ? -6 : 1 - day
@@ -131,26 +140,46 @@ export function AdminConteo() {
     // Periodo seleccionado
     const targetPeriod = `${selectedYear}-${selectedMonth.padStart(2, "0")}`
 
-    // Helpers de fecha (VENTAS deben ir por sold_at)
-    const salesDateOf = (l: any) => l.sold_at || l.fecha_ingreso || l.activation_date || l.fecha_alta || l.created_at
+    // Helpers de fecha (VENTAS por fecha_ingreso; fallback para legacy)
+    const salesDateOf = (l: any) => l?.fecha_ingreso || l?.sold_at || l?.activation_date || l?.fecha_alta || l?.created_at
 
-    const startDateISO =
+    // ✅ Para campos tipo DATE (fecha_ingreso), usamos YYYY-MM-DD (sin timezone)
+    const startDateStr =
       selectedYear !== "all"
-        ? new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1, 0, 0, 0).toISOString()
-        : null
-    const endDateISO =
-      selectedYear !== "all"
-        ? new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
+        ? `${parseInt(selectedYear, 10)}-${String(parseInt(selectedMonth, 10)).padStart(2, "0")}-01`
         : null
 
-    // A. PRODUCCIÓN (VENTAS por sold_at)
+    // End exclusivo: primer día del mes siguiente (evita bugs por timezone/UTC)
+    const endDateStr =
+      selectedYear !== "all"
+        ? (() => {
+            const y = parseInt(selectedYear, 10)
+            const m = parseInt(selectedMonth, 10)
+            const nextM = m === 12 ? 1 : m + 1
+            const nextY = m === 12 ? y + 1 : y
+            return `${nextY}-${String(nextM).padStart(2, "0")}-01`
+          })()
+        : null
+
+  // ISO timestamps (UTC) para filtros en DB (creados desde AR -03:00)
+  // Usamos rango completo del mes en hora Argentina y lo convertimos a ISO UTC
+  const startDateISO =
+    selectedYear !== "all" && startDateStr
+      ? new Date(`${startDateStr}T00:00:00-03:00`).toISOString()
+      : null
+  const endDateISO =
+    selectedYear !== "all" && endDateStr
+      ? new Date(`${endDateStr}T23:59:59.999-03:00`).toISOString()
+      : null
+
+    // A. PRODUCCIÓN (VENTAS por fecha_ingreso: se cuentan cuando llegan a INGRESADO y siguen contando aunque avancen)
     if (selectedYear !== "all") {
       const { data: prodData } = await supabase
         .from("leads")
         .select("*")
         .in("status", SALE_STATUSES)
-        .gte("sold_at", startDateISO as string)
-        .lte("sold_at", endDateISO as string)
+        .gte("fecha_ingreso", startDateStr as string)
+        .lte("fecha_ingreso", endDateStr as string)
 
       if (prodData) productionLeads = prodData
     } else {

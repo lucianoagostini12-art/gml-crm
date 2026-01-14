@@ -30,7 +30,8 @@ import {
   Calendar,
   Trophy,
   MessageCircle,
-  FileText
+  FileText,
+  TrendingUp // ✅ IMPORTADO
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -57,6 +58,7 @@ import { AdminCommissions } from "@/components/admin/AdminCommissions"
 import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
 import { AdminRanking } from "@/components/admin/AdminRanking"
+import { AdminPerformance } from "@/components/admin/AdminPerformance" // ✅ IMPORTADO
 
 // --- FORMATO DE HORA CORREGIDO (ARGENTINA) ---
 const formatTime = (dateString: string) => {
@@ -293,7 +295,8 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                     <div className="space-y-1 animate-in slide-in-from-top-1">
                         <SidebarBtn active={view === 'team'} onClick={() => setView('team')} icon={<Users size={20} className="text-blue-400"/>} label="Equipo" />
                         <SidebarBtn active={view === 'metrics'} onClick={() => setView('metrics')} icon={<BarChart4 size={20} className="text-purple-400"/>} label="Analítica" />
-                        {/* ✅ BOTÓN DE RANKING */}
+                        {/* ✅ BOTÓN DE RENDIMIENTO AGREGADO */}
+                        <SidebarBtn active={view === 'performance'} onClick={() => setView('performance')} icon={<TrendingUp size={20} className="text-pink-500"/>} label="Rendimiento" />
                         <SidebarBtn active={view === 'ranking'} onClick={() => setView('ranking')} icon={<Trophy size={20} className="text-yellow-500"/>} label="Ranking" />
                         <SidebarBtn active={view === 'commissions'} onClick={() => setView('commissions')} icon={<Banknote size={20} className="text-green-400"/>} label="Liquidación" />
                     </div>
@@ -636,6 +639,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           {view === "conteo" && <AdminConteo />}
           {view === "leads" && <AdminLeadFactory />}
           {view === "metrics" && <AdminMetrics />}
+          {view === "performance" && <AdminPerformance />}
           {view === "ranking" && <AdminRanking />}
           {view === "team" && <AdminTeam />}
           {view === "logs" && <AdminLogs />}

@@ -532,6 +532,15 @@ export function AdminLeadFactory() {
       
       // Intentamos insertar, si falla no es crítico para la asignación, pero sí para el contador
       await supabase.from('lead_status_history').insert(historyEntries)
+      // ✅ Refresco inmediato del semáforo (no dependemos del realtime)
+fetchDailyStats()
+
+// ✅ Opcional: instantáneo (antes de que responda fetchDailyStats)
+setDailyAssignments(prev => ({
+  ...prev,
+  [targetAgent]: (prev[targetAgent] || 0) + selectedLeads.length
+}))
+
 
       setSelectedLeads([])
 

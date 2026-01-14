@@ -151,19 +151,38 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         window.location.href = "/" 
     }
 
-    // --- HELPER DE NOTIFICACIONES UNIFICADO ---
+    // --- 🔔 HELPER DE NOTIFICACIONES (FRONTEND) ---
+    // Esta función solo se encarga de MOSTRAR (Sonido + Visual), pero NO guarda.
+    // Quien la llama es el LISTENER de la base de datos.
     const notifyOPS = (title: string, body: string, type: 'success'|'info'|'warning' = 'info') => {
         // 1. Toast Visual
         showToast(title + ": " + body, type);
         
         // 2. Notificación Nativa del Navegador
-        sendNativeNotification(title, body);
+        // 🛑 IMPORTANT: Pasamos 'false' como 3er argumento para que NO use el sonido nativo
+        // y así usamos nuestro propio ALARM_SOUND sin conflictos.
+        sendNativeNotification(title, body, false);
 
-        // 3. Sonido
+        // 3. Sonido Personalizado (El que querías)
         if (audioRef.current) {
             audioRef.current.currentTime = 0;
             audioRef.current.play().catch(e => console.log("Audio blocked:", e));
         }
+    }
+
+    // --- 💾 HELPER DE NOTIFICACIONES (BACKEND) ---
+    // Esta función GUARDA en DB. Al guardar, el listener lo detecta y llama a notifyOPS.
+    // ¡Ciclo cerrado!
+    const dispatchNotification = async (title: string, body: string, target: string = 'OPS', type: 'info'|'success'|'warning' = 'info', leadId?: string) => {
+        await supabase.from('notifications').insert({
+            user_name: target,
+            title,
+            body,
+            type,
+            read: false,
+            lead_id: leadId,
+            created_at: new Date().toISOString()
+        })
     }
 
     const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'success') => { 
@@ -367,14 +386,15 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData?.status !== newData.status)
                 ) {
                     setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
-                    notifyOPS("¡Venta Nueva! 🚀", `${newData.agent_name} ingresó a ${newData.name}`, 'success');
+                    // ✅ AHORA GUARDAMOS EN DB (El listener de notifications se encargará de sonar)
+                    dispatchNotification("¡Venta Nueva! 🚀", `${newData.agent_name} ingresó a ${newData.name}`, 'OPS', 'success', newData.id);
                 }
 
                 // 2. DETECTOR DE CAMBIO DE ESTADO (Para flujo)
                 if (payload.eventType === 'UPDATE' && oldData && newData.status !== oldData.status && newData.status !== 'ingresado' && newData.status !== 'vendido') {
                     // Ignoramos movimientos previos a la venta (nuevo->contactado)
                     if (['precarga', 'medicas', 'legajo', 'cumplidas', 'rechazado', 'demoras'].includes(newData.status)) {
-                        notifyOPS("Movimiento de Estado", `${newData.name} pasó a ${newData.status.toUpperCase()}`);
+                        dispatchNotification("Movimiento de Estado", `${newData.name} pasó a ${newData.status.toUpperCase()}`, 'OPS', 'info', newData.id);
                     }
                 }
 
@@ -382,12 +402,12 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 if (payload.eventType === 'UPDATE' && oldData && newData.notes !== oldData.notes) {
                      // Solo avisar si la nota no contiene el timestamp actual (algo rudimentario pero funcional)
                      // O simplemente avisar genérico
-                     notifyOPS("Nueva Nota 📝", `Se agregó información en ${newData.name}`);
+                     dispatchNotification("Nueva Nota 📝", `Se agregó información en ${newData.name}`, 'OPS', 'info', newData.id);
                 }
 
                 // 4. DETECTOR DE POSVENTA
                 if (payload.eventType === 'UPDATE' && oldData && (newData.post_sale_action !== oldData.post_sale_action || newData.post_sale_status !== oldData.post_sale_status)) {
-                    notifyOPS("Novedad Posventa 🛠️", `${newData.name}: ${newData.post_sale_action} (${newData.post_sale_status})`, 'warning');
+                    dispatchNotification("Novedad Posventa 🛠️", `${newData.name}: ${newData.post_sale_action} (${newData.post_sale_status})`, 'OPS', 'warning', newData.id);
                 }
 
                 // 5. DETECTOR DE CHATS (Analizando el JSON de comments)
@@ -399,7 +419,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         const lastMsg = newComments[newComments.length - 1];
                         // Si el mensaje NO es mío, avisar
                         if (lastMsg.author !== userName) {
-                            notifyOPS("Nuevo Mensaje 💬", `${lastMsg.author}: ${lastMsg.text}`, 'info');
+                            dispatchNotification("Nuevo Mensaje 💬", `${lastMsg.author}: ${lastMsg.text}`, 'OPS', 'info', newData.id);
                         }
                     }
                 }
@@ -413,7 +433,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 const target = payload.new.user_name;
                 if (target === userName || target === 'OPS' || (role.includes('admin') && target === 'Administración')) {
                     setNotifications(prev => [payload.new, ...prev])
-                    notifyOPS("Nueva Notificación 🔔", payload.new.title || "Tenés un mensaje nuevo.");
+                    // ✅ AQUÍ ES DONDE SUENA Y SE MUESTRA EL TOAST
+                    notifyOPS(payload.new.title, payload.new.body, payload.new.type || 'info');
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {

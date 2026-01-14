@@ -75,6 +75,16 @@ const DAY_LABELS = [
 
 const norm = (v: any) => String(v ?? "").trim().toLowerCase()
 
+// Normalización fuerte para matchear nombres aunque tengan tildes, dobles espacios, etc.
+function normKey(v: any) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+}
+
 function toISODate(d: Date) {
   return d.toISOString().slice(0, 10)
 }
@@ -105,6 +115,32 @@ function getBusinessDaysDiff(startDate: Date, endDate: Date) {
     }
     return count;
 }
+
+
+// ✅ Helper AR: normalizamos fechas a "día Argentina" para que el semáforo no mienta por timezone del servidor/browser.
+function getARDateParts(d: Date) {
+  const parts = new Intl.DateTimeFormat("es-AR", { timeZone: AR_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d)
+  const get = (t: string) => parts.find(p => p.type === t)?.value || "00"
+  return { y: Number(get("year")), m: Number(get("month")), d: Number(get("day")) }
+}
+function toARMidnightUTC(d: Date) {
+  const { y, m, d: da } = getARDateParts(d)
+  return new Date(Date.UTC(y, m - 1, da, 0, 0, 0))
+}
+function getBusinessDaysDiffAR(startDate: Date, endDate: Date) {
+  const s = toARMidnightUTC(startDate)
+  const e = toARMidnightUTC(endDate)
+  if (s >= e) return 0
+  let count = 0
+  const cur = new Date(s.getTime())
+  while (cur < e) {
+    cur.setUTCDate(cur.getUTCDate() + 1)
+    const dow = cur.getUTCDay()
+    if (dow !== 0 && dow !== 6) count++
+  }
+  return count
+}
+
 
 function getARWeekdayHour(iso: string): { weekday: string; hour: number } {
   const weekday = new Intl.DateTimeFormat("es-AR", { timeZone: AR_TZ, weekday: "long" }).format(new Date(iso))
@@ -219,7 +255,7 @@ export function AdminMetrics() {
     // B. QUERIES
     let leadsQuery = supabase.from("leads").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
     let prevLeadsQuery = supabase.from("leads").select("status, price, quoted_price").gte("created_at", prevStart.toISOString()).lte("created_at", prevEnd.toISOString())
-    let historyQuery = supabase.from("lead_status_history").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
+    let historyQuery = supabase.from("lead_status_history").select("*").gte("changed_at", currentStart.toISOString()).lte("changed_at", currentEnd.toISOString())
 
     if (agent !== "global") {
       leadsQuery = leadsQuery.eq("agent_name", agent)
@@ -234,49 +270,83 @@ export function AdminMetrics() {
     const events = (resHistory.data || []) as StatusEvent[]
 
     // --- 🚦 CÁLCULO DE SEMÁFORO (TEAM PULSE) ---
-    // 1. Traemos TODAS las ventas (sin filtro de fecha) para ver la última real
-    //    Seleccionamos fecha_ingreso y sold_at explícitamente
-    const { data: allSales } = await supabase
-        .from('leads')
-        .select('agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at') 
-        .in('status', SALE_STATUSES)
-        
-    if (agentsList.length > 0) {
-        const pulseMap: AgentPulse[] = agentsList.map(a => {
-            // Filtrar ventas de este agente
-            const mySales = (allSales || []).filter((s:any) => norm(s.agent_name) === norm(a.name))
-            
-            let lastDate: Date | null = null
-            
-            if (mySales.length > 0) {
-                // Ordenar por FECHA REAL DE VENTA (Priorizando fecha_ingreso) descendente
-                mySales.sort((x:any, y:any) => {
-                    const dx = new Date(salesDateOf(x)).getTime()
-                    const dy = new Date(salesDateOf(y)).getTime()
-                    return dy - dx
-                })
-                const latestSale = mySales[0]
-                const dRaw = salesDateOf(latestSale)
-                if (dRaw) lastDate = new Date(dRaw)
-            }
-            
-            let businessDays = 999
-            if (lastDate) {
-                const now = new Date(); 
-                businessDays = getBusinessDaysDiff(lastDate, now)
-            }
+// La forma robusta es NO inferir desde leads (porque el lead sigue moviéndose),
+// sino leer un evento persistente de ventas (sales_events) que se registra cuando entra a INGRESADO (OPS).
+let lastSaleByAgent = new Map<string, Date>()
 
-            let status: AgentPulse['status'] = 'gray'
-            if (businessDays <= 1) status = 'green'      // Hoy o Ayer (Hábil)
-            else if (businessDays === 2) status = 'yellow' // 2 Días hábiles
-            else if (businessDays >= 3) status = 'red'     // 3 o más
+try {
+  const { data: seData, error: seErr } = await supabase
+    .from("sales_events")
+    .select("agent_name, sale_at")
+    .eq("event_type", "sale_ingresado")
+    .order("sale_at", { ascending: false })
+    .limit(5000)
 
-            if (businessDays === 999) status = 'gray'
-
-            return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, businessDays, status }
-        })
-        setTeamPulse(pulseMap.sort((a,b) => a.businessDays - b.businessDays))
+  if (!seErr && seData) {
+    // Tomamos el MAX por agente (no dependemos del orden del SELECT)
+    const tmp = new Map<string, Date>()
+    for (const row of seData as any[]) {
+      const name = String(row?.agent_name || "").trim()
+      const d = safeDate(row?.sale_at || null)
+      if (!name || !d) continue
+      const key = normKey(name)
+      const prev = tmp.get(key)
+      if (!prev || d.getTime() > prev.getTime()) tmp.set(key, d)
     }
+    lastSaleByAgent = tmp
+  } else {
+    // Fallback (por si todavía no creaste la tabla)
+    const { data: allSales } = await supabase
+      .from("leads")
+      .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
+      .in("status", SALE_STATUSES)
+
+    for (const s of (allSales || []) as any[]) {
+      const name = String(s?.agent_name || "").trim()
+      const d = safeDate(salesDateOf(s) || null)
+      if (!name || !d) continue
+      const key = normKey(name)
+      const prev = lastSaleByAgent.get(key)
+      if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
+    }
+  }
+} catch {
+  // Fallback seguro
+  const { data: allSales } = await supabase
+    .from("leads")
+    .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
+    .in("status", SALE_STATUSES)
+
+  for (const s of (allSales || []) as any[]) {
+    const name = String(s?.agent_name || "").trim()
+    const d = safeDate(salesDateOf(s) || null)
+    if (!name || !d) continue
+    const key = normKey(name)
+    const prev = lastSaleByAgent.get(key)
+    if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
+  }
+}
+
+if (agentsList.length > 0) {
+  const pulseMap: AgentPulse[] = agentsList.map(a => {
+    const lastDate = lastSaleByAgent.get(normKey(a.name)) || null
+
+    let businessDays = 999
+    if (lastDate) {
+      const now = new Date()
+      businessDays = getBusinessDaysDiffAR(lastDate, now)
+    }
+
+    let status: AgentPulse['status'] = 'gray'
+    if (businessDays <= 1) status = 'green'      // Hoy o Ayer (Hábil)
+    else if (businessDays === 2) status = 'yellow' // 2 Días hábiles
+    else if (businessDays >= 3) status = 'red'     // 3 o más
+    if (businessDays === 999) status = 'gray'
+
+    return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, businessDays, status }
+  })
+  setTeamPulse(pulseMap.sort((a,b) => a.businessDays - b.businessDays))
+}
 
     // --- CÁLCULOS MÉTRICAS ---
     const counts: Record<string, number> = { 
@@ -463,7 +533,11 @@ export function AdminMetrics() {
   // ✅ CORRECCIÓN FINAL: 'agentsList' en dependencias asegura que el semáforo se calcule
   useEffect(() => {
     fetchData()
-    const channel = supabase.channel('admin_metrics_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchData()).subscribe()
+    const channel = supabase.channel('admin_metrics_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_status_history' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_events' }, () => fetchData())
+      .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [agent, dateStart, dateEnd, agentsList])
 

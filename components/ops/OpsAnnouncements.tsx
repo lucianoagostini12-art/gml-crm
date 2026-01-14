@@ -55,12 +55,15 @@ export function OpsAnnouncements() {
     const handleSend = async () => {
         if (!title || !message) return
 
+        // 1. OBTENER USUARIO ACTUAL
+        const { data: { user } } = await supabase.auth.getUser()
+
         const { error } = await supabase.from('announcements').insert({
             title,
             message,
             priority,
             is_blocking: isBlocking,
-            // author_id se maneja solo si querés, o podés agregar un campo 'author_role' en la tabla
+            author_id: user?.id // 2. ASIGNAR AUTOR
         })
 
         if (!error) {

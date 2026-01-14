@@ -73,12 +73,15 @@ export function AdminAnnouncements() {
     const handleSend = async () => {
         if (!title || !message) return
 
+        // 1. OBTENER USUARIO ACTUAL
+        const { data: { user } } = await supabase.auth.getUser()
+
         const { error } = await supabase.from('announcements').insert({
             title,
             message,
             priority,
             is_blocking: isBlocking,
-            // author_id: usuario actual (opcional, supabase lo puede manejar con auth.uid())
+            author_id: user?.id // 2. ASIGNAMOS EL AUTOR
         })
 
         if (!error) {

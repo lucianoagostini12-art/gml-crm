@@ -47,9 +47,8 @@ export function AdminConteo() {
   "demoras",
   "cumplidas",
   "rechazado",
-  "vendido",
-  "finalizada",
 ]
+
 const startOfWeekMonday = (ref: Date) => {
     const d = new Date(ref)
     const day = d.getDay()
@@ -183,7 +182,7 @@ const startOfWeekMonday = (ref: Date) => {
 
       if (prodData) productionLeads = prodData
     } else {
-      const { data } = await supabase.from("leads").select("*").in("status", SALE_STATUSES)
+      const { data } = await supabase.from("leads").select("*").in("status", SALE_STATUSES).not("fecha_ingreso","is",null)
       if (data) productionLeads = data
     }
 
@@ -241,32 +240,48 @@ const startOfWeekMonday = (ref: Date) => {
     let totalSalesGlobal = 0
     let totalFulfilledGlobal = 0
 
-    // ✅ Helper: Suma puntos
-    const calculatePoints = (items: any[]) => {
-      return items.reduce((acc, item) => {
-        const pName = (item.prepaga || item.quoted_prepaga || "").toLowerCase()
-        const isAMPF = pName.includes("ampf")
-        const points = isAMPF ? 1 : Number(item.capitas) || 1
-        return acc + points
+    // ✅ Helper: Conteo (registros) — para que cierre 1:1 con SQL
+    const calculatePoints = (items: any[]) => items.length
+    // ✅ Desglose por prepaga (abajo): por capitas, excepto AMPF (1 por registro)
+    const pointsByCapitas = (items: any[]) => {
+      return (items || []).reduce((acc: number, l: any) => {
+        const prep = ((l?.prepaga || l?.quoted_prepaga || "") + "").trim().toLowerCase()
+        if (prep === "ampf") return acc + 1
+        const c = Number(l?.capitas)
+        return acc + (Number.isFinite(c) && c > 0 ? c : 1)
       }, 0)
     }
 
-    // ✅ Helper: Detectar PASS (por type)
-    const isPass = (l: any) => (l.type || "").toLowerCase() === "pass"
+
+
+    // ✅ Helper: Detectar PASS (lógica unificada)
+    const isPass = (l: any) => {
+      const t = String(l?.type ?? "").toLowerCase()
+      const ss = String(l?.sub_state ?? l?.substate ?? "").toLowerCase()
+      const so = String(l?.source ?? l?.origen ?? "").toLowerCase()
+      return t === "pass" || ss === "auditoria_pass" || so === "pass"
+    }
+
 
     const isSalesMonth = (lead: any) => {
       if (selectedYear === "all") return true
-      const d = new Date(salesDateOf(lead))
-      return d.getMonth() + 1 === parseInt(selectedMonth) && d.getFullYear() === parseInt(selectedYear)
+      const fi = String(salesDateOf(lead) || "")
+      if (!fi) return false
+      const ym = fi.slice(0, 7)
+      return ym === `${selectedYear}-${selectedMonth.padStart(2, "0")}`
     }
 
     const isSalesToday = (lead: any) => {
-      const d = new Date(salesDateOf(lead))
+      const fi = String(salesDateOf(lead) || "")
+      if (!fi) return false
+      const d = new Date(`${fi}T00:00:00-03:00`)
       return d.toDateString() === now.toDateString()
     }
 
     const isSalesThisWeek = (lead: any) => {
-      const d = new Date(salesDateOf(lead))
+      const fi = String(salesDateOf(lead) || "")
+      if (!fi) return false
+      const d = new Date(`${fi}T00:00:00-03:00`)
       return d >= weekStart
     }
 
@@ -289,33 +304,24 @@ const startOfWeekMonday = (ref: Date) => {
       const dailyLeads = salesLeadsNoPass.filter((l: any) => isSalesToday(l))
       const weeklyLeads = salesLeadsNoPass.filter((l: any) => isSalesThisWeek(l))
 
-      const daily = calculatePoints(dailyLeads)
-      const weekly = calculatePoints(weeklyLeads)
+      const daily = pointsByCapitas(dailyLeads)
+      const weekly = pointsByCapitas(weeklyLeads)
 
       // ✅ Ventas del mes (SIN PASS)
-      const monthly = calculatePoints(salesLeadsNoPass)
+      const monthly = pointsByCapitas(salesLeads)
 
       // ✅ Pass del mes (conteo separado para mostrar +X pass)
       const monthlyPassCount = salesLeadsPass.length
 
-      // B. CUMPLIDAS (VERDE): SOLO OFICIAL (billing_approved=true), EXCLUYENDO PASS (como tu tablero)
-      const fulfilledLeads = agentLeads.filter(
+      // B. CUMPLIDAS (VERDE): LIQUIDACIÓN OFICIAL (billing_approved=true) — total (altas+pass)
+      const fulfilledAll = agentLeads.filter(
         (l: any) =>
-          norm(l.status) === "cumplidas" &&
-          l.billing_approved === true &&
-          !isPass(l) &&
-          isBillingMonth(l)
+          norm(l.status) === "cumplidas" && l.billing_approved === true && isBillingMonth(l)
       )
-      const fulfilled = calculatePoints(fulfilledLeads)
+      const fulfilledPassLeads = fulfilledAll.filter((l: any) => isPass(l))
+      const fulfilledAltasLeads = fulfilledAll.filter((l: any) => !isPass(l))
 
-      // C) PASS cumplidas (para mostrar +X pass también en verde)
-      const fulfilledPassLeads = agentLeads.filter(
-        (l: any) =>
-          norm(l.status) === "cumplidas" &&
-          l.billing_approved === true &&
-          isPass(l) &&
-          isBillingMonth(l)
-      )
+      const fulfilled = calculatePoints(fulfilledAll) // total liquidable (altas+pass)
       const passCount = fulfilledPassLeads.length
 
       const ratioVal = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
@@ -349,8 +355,8 @@ const startOfWeekMonday = (ref: Date) => {
           .filter(Boolean)
           .map((prepName: any) => ({
             name: prepName,
-            sold: calculatePoints(salesLeadsNoPass.filter((l: any) => (l.prepaga || l.quoted_prepaga) === prepName)),
-            fulfilled: calculatePoints(fulfilledLeads.filter((l: any) => (l.prepaga || l.quoted_prepaga) === prepName)),
+            sold: pointsByCapitas(salesLeadsNoPass.filter((l: any) => (l.prepaga || l.quoted_prepaga) === prepName)),
+            fulfilled: pointsByCapitas(fulfilledAll.filter((l: any) => (l.prepaga || l.quoted_prepaga) === prepName)),
           })),
       }
     })

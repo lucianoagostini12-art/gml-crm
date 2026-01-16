@@ -39,6 +39,25 @@ function normalizePhoneCanon(raw: any) {
   return d.length > 10 ? d.slice(-10) : d
 }
 
+// ✅ helper: detectar prepaga (para pintar badges en AdminLeadFactory)
+function detectPrepagaFromAny(...inputs: any[]): string | null {
+  const joined = inputs
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase())
+    .join(" | ")
+
+  if (joined.includes("doctored") || joined.includes("docto red")) return "DoctoRed"
+  if (joined.includes("prevencion")) return "Prevención" // tu UI acepta "Prevención" o "Prevencion"
+  if (joined.includes("sancor")) return "Sancor"
+  if (joined.includes("galeno")) return "Galeno"
+  if (joined.includes("swiss")) return "Swiss Medical"
+  if (joined.includes("osde")) return "Osde"
+  if (joined.includes("avalian")) return "Avalian"
+  if (joined.includes("ampf")) return "AMPF"
+
+  return null
+}
+
 // ✅ helper: log de eventos sin romper el webhook si falla
 async function safeLeadEvent(
   supabase: any,
@@ -127,10 +146,16 @@ export async function POST(req: Request) {
       }
     }
 
+    // ✅ CLAVE: detectar prepaga para que aparezcan badges (violeta DoctoRed / rosa Prevención)
+    // Prioridad: campo explícito del form > deducción por source/landing/ref
+    const detectedPrepaga =
+      (body.prepaga || body.prepaga_name || body.interest || body.plan || "").toString().trim() ||
+      detectPrepagaFromAny(finalTag, sourceFromLanding, landing_url, ref)
+
     const now = new Date().toISOString()
 
     // 1) Buscar si ya existe por phone_canon (si lo tenemos)
-    const baseFind = supabase.from("leads").select("id, source, notes, phone_canon")
+    const baseFind = supabase.from("leads").select("id, source, notes, phone_canon, prepaga")
     const { data: existingLead, error: findErr } = phoneCanon
       ? await baseFind.eq("phone_canon", phoneCanon).maybeSingle()
       : await baseFind.eq("phone", telefono).maybeSingle()
@@ -156,6 +181,11 @@ export async function POST(req: Request) {
       // ✅ Completar phone_canon si faltaba (para saneo)
       if (!existingLead.phone_canon && phoneCanon) {
         updates.phone_canon = phoneCanon
+      }
+
+      // ✅ Completar prepaga si faltaba (para badges)
+      if (!existingLead.prepaga && detectedPrepaga) {
+        updates.prepaga = detectedPrepaga
       }
 
       // Guardamos geo
@@ -187,7 +217,7 @@ export async function POST(req: Request) {
         event_type: "lead_updated",
         actor_name: "Sistema",
         summary: `Formulario actualizó lead (source=${finalTag})`,
-        payload: { body, finalTag, updates },
+        payload: { body, finalTag, detectedPrepaga, updates },
       })
 
       return NextResponse.json({ success: true, action: "updated" }, { headers: corsHeaders() })
@@ -211,6 +241,9 @@ export async function POST(req: Request) {
         // ✅ CLAVE para que aparezca en AdminLeadFactory:
         agent_name: null,
 
+        // ✅ CLAVE para badges:
+        prepaga: detectedPrepaga || null,
+
         // Opcional prolijo: tu tabla tiene assigned_to
         assigned_to: null,
       })
@@ -230,7 +263,7 @@ export async function POST(req: Request) {
       event_type: "lead_created",
       actor_name: "Sistema",
       summary: `Lead creado desde Formulario (source=${finalTag})`,
-      payload: { body, finalTag },
+      payload: { body, finalTag, detectedPrepaga },
     })
 
     return NextResponse.json({ success: true, action: "created" }, { headers: corsHeaders() })

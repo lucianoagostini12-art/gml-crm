@@ -20,6 +20,10 @@ type LeadRow = {
   agent_name: string | null
   prepaga: string | null
   plan: string | null
+  // Para identificar PASS de forma unificada (misma regla madre del CRM)
+  type?: string | null
+  sub_state?: string | null
+  source?: string | null
   status: string | null
   created_at: string
   capitas: number | null
@@ -73,6 +77,23 @@ const CALC_RULES = {
 }
 
 const norm = (v: any) => String(v ?? "").trim().toLowerCase()
+
+// Regla unificada PASS (misma que tableros / billing):
+// type='pass' OR sub_state='auditoria_pass' OR source='pass'
+const isPass = (op: Partial<LeadRow>) => {
+  const t = norm((op as any).type)
+  const ss = norm((op as any).sub_state)
+  const src = norm((op as any).source)
+  return t === "pass" || ss === "auditoria_pass" || src === "pass"
+}
+
+// Regla de cápitas: AMPF cuenta 1; resto usa capitas (fallback 1)
+const capitasPoints = (op: Partial<LeadRow>) => {
+  const p = norm((op as any).prepaga)
+  if (p.includes("ampf")) return 1
+  const c = Number((op as any).capitas)
+  return Number.isFinite(c) && c > 0 ? c : 1
+}
 
 export function AdminCommissions() {
   const supabase = createClient()
@@ -152,26 +173,23 @@ export function AdminCommissions() {
     const targetPeriod = `${selectedYear}-${selectedMonth.padStart(2, '0')}`
     
     // Traemos campos necesarios para calcular facturación (Neto)
+    // Regla madre: Cumplidas oficiales SOLO desde OpsBilling
+    // status='cumplidas' AND billing_approved=true AND billing_period='YYYY-MM'
     const { data, error } = await supabase
       .from("leads")
       .select(`
-        id, agent_name, prepaga, plan, status, created_at, capitas, 
+        id, agent_name, prepaga, plan, type, sub_state, source, status, created_at, capitas,
         billing_period, billing_approved,
         full_price, aportes, descuento, labor_condition, billing_price_override
       `)
       .eq("status", "cumplidas")
-      .eq("billing_approved", true) // SOLO LO QUE OPS APROBÓ
+      .eq("billing_approved", true)
+      .eq("billing_period", targetPeriod)
+      .not("billing_period", "is", null)
 
     if (error || !data) { setLeads([]); return }
 
-    // Filtro JS para priorizar billing_period sobre created_at
-    const filtered = (data as LeadRow[]).filter((l) => {
-        const createdDate = new Date(l.created_at)
-        const defaultPeriod = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`
-        const effectivePeriod = l.billing_period || defaultPeriod
-        return effectivePeriod === targetPeriod
-    })
-    setLeads(filtered)
+    setLeads((data as LeadRow[]) || [])
   }
 
   const refreshAll = async () => {
@@ -192,6 +210,9 @@ export function AdminCommissions() {
 
   // --- 5. CALCULADORA DE FACTURACIÓN (PORTADA DE OPSBILLING) ---
   const calculateLiquidationValue = (op: LeadRow) => {
+      // PASS no genera facturación (regla unificada)
+      if (isPass(op)) return 0
+
       // Si tiene override manual de Ops, se usa ese valor directo
       if (op.billing_price_override !== null && op.billing_price_override !== undefined && op.billing_price_override > 0) {
           return Number(op.billing_price_override)
@@ -223,16 +244,15 @@ export function AdminCommissions() {
           val = base * CALC_RULES.generalGroup.multiplier
       }
 
-      // Pass no genera facturación
-      if (p.includes("pass")) { val = 0 }
-
       return val
   }
 
   // --- 6. CÁLCULO DE COMISIÓN (LÓGICA REVENUE SHARE) ---
   const calculateCommission = (seller: Seller) => {
     const keywords = settings.special_operator_keywords.map((k) => norm(k)).filter(Boolean)
-    const agentLeads = leads.filter((l) => norm(l.agent_name) === norm(seller.name))
+    // Comisiones: siempre sobre cumplidas oficiales del periodo (leads ya viene filtrado)
+    // PASS no suma facturación ni puntos (regla madre)
+    const agentLeads = leads.filter((l) => norm(l.agent_name) === norm(seller.name) && !isPass(l))
 
     // Separar Especiales vs Estándar
     const specialLeads: LeadRow[] = []
@@ -249,16 +269,13 @@ export function AdminCommissions() {
     standardLeads.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
     // Calcular Puntos (Cápitas) para Escala
-    const standardPoints = standardLeads.reduce((acc, lead) => {
-        // AMPF suele ser especial, pero si cae aquí cuenta como 1. 
-        // Si no es AMPF, usa capitas.
-        return acc + (Number(lead.capitas) || 1)
-    }, 0)
+    const standardPoints = standardLeads.reduce((acc, lead) => acc + capitasPoints(lead), 0)
+    const specialPoints = specialLeads.reduce((acc, lead) => acc + capitasPoints(lead), 0)
 
     const specialQty = specialLeads.length
-    const totalPoints = standardPoints + specialQty
+    const totalPoints = standardPoints + specialPoints
 
-    // Determinar Absorción
+    // Determinar Absorción (por PUNTOS / CÁPITAS, no por cantidad de filas)
     const absorbedLimit = seller.hours === 5 ? settings.absorbed_5h : settings.absorbed_8h
     const isThresholdMet = standardPoints > absorbedLimit
 
@@ -266,13 +283,18 @@ export function AdminCommissions() {
     const breakdown: string[] = []
 
     // 1. CALCULAR ESPECIALES (Revenue Share)
-    // En OpsBilling: Suma de valores * Porcentaje Especial
+    // Regla de OpsBilling: los especiales se computan sobre cumplidas oficiales, pero
+    // NO se pagan si la vendedora NO cubrió la base de absorción.
     const totalLiquidatedSpecial = specialLeads.reduce((acc, op) => acc + calculateLiquidationValue(op), 0)
-    const specialCommission = totalLiquidatedSpecial * settings.special_pct
+    const specialCommission = isThresholdMet ? (totalLiquidatedSpecial * settings.special_pct) : 0
     
     if (specialQty > 0) {
-        commissionTotal += specialCommission
-        breakdown.push(`Esp. (${specialQty} vtas): Facturado $${Math.round(totalLiquidatedSpecial).toLocaleString()} -> Paga $${Math.round(specialCommission).toLocaleString()} (${settings.special_pct * 100}%)`)
+        if (isThresholdMet) commissionTotal += specialCommission
+        breakdown.push(
+          isThresholdMet
+            ? `Esp. (${specialQty} vtas): Facturado $${Math.round(totalLiquidatedSpecial).toLocaleString()} -> Paga $${Math.round(specialCommission).toLocaleString()} (${settings.special_pct * 100}%)`
+            : `Esp. (${specialQty} vtas): Facturado $${Math.round(totalLiquidatedSpecial).toLocaleString()} (NO paga: base no cubierta)`
+        )
     }
 
     // 2. CALCULAR ESCALA (Revenue Share tras absorción)
@@ -294,16 +316,28 @@ export function AdminCommissions() {
         else if (netCount <= (settings.tier1_qty + settings.tier2_qty + settings.tier3_qty)) scalePct = settings.tier3_pct
         else scalePct = settings.tier4_pct
 
-        // Calcular Facturación de las ventas que NO fueron absorbidas
-        // (Las primeras X ventas se absorben, el resto se paga)
-        // NOTA: OpsBilling usa standardOps.slice(absorbableLimit). 
-        // Aquí standardLeads ya está ordenado por fecha.
-        
-        // Problema: standardPoints se basa en CÁPITAS, pero slice corta por VENTA.
-        // OpsBilling simplifica cortando por array index. Haremos lo mismo para coincidir.
-        
-        const payableOps = standardLeads.slice(absorbedLimit) // Cortamos las primeras N ventas (absorbidas)
-        const totalLiquidatedStandard = payableOps.reduce((acc, op) => acc + calculateLiquidationValue(op), 0)
+        // Calcular Facturación de lo NO absorbido (por puntos/cápitas).
+        // Si una operación trae varias cápitas, prorrateamos el valor cuando la absorción "parte" la operación.
+        let remainingAbsorb = Math.max(0, absorbedLimit)
+        let totalLiquidatedStandard = 0
+        for (const op of standardLeads) {
+          const pts = capitasPoints(op)
+          const liq = calculateLiquidationValue(op)
+          if (remainingAbsorb <= 0) {
+            totalLiquidatedStandard += liq
+            continue
+          }
+          if (pts <= remainingAbsorb) {
+            // completamente absorbida
+            remainingAbsorb -= pts
+            continue
+          }
+          // parcialmente absorbida
+          const payablePts = pts - remainingAbsorb
+          const fraction = pts > 0 ? payablePts / pts : 1
+          totalLiquidatedStandard += liq * fraction
+          remainingAbsorb = 0
+        }
         
         const standardCommission = totalLiquidatedStandard * scalePct
         commissionTotal += standardCommission

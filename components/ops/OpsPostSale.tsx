@@ -142,6 +142,8 @@ export function OpsPostSale({ globalConfig }: any) {
                 name: c.name || "Sin Nombre",
                 dni: c.dni || "-",
                 cuit: c.cuit, // ✅ Agregamos CUIT al mapa
+                phone: c.phone || "", // ✅ Aseguramos que el teléfono esté mapeado
+                email: c.email || "", // ✅ Aseguramos que el email esté mapeado
                 dob: c.dob || "2000-01-01", 
                 prepaga: c.prepaga || c.quoted_prepaga || "Sin Asignar",
                 plan: c.plan || c.quoted_plan || "-",
@@ -235,13 +237,19 @@ export function OpsPostSale({ globalConfig }: any) {
             .slice(0, 3)
     }, [clients])
 
-    // --- FILTRADO ---
+    // --- FILTRADO AVANZADO (BUSCADOR GLOBAL) ---
     const filteredClients = useMemo(() => {
         return clients.filter(c => {
-            const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                  c.dni.includes(searchTerm) || 
-                                  (c.cuit && c.cuit.includes(searchTerm)) || // Busqueda por CUIT
-                                  c.prepaga.toLowerCase().includes(searchTerm.toLowerCase())
+            const term = searchTerm.toLowerCase()
+            const matchesSearch = 
+                (c.name && c.name.toLowerCase().includes(term)) || 
+                (c.dni && c.dni.includes(term)) || 
+                (c.cuit && c.cuit.includes(term)) || // Busqueda por CUIT
+                (c.phone && c.phone.includes(term)) || // ✅ Busqueda por Teléfono
+                (c.email && c.email.toLowerCase().includes(term)) || // ✅ Busqueda por Email
+                (c.plan && c.plan.toLowerCase().includes(term)) || // ✅ Busqueda por Plan
+                (c.province && c.province.toLowerCase().includes(term)) ||
+                (c.prepaga && c.prepaga.toLowerCase().includes(term))
             
             if (!matchesSearch) return false
             if (filters.seller !== "all" && c.seller !== filters.seller) return false
@@ -301,7 +309,7 @@ export function OpsPostSale({ globalConfig }: any) {
 
             {/* TOOLBAR & FILTROS */}
             <div className="flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-                <div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-2.5 text-slate-400 h-4 w-4"/><Input placeholder="Buscar cliente..." className="pl-9 bg-slate-50 border-slate-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/></div>
+                <div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-2.5 text-slate-400 h-4 w-4"/><Input placeholder="Buscar por Nombre, DNI, Teléfono..." className="pl-9 bg-slate-50 border-slate-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/></div>
                 <div className="h-8 w-px bg-slate-200"></div>
                 <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                     <PopoverTrigger asChild><Button variant={activeFiltersCount>0?"default":"outline"} className="gap-2 relative"><Filter size={16}/> Filtros {activeFiltersCount>0 && <span className="bg-pink-500 text-white text-[10px] h-5 w-5 rounded-full flex items-center justify-center absolute -top-2 -right-2">{activeFiltersCount}</span>}</Button></PopoverTrigger>

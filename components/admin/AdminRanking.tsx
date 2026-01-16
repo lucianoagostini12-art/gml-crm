@@ -118,7 +118,10 @@ export function AdminRanking() {
         setPrepagasAvailable(uniquePrepagas as string[])
 
         // B. Agrupar por Vendedor
-        const stats: Record<string, { name: string, count: number, revenue: number, sales: number }> = {}
+        // Regla de oro:
+        // - Volumen = cápitas (AMPF cuenta 1; el resto suma capitas con fallback 1)
+        // - Ticket promedio = facturación neta / cápitas (NO por cantidad de operaciones)
+        const stats: Record<string, { name: string, count: number, revenue: number, ops: number }> = {}
 
         leads.forEach((l: any) => {
             // Filtro de Prepaga en memoria
@@ -126,7 +129,7 @@ export function AdminRanking() {
             if (prepagaFilter !== "all" && pName !== prepagaFilter) return
 
             const agent = (l.agent_name || "Desconocido").trim()
-            if (!stats[agent]) stats[agent] = { name: agent, count: 0, revenue: 0, sales: 0 }
+            if (!stats[agent]) stats[agent] = { name: agent, count: 0, revenue: 0, ops: 0 }
 
             // Lógica de Volumen (Cápitas) - Igual que RankingsView
             const isAMPF = pName.toLowerCase().includes("ampf")
@@ -136,14 +139,15 @@ export function AdminRanking() {
             const money = calculateNetValue(l)
 
             stats[agent].count += points
-            stats[agent].sales += 1 // Cantidad de operaciones (para ticket promedio)
+            stats[agent].ops += 1 // Cantidad de operaciones (solo informativo)
             stats[agent].revenue += money
         })
 
         // C. Convertir a Array y Ordenar
         const array = Object.values(stats).map((s) => ({
             ...s,
-            ticket: s.sales > 0 ? s.revenue / s.sales : 0,
+            // Ticket promedio por cápita (facturación neta / cápitas)
+            ticket: s.count > 0 ? s.revenue / s.count : 0,
             avatar: avatarMap[norm(s.name)] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.name}`
         }))
 
@@ -192,7 +196,7 @@ export function AdminRanking() {
   const renderMetricLabel = () => {
       if (metric === "volume") return "Cápitas"
       if (metric === "revenue") return "Facturación Est."
-      if (metric === "ticket") return "Ticket Promedio"
+      if (metric === "ticket") return "Ticket / Cápita"
   }
 
   return (
@@ -366,6 +370,8 @@ export function AdminRanking() {
                                 </div>
                                 <div className="flex gap-4 mt-1 text-xs text-slate-400">
                                     <span>Vol: <b>{user.count}</b></span>
+                                    <span className="w-px h-3 bg-slate-300"></span>
+                                    <span>Ops: <b>{user.ops}</b></span>
                                     <span className="w-px h-3 bg-slate-300"></span>
                                     <span>Ticket: <b>{formatMoney(user.ticket)}</b></span>
                                 </div>

@@ -4,7 +4,9 @@ import { NextResponse } from "next/server"
 // 🔐 TU CONTRASEÑA DE SEGURIDAD
 const API_SECRET = "gml_crm_secret_key_2024"
 
-// Helper simple (queda por compatibilidad)
+// 🔧 VERSION TAG (para verificar deploy en logs)
+const ROUTE_VERSION = "webhooks/leads route v_emoji_fallback_2026-01-16_02"
+
 const cleanText = (t: string) => t?.toLowerCase().trim() || ""
 
 // ✅ normalizador fuerte (saca tildes, signos, emojis, espacios raros)
@@ -20,40 +22,62 @@ const normalizeText = (input: any) => {
     .trim()
 }
 
-// ✅ matcher universal por matchType
-const matchRule = (inputRaw: any, rule: any) => {
-  const input = normalizeText(inputRaw)
-  const trigger = normalizeText(rule?.trigger)
-  const type = rule?.matchType || "contains"
+// 🔧 detectar emoji / non-ascii en trigger
+const hasNonAscii = (s: any) => /[^\x00-\x7F]/.test(String(s || ""))
 
+// 🔧 matcher: si trigger tiene emoji => match crudo; si no => match normalizado
+const matchRule = (inputRaw: any, rule: any) => {
+  const rawInput = String(inputRaw || "")
+  const rawTrigger = String(rule?.trigger || "")
+  const type = rule?.matchType || "contains"
+  if (!rawTrigger.trim()) return false
+
+  if (hasNonAscii(rawTrigger)) {
+    const input = rawInput.trim()
+    const trigger = rawTrigger.trim()
+    if (type === "exact") return input === trigger
+    if (type === "starts_with") return input.startsWith(trigger)
+    return input.includes(trigger)
+  }
+
+  const input = normalizeText(rawInput)
+  const trigger = normalizeText(rawTrigger)
   if (!trigger) return false
   if (type === "exact") return input === trigger
   if (type === "starts_with") return input.startsWith(trigger)
-  return input.includes(trigger) // contains
+  return input.includes(trigger)
 }
 
 // ✅ normaliza a "canon" 10 dígitos (AR) para dedupe
 const normalizePhoneCanon = (raw: any) => {
   const d = String(raw || "").replace(/\D+/g, "")
   if (!d) return null
-
-  // WhatsApp AR: 549 + 10 dígitos
   if (d.startsWith("549") && d.length >= 13) return d.substring(3, 13)
-
-  // AR con país: 54 + 10 dígitos
   if (d.startsWith("54") && d.length >= 12) return d.substring(2, 12)
-
-  // 9 + 10 dígitos
   if (d.startsWith("9") && d.length === 11) return d.substring(1)
-
-  // Ya canon
   if (d.length === 10) return d
-
-  // fallback: últimos 10
   return d.length > 10 ? d.slice(-10) : d
 }
 
-// ✅ helper: log de eventos sin romper el webhook si falla
+// ✅ helper: detectar prepaga (badge)
+const detectPrepagaFromAny = (...inputs: any[]): string | null => {
+  const joined = inputs
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase())
+    .join(" | ")
+
+  if (joined.includes("doctored") || joined.includes("docto red")) return "DoctoRed"
+  if (joined.includes("prevencion")) return "Prevención"
+  if (joined.includes("sancor")) return "Sancor"
+  if (joined.includes("galeno")) return "Galeno"
+  if (joined.includes("swiss")) return "Swiss Medical"
+  if (joined.includes("osde")) return "Osde"
+  if (joined.includes("avalian")) return "Avalian"
+  if (joined.includes("ampf")) return "AMPF"
+  return null
+}
+
+// ✅ helper: log de eventos sin romper webhook si falla
 async function safeLeadEvent(
   supabase: any,
   evt: {
@@ -76,115 +100,207 @@ async function safeLeadEvent(
       summary: evt.summary ?? null,
       payload: evt.payload ?? null,
     })
-
     if (error) console.error("❌ lead_events insert error:", error)
   } catch (e: any) {
     console.error("❌ lead_events insert fatal:", e?.message || e)
   }
 }
 
+// ============================================================================
+// 🟦 FORM HANDLER (Landing) — para cuando el formulario pega a /api/webhooks/leads
+// ============================================================================
+async function handleLandingPayload(supabase: any, body: any) {
+  const onlyDigits = (v: any) => String(v || "").replace(/\D+/g, "")
+
+  const nombre = (body.nombre || body.name || "Sin Nombre").toString().trim()
+  const telefono = onlyDigits(body.telefono || body.phone)
+  const phoneCanon = normalizePhoneCanon(telefono)
+  const cp = (body.cp || body.zip || "").toString().trim()
+  const provincia = (body.provincia || body.province || "").toString().trim()
+  const landing_url = (body.landing_url || "").toString().trim()
+  const ref = (body.ref || "").toString().trim()
+  const sourceFromLanding = (body.source || "").toString().trim()
+
+  if (!telefono) {
+    return NextResponse.json({ success: false, error: "No phone" }, { status: 200 })
+  }
+
+  await safeLeadEvent(supabase, {
+    lead_id: null,
+    phone_canon: phoneCanon,
+    source: "landing",
+    event_type: "form_submit",
+    actor_name: "Cliente",
+    summary: `Formulario: ${nombre} (${telefono})`,
+    payload: body,
+  })
+
+  let finalTag = sourceFromLanding || "Formulario - DoctoRed"
+
+  if (ref) {
+    const { data: config } = await supabase
+      .from("system_config")
+      .select("value")
+      .eq("key", "message_source_rules")
+      .limit(1)
+
+    if (config && config.length > 0) {
+      const rules = (config[0] as any).value || []
+      const match = rules.find((r: any) => {
+        if (r.matchType === "exact") return r.trigger === ref
+        return String(ref).includes(r.trigger)
+      })
+      if (match) finalTag = match.source
+      else finalTag = `Meta Ads (${ref})`
+    } else {
+      finalTag = `Meta Ads (${ref})`
+    }
+  }
+
+  const detectedPrepaga =
+    (body.prepaga || body.prepaga_name || body.interest || body.plan || "").toString().trim() ||
+    detectPrepagaFromAny(finalTag, sourceFromLanding, landing_url, ref)
+
+  const now = new Date().toISOString()
+
+  const baseFind = supabase.from("leads").select("id, source, notes, phone_canon, prepaga")
+  const { data: existingLead } = phoneCanon
+    ? await baseFind.eq("phone_canon", phoneCanon).maybeSingle()
+    : await baseFind.eq("phone", telefono).maybeSingle()
+
+  const extraNotesParts: string[] = []
+  if (landing_url) extraNotesParts.push(`Landing URL: ${landing_url}`)
+  if (cp) extraNotesParts.push(`CP: ${cp}`)
+  if (provincia) extraNotesParts.push(`Provincia: ${provincia}`)
+  const extraNotes = extraNotesParts.join(" | ")
+
+  if (existingLead?.id) {
+    const updates: any = { last_update: now }
+    if (!existingLead.phone_canon && phoneCanon) updates.phone_canon = phoneCanon
+    if (!existingLead.prepaga && detectedPrepaga) updates.prepaga = detectedPrepaga
+    if (provincia) updates.province = provincia
+    if (cp) updates.zip = cp
+    if (extraNotes) {
+      const prev = (existingLead.notes || "").toString()
+      updates.notes = prev ? `${prev}\n${extraNotes}` : extraNotes
+    }
+    if (!existingLead.source || existingLead.source === "WATI / Bot") {
+      updates.source = finalTag
+    }
+
+    const { error: updErr } = await supabase.from("leads").update(updates).eq("id", existingLead.id)
+    if (updErr) return NextResponse.json({ success: false, error: updErr.message }, { status: 200 })
+
+    return NextResponse.json({ success: true, action: "updated", kind: "landing" }, { status: 200 })
+  }
+
+  const { error: insErr } = await supabase.from("leads").insert({
+    name: nombre,
+    phone: telefono,
+    phone_canon: phoneCanon,
+    source: finalTag,
+    status: "nuevo",
+    notes: extraNotes || null,
+    province: provincia || null,
+    zip: cp || null,
+    created_at: now,
+    last_update: now,
+    agent_name: null,
+    prepaga: detectedPrepaga || null,
+    assigned_to: null,
+  })
+
+  if (insErr) return NextResponse.json({ success: false, error: insErr.message }, { status: 200 })
+
+  return NextResponse.json({ success: true, action: "created", kind: "landing" }, { status: 200 })
+}
+
 export async function POST(request: Request) {
   const supabase = createClient()
 
   try {
-    // 1) VERIFICACIÓN DE SEGURIDAD
     const url = new URL(request.url)
     const apiKey = url.searchParams.get("key")
     if (apiKey !== API_SECRET) {
       return NextResponse.json({ error: "Acceso denegado" }, { status: 401 })
     }
 
-    // 2) LEER BODY (y evitar test)
     const body = await request.json()
 
+    // ✅ Landing (no trae waId)
+    if (!body?.waId) return await handleLandingPayload(supabase, body)
+
+    // ✅ Test
     if (body.waId === "senderPhone" || body.info === "test_notification") {
       return NextResponse.json({ message: "Test WATI recibido OK" }, { status: 200 })
     }
 
-    // 3) MENSAJE REAL
+    // ✅ MENSAJE REAL
     let finalMessage = body.text || ""
     if (body.interactiveButtonReply?.title) finalMessage = `[Botón]: ${body.interactiveButtonReply.title}`
     else if (body.listReply?.title) finalMessage = `[Lista]: ${body.listReply.title}`
 
-    // candidatos (para que “primer mensaje” matchee aunque venga con formatos)
     const textCandidates = [
       body.text || "",
+      body.message || "",
       body.interactiveButtonReply?.title || "",
       body.listReply?.title || "",
       finalMessage || "",
     ].filter(Boolean)
 
-    // 4) DATOS CLIENTE
+    // 🔧 Texto combinado (crudo y normalizado) para diagnóstico + fallback
+    const rawCombined = textCandidates.join(" | ")
+    const normCombined = normalizeText(rawCombined)
+
+    // ✅ DATOS CLIENTE
     let phone = ""
     let name = "Desconocido"
-
     if (body.waId) {
       phone = String(body.waId).replace(/\D/g, "")
       name = body.senderName || "Cliente WhatsApp"
-    } else {
-      phone = (body.phone || body.telefono || "").replace(/\D/g, "")
-      name = body.name || body.nombre || "Cliente Web"
-      finalMessage = body.message || body.mensaje || finalMessage || "Consulta Web"
     }
 
     if (!phone) return NextResponse.json({ message: "Ignored: No valid phone" }, { status: 200 })
-
     const phoneCanon = normalizePhoneCanon(phone)
 
-    // Logs cortos para debug (no te llena el server)
+    // 🔧 Log clave para verificar deploy + texto recibido
     console.log(
-      "📥 WATI:",
-      JSON.stringify({
-        phone,
-        phoneCanon,
-        msg: String(finalMessage || "").slice(0, 80),
-        referral: body.referral,
-        sourceId: body.sourceId,
-      })
+      "🧾 ROUTE_VERSION:",
+      ROUTE_VERSION,
+      JSON.stringify({ phoneCanon, raw: rawCombined.slice(0, 140), norm: normCombined.slice(0, 140) })
     )
 
-    // ✅ 4.5) EVENTO INBOUND (aunque todavía no sepamos lead_id)
     await safeLeadEvent(supabase, {
       lead_id: null,
       phone_canon: phoneCanon,
       source: "wati",
       event_type: "wati_inbound",
       actor_name: "Cliente",
-      summary: String(finalMessage || "").slice(0, 160),
+      summary: rawCombined.slice(0, 160),
       payload: body,
     })
 
     // =====================================================================
-    // 5) 🧠 MOTOR DE REGLAS
+    // 🧠 MOTOR DE REGLAS (WATI)
     // =====================================================================
 
     let detectedSource = body.source || "WATI / Bot"
-    let detectedPrepaga: string | null = null
 
-    // A) Obtener reglas desde system_config (robusto)
-    const { data: configData, error: configErr } = await supabase
+    const { data: configData } = await supabase
       .from("system_config")
       .select("value")
       .eq("key", "message_source_rules")
       .maybeSingle()
 
-    if (configErr) {
-      console.error("❌ Error leyendo system_config(message_source_rules):", configErr)
-    }
-
     let rules: any[] = []
     const rawVal: any = configData?.value
-
-    if (Array.isArray(rawVal)) {
-      rules = rawVal
-    } else if (typeof rawVal === "string") {
+    if (Array.isArray(rawVal)) rules = rawVal
+    else if (typeof rawVal === "string") {
       try {
         const parsed = JSON.parse(rawVal)
         if (Array.isArray(parsed)) rules = parsed
         else if (parsed?.rules && Array.isArray(parsed.rules)) rules = parsed.rules
-      } catch (e) {
-        console.error("❌ No se pudo parsear message_source_rules:", e)
-      }
+      } catch {}
     } else if (rawVal?.rules && Array.isArray(rawVal.rules)) {
       rules = rawVal.rules
     }
@@ -193,136 +309,74 @@ export async function POST(request: Request) {
       ? [...rules].sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))
       : []
 
-    console.log("🧩 Rules cargadas:", sortedRules.length)
-
     let matchedRule: any = null
 
-    // B) Referral/SourceId (Meta)
+    // 1) Referral/SourceId (si llega)
     const metaReferralRaw = body.referral || body.sourceId || ""
     if (String(metaReferralRaw || "").trim()) {
       matchedRule = sortedRules.find((r: any) => matchRule(metaReferralRaw, r)) || null
-      if (!matchedRule) {
-        detectedSource = `Meta Ads (${String(metaReferralRaw).trim()})`
-      }
+      if (!matchedRule) detectedSource = `Meta Ads (${String(metaReferralRaw).trim()})`
     }
 
-    // C) Texto (primer mensaje)
+    // 2) Texto combinado (una sola pasada) — soporta emojis
     if (!matchedRule && sortedRules.length > 0) {
-      for (const rule of sortedRules) {
-        let ok = false
-        for (const candidate of textCandidates) {
-          if (matchRule(candidate, rule)) {
-            ok = true
-            break
-          }
-        }
-        if (ok) {
-          matchedRule = rule
-          break
-        }
-      }
+      matchedRule = sortedRules.find((r: any) => matchRule(rawCombined, r)) || null
     }
 
-    // D) Aplicar rule
     if (matchedRule?.source) detectedSource = matchedRule.source
+
+    // 3) Fallback Google Ads por texto (sin depender de reglas)
+    if (!matchedRule) {
+      if (normCombined.includes("doctored") || normCombined.includes("docto red")) detectedSource = "Google Ads - DoctoRed"
+      else if (normCombined.includes("prevencion")) detectedSource = "Google Ads - Prevención"
+    }
 
     console.log("🏷️ Match:", JSON.stringify({ matched: !!matchedRule, detectedSource }))
 
-    // E) Deducción inversa prepaga
-    const sourceLower = cleanText(detectedSource)
-    if (sourceLower.includes("doctored") || sourceLower.includes("docto red")) detectedPrepaga = "DoctoRed"
-    else if (sourceLower.includes("prevencion") || sourceLower.includes("prevención")) detectedPrepaga = "Prevencion"
-    else if (sourceLower.includes("sancor")) detectedPrepaga = "Sancor"
-    else if (sourceLower.includes("galeno")) detectedPrepaga = "Galeno"
-    else if (sourceLower.includes("swiss")) detectedPrepaga = "Swiss Medical"
-    else if (sourceLower.includes("osde")) detectedPrepaga = "Osde"
-    else if (sourceLower.includes("avalian")) detectedPrepaga = "Avalian"
-    else if (sourceLower.includes("ampf")) detectedPrepaga = "AMPF"
+    // ✅ Badge/prepaga desde source + texto (robusto)
+    const detectedPrepaga =
+      detectPrepagaFromAny(detectedSource, normCombined) || null
 
     // =====================================================================
-    // 6) LEADS: Buscar + Update/Insert (por phone_canon)
+    // LEADS upsert (por phone_canon)
     // =====================================================================
 
-    let existingLead: any = null
-
-    if (phoneCanon) {
-      const { data } = await supabase
-        .from("leads")
-        .select("id, chat, name, notes, prepaga, source, phone_canon")
-        .eq("phone_canon", phoneCanon)
-        .maybeSingle()
-      existingLead = data
-    } else {
-      const { data } = await supabase
-        .from("leads")
-        .select("id, chat, name, notes, prepaga, source, phone_canon")
-        .eq("phone", phone)
-        .maybeSingle()
-      existingLead = data
-    }
+    const { data: existingLead } = await supabase
+      .from("leads")
+      .select("id, chat, prepaga, source, phone_canon")
+      .eq("phone_canon", phoneCanon)
+      .maybeSingle()
 
     const now = new Date().toISOString()
     const timeString = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
 
-    // A) UPDATE
-    if (existingLead) {
+    if (existingLead?.id) {
       let currentChat = existingLead.chat
       if (typeof currentChat === "string") {
-        try {
-          currentChat = JSON.parse(currentChat)
-        } catch {
-          currentChat = []
-        }
+        try { currentChat = JSON.parse(currentChat) } catch { currentChat = [] }
       }
       if (!Array.isArray(currentChat)) currentChat = []
 
-      const newChatMsg = { user: "Cliente", text: finalMessage, time: timeString, isMe: false }
-
       const updates: any = {
-        chat: [...currentChat, newChatMsg],
+        chat: [...currentChat, { user: "Cliente", text: finalMessage, time: timeString, isMe: false }],
         last_update: now,
       }
 
-      // completar canon si faltaba
-      if (!existingLead.phone_canon && phoneCanon) updates.phone_canon = phoneCanon
-
-      // completar prepaga si faltaba
       if (!existingLead.prepaga && detectedPrepaga) updates.prepaga = detectedPrepaga
-
-      // actualizar source solo si era genérico
       if ((!existingLead.source || existingLead.source === "WATI / Bot") && detectedSource !== "WATI / Bot") {
         updates.source = detectedSource
       }
 
       const { error: updErr } = await supabase.from("leads").update(updates).eq("id", existingLead.id)
-      if (updErr) {
-        console.error("❌ Error update lead:", updErr)
-        return NextResponse.json({ error: updErr.message }, { status: 500 })
-      }
-
-      // ✅ EVENTO: lead actualizado por mensaje WATI
-      await safeLeadEvent(supabase, {
-        lead_id: existingLead.id,
-        phone_canon: phoneCanon,
-        source: "wati",
-        event_type: "lead_updated",
-        actor_name: "Sistema",
-        summary: `WATI: mensaje (${String(finalMessage || "").slice(0, 80)})`,
-        payload: {
-          wati: body,
-          applied: { detectedSource, detectedPrepaga },
-          updates,
-        },
-      })
+      if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 })
 
       return NextResponse.json({ success: true, action: "updated", source: detectedSource }, { status: 200 })
     }
 
-    // B) INSERT
-    const newLeadData: any = {
+    const { error: insErr } = await supabase.from("leads").insert({
       name,
       phone,
-      phone_canon: phoneCanon, // ✅ CLAVE
+      phone_canon: phoneCanon,
       source: detectedSource,
       status: "nuevo",
       agent_name: null,
@@ -331,34 +385,9 @@ export async function POST(request: Request) {
       prepaga: detectedPrepaga,
       created_at: now,
       last_update: now,
-    }
-
-    // ✅ Cambio mínimo: devolvemos el id para loguear evento
-    const { data: insertedLead, error: insErr } = await supabase
-      .from("leads")
-      .insert(newLeadData)
-      .select("id")
-      .single()
-
-    if (insErr) {
-      console.error("❌ Error insert lead:", insErr)
-      return NextResponse.json({ error: insErr.message }, { status: 500 })
-    }
-
-    // ✅ EVENTO: lead creado por WATI
-    await safeLeadEvent(supabase, {
-      lead_id: insertedLead?.id || null,
-      phone_canon: phoneCanon,
-      source: "wati",
-      event_type: "lead_created",
-      actor_name: "Sistema",
-      summary: `Lead creado desde WATI (${String(finalMessage || "").slice(0, 80)})`,
-      payload: {
-        wati: body,
-        newLeadData,
-        applied: { detectedSource, detectedPrepaga },
-      },
     })
+
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })
 
     return NextResponse.json({ success: true, action: "created", source: detectedSource }, { status: 200 })
   } catch (e: any) {

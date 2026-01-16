@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Database, Download, Search, FileSpreadsheet, Calendar, Trash2, Filter, X, RefreshCw, AlertTriangle, UserCheck, Eye, StickyNote, History, Webhook, BadgeCheck } from "lucide-react"
+import { AlertTriangle, BadgeCheck, Calendar, Database, Download, Eye, FileSpreadsheet, Filter, History, RefreshCw, Search, StickyNote, Trash2, UserCheck, Webhook, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -57,6 +58,102 @@ type StatusLog = {
   meta?: any
 }
 
+
+function MultiSelectPopover({
+  label,
+  options,
+  selected,
+  setSelected,
+  placeholderAll = "Todos",
+  widthClass = "w-full",
+}: {
+  label: string
+  options: string[]
+  selected: string[]
+  setSelected: (fn: (prev: string[]) => string[]) => void
+  placeholderAll?: string
+  widthClass?: string
+}) {
+  const count = selected.length
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-slate-500 font-bold uppercase">{label}</Label>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" className={`${widthClass} justify-between bg-white dark:bg-slate-950/20`}>
+            <span className="truncate">
+              {count === 0 ? placeholderAll : `${count} seleccionado${count === 1 ? "" : "s"}`}
+            </span>
+            <Filter className="h-4 w-4 text-slate-400" />
+          </Button>
+        </PopoverTrigger>
+
+        <PopoverContent className="w-[320px] p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-black text-slate-800 dark:text-white">{label}</div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-slate-500"
+              onClick={() => setSelected(() => [])}
+              disabled={count === 0}
+            >
+              Limpiar
+            </Button>
+          </div>
+
+          <div className="mt-2 max-h-[260px] overflow-y-auto space-y-1">
+            {options
+              .filter(Boolean)
+              .map((opt) => {
+                const checked = selected.includes(opt)
+                return (
+                  <div
+                    key={opt}
+                    role="button"
+                    tabIndex={0}
+                    className="w-full flex items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition cursor-pointer select-none"
+                    onClick={() => {
+                      setSelected((prev) => (prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]))
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        setSelected((prev) => (prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]))
+                      }
+                    }}
+                  >
+                    <Checkbox checked={checked} />
+                    <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{opt}</span>
+                  </div>
+                )
+              })}
+
+            {options.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">Sin opciones.</div>}
+          </div>
+
+          {count > 0 && (
+            <div className="mt-3 border-t pt-2 flex flex-wrap gap-2">
+              {selected.slice(0, 6).map((s) => (
+                <Badge key={s} variant="outline" className="text-[10px]">
+                  {s}
+                </Badge>
+              ))}
+              {count > 6 && (
+                <Badge variant="outline" className="text-[10px]">
+                  +{count - 6}
+                </Badge>
+              )}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
+
+
 export function AdminDatabase() {
   const supabase = createClient()
 
@@ -71,10 +168,10 @@ export function AdminDatabase() {
 
   // --- FILTROS ---
   const [searchTerm, setSearchTerm] = useState("")
-  const [filterAgent, setFilterAgent] = useState("all")
-  const [filterStatus, setFilterStatus] = useState("all")
-  const [filterSource, setFilterSource] = useState("all")
-  const [filterLossReason, setFilterLossReason] = useState("all")
+  const [filterAgents, setFilterAgents] = useState<string[]>([])
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([])
+  const [filterSources, setFilterSources] = useState<string[]>([])
+  const [filterLossReasons, setFilterLossReasons] = useState<string[]>([])
 
   // Filtro de Fecha (Rango)
   const [dateFrom, setDateFrom] = useState("")
@@ -113,7 +210,7 @@ export function AdminDatabase() {
   const [confirmClearNotesOpen, setConfirmClearNotesOpen] = useState(false)
   const [confirmReactivateOpen, setConfirmReactivateOpen] = useState(false)
 
-  // ✅ NUEVO: nombre del usuario logueado (para author en notas)
+  //  NUEVO: nombre del usuario logueado (para author en notas)
   const [currentUserName, setCurrentUserName] = useState("")
 
   useEffect(() => {
@@ -140,6 +237,23 @@ export function AdminDatabase() {
 
 
   // Helpers
+
+
+  const fetchDistinctSourcesFromLeads = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("leads")
+        .select("source")
+        .not("source", "is", null)
+        .limit(10000)
+
+      if (error || !data) return []
+      return Array.from(new Set((data as any[]).map((r) => r?.source).filter(Boolean))).sort()
+    } catch {
+      return []
+    }
+  }
+
   const tryFetchSimpleList = async (table: string, column: string) => {
     try {
       const { data, error } = await supabase.from(table).select(column)
@@ -172,18 +286,13 @@ export function AdminDatabase() {
       setAgentsList(uniqueAgents.sort())
       setStatusList(uniqueStatuses.sort())
 
-      const [srcFromDb, lossFromDb] = await Promise.all([
-        tryFetchSimpleList("lead_sources", "name")
-          .then((x) => x ?? tryFetchSimpleList("sources", "name"))
-          .then((x) => x ?? tryFetchSimpleList("lead_sources", "source"))
-          .then((x) => x ?? null),
-        tryFetchSimpleList("lead_loss_reasons", "name")
-          .then((x) => x ?? tryFetchSimpleList("loss_reasons", "name"))
-          .then((x) => x ?? tryFetchSimpleList("lead_loss_reasons", "reason"))
-          .then((x) => x ?? null),
-      ])
+      const lossFromDb = await tryFetchSimpleList("lead_loss_reasons", "name")
+        .then((x) => x ?? tryFetchSimpleList("loss_reasons", "name"))
+        .then((x) => x ?? tryFetchSimpleList("lead_loss_reasons", "reason"))
+        .then((x) => x ?? null)
 
-      setSourceList(((srcFromDb && srcFromDb.length > 0 ? srcFromDb : uniqueSources.sort()) as string[]).filter(Boolean))
+      const sourcesFromDb = await fetchDistinctSourcesFromLeads()
+      setSourceList((sourcesFromDb.length > 0 ? sourcesFromDb : uniqueSources.sort()) as string[])
       setLossReasonsList((lossFromDb && lossFromDb.length > 0 ? lossFromDb : uniqueLossReasons.sort()) as string[])
     }
 
@@ -212,14 +321,14 @@ export function AdminDatabase() {
         (item.name?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
         (item.phone?.toLowerCase() || "").includes(searchTerm.toLowerCase())
 
-      const matchesAgent = filterAgent === "all" || item.agent_name === filterAgent
-      const matchesStatus = filterStatus === "all" || item.status === filterStatus
-      const matchesSource = filterSource === "all" || item.source === filterSource
-      const matchesLoss = filterLossReason === "all" || item.loss_reason === filterLossReason
+      const matchesAgent = filterAgents.length === 0 || filterAgents.includes(item.agent_name)
+      const matchesStatus = filterStatuses.length === 0 || filterStatuses.includes(item.status)
+      const matchesSource = filterSources.length === 0 || filterSources.includes(item.source)
+      const matchesLoss = filterLossReasons.length === 0 || filterLossReasons.includes(item.loss_reason)
 
       return matchesSearch && matchesAgent && matchesStatus && matchesSource && matchesLoss
     })
-  }, [leads, searchTerm, filterAgent, filterStatus, filterSource, filterLossReason])
+  }, [leads, searchTerm, filterAgents, filterStatuses, filterSources, filterLossReasons])
 
   // SELECCIÓN MASIVA
   const handleSelectAll = (checked: boolean) => {
@@ -244,7 +353,7 @@ export function AdminDatabase() {
       .in("id", selectedIds)
 
     if (!error) {
-      alert(`✅ ${selectedIds.length} leads reasignados a ${targetAgent}.`)
+      alert(` ${selectedIds.length} leads reasignados a ${targetAgent}.`)
       setSelectedIds([])
       setTargetAgent("")
       fetchData()
@@ -331,7 +440,7 @@ export function AdminDatabase() {
         setModalLossReason(lead.loss_reason || "")
       }
 
-      // ✅ Webhook / Eventos: fuente única = lead_events
+      //  Webhook / Eventos: fuente única = lead_events
       const { data: ev, error: evErr } = await supabase
         .from("lead_events")
         .select("id, lead_id, source, event_type, actor_name, summary, payload, created_at")
@@ -365,7 +474,7 @@ export function AdminDatabase() {
         }
       } catch {}
 
-      // ✅ Logs del vendedor/acciones: audit_logs por lead_id
+      //  Logs del vendedor/acciones: audit_logs por lead_id
       const { data: lg, error: lgErr } = await supabase
         .from("audit_logs")
         .select("id, created_at, level, event_type, actor_name, action, details, lead_id")
@@ -409,7 +518,7 @@ export function AdminDatabase() {
     return vv
   }
 
-  // ✅ helper para insertar nota con fallback (con author / sin author)
+  //  helper para insertar nota con fallback (con author / sin author)
   const insertNoteWithFallback = async (leadId: string, noteText: string) => {
     const noteTables = ["lead_notes", "notes", "lead_notes_logs"]
     const basePayload: any = {
@@ -575,49 +684,114 @@ export function AdminDatabase() {
                   <Input type="date" className="text-xs" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
                 </div>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-slate-500 font-bold uppercase">Vendedor</Label>
-                <Select value={filterAgent} onValueChange={setFilterAgent}>
-                  <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    {agentsList.map((a) => (<SelectItem key={a} value={a}>{a}</SelectItem>))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-slate-500 font-bold uppercase">Estado</Label>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    {statusList.map((s) => (<SelectItem key={s} value={s}>{String(s).toUpperCase()}</SelectItem>))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <MultiSelectPopover
+                label="Vendedor"
+                options={agentsList}
+                selected={filterAgents}
+                setSelected={setFilterAgents}
+                placeholderAll="Todos"
+              />
+              <MultiSelectPopover
+                label="Estado"
+                options={statusList}
+                selected={filterStatuses}
+                setSelected={setFilterStatuses}
+                placeholderAll="Todos"
+              />
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 font-bold uppercase">Fuente</Label>
-                <Select value={filterSource} onValueChange={setFilterSource}>
-                  <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas</SelectItem>
-                    {sourceList.map((s) => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
-                  </SelectContent>
-                </Select>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-between bg-white dark:bg-slate-950/20"
+                    >
+                      <span className="truncate">
+                        {filterSources.length === 0
+                          ? "Todas"
+                          : `${filterSources.length} seleccionada${filterSources.length === 1 ? "" : "s"}`}
+                      </span>
+                      <Filter className="h-4 w-4 text-slate-400" />
+                    </Button>
+                  </PopoverTrigger>
+
+                  <PopoverContent className="w-[320px] p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-black text-slate-800 dark:text-white">Fuentes</div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-slate-500"
+                        onClick={() => setFilterSources([])}
+                        disabled={filterSources.length === 0}
+                      >
+                        Limpiar
+                      </Button>
+                    </div>
+
+                    <div className="mt-2 max-h-[260px] overflow-y-auto space-y-1">
+                      {sourceList.map((s) => {
+                        const checked = filterSources.includes(s)
+                        return (
+                          <div
+                            key={s}
+                            role="button"
+                            tabIndex={0}
+                            className="w-full flex items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition cursor-pointer select-none"
+                            onClick={() => {
+                              setFilterSources((prev) =>
+                                prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                              )
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault()
+                                setFilterSources((prev) =>
+                                  prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                                )
+                              }
+                            }}
+                          >
+                            <Checkbox checked={checked} />
+                            <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{s}</span>
+                          </div>
+                        )
+                      })}
+                      {sourceList.length === 0 && (
+                        <div className="text-sm text-slate-400 py-6 text-center">Sin fuentes disponibles.</div>
+                      )}
+                    </div>
+
+                    {filterSources.length > 0 && (
+                      <div className="mt-3 border-t pt-2 flex flex-wrap gap-2">
+                        {filterSources.slice(0, 6).map((s) => (
+                          <Badge key={s} variant="outline" className="text-[10px]">
+                            {s}
+                          </Badge>
+                        ))}
+                        {filterSources.length > 6 && (
+                          <Badge variant="outline" className="text-[10px]">
+                            +{filterSources.length - 6}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
               </div>
-              <div className="space-y-1 md:col-span-2">
-                <Label className="text-xs text-slate-500 font-bold uppercase">Motivo Pérdida</Label>
-                <Select value={filterLossReason} onValueChange={setFilterLossReason}>
-                  <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    {lossReasonsList.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
-                  </SelectContent>
-                </Select>
+              <div className="md:col-span-2">
+                <MultiSelectPopover
+                  label="Motivo Pérdida"
+                  options={lossReasonsList}
+                  selected={filterLossReasons}
+                  setSelected={setFilterLossReasons}
+                  placeholderAll="Todos"
+                />
               </div>
               <div className="md:col-span-5 flex justify-end pt-2 border-t mt-2">
                 <Button variant="ghost" size="sm" onClick={() => {
-                    setFilterAgent("all"); setFilterStatus("all"); setFilterSource("all"); setFilterLossReason("all"); setSearchTerm(""); setDateFrom(""); setDateTo("")
+                    setFilterAgents([]); setFilterStatuses([]); setFilterSources([]); setFilterLossReasons([]); setSearchTerm(""); setDateFrom(""); setDateTo("")
                   }} className="text-xs text-red-500">
                   <X className="h-3 w-3 mr-1" /> Limpiar Todo
                 </Button>
@@ -677,6 +851,15 @@ export function AdminDatabase() {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          <div className="px-4 py-3 border-t bg-white/70 dark:bg-slate-950/20 flex items-center justify-between">
+            <div className="text-xs text-slate-500">
+              Total visualizado: <span className="font-black text-slate-800 dark:text-white">{filteredData.length}</span>
+            </div>
+            <div className="text-xs text-slate-400">
+              {filterSources.length > 0 ? `Fuentes seleccionadas: ${filterSources.length}` : "Fuentes: Todas"}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -985,4 +1168,6 @@ export function AdminDatabase() {
       </Dialog>
     </div>
   )
+
 }
+

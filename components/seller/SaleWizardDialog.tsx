@@ -14,9 +14,11 @@ interface SaleWizardDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
     onConfirm: (data: any) => void
+    // ✅ Opcional: si lo pasás, el wizard puede precargar datos del lead (nombre/telefono)
+    leadId?: string
 }
 
-export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDialogProps) {
+export function SaleWizardDialog({ open, onOpenChange, onConfirm, leadId }: SaleWizardDialogProps) {
     const supabase = createClient()
     const [step, setStep] = useState(1)
     const [showSuccess, setShowSuccess] = useState(false)
@@ -56,6 +58,42 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm }: SaleWizardDi
             fetchConfig()
         }
     }, [open])
+
+    // ✅ Precarga de datos (nombre + telefono) desde el lead, para evitar que queden vacíos al confirmar
+    useEffect(() => {
+        if (!open) return
+        if (!leadId) return
+
+        const prefillFromLead = async () => {
+            const { data, error } = await supabase
+                .from('leads')
+                .select('name, phone')
+                .eq('id', leadId)
+                .single()
+
+            if (error || !data) return
+
+            setFormData((prev: any) => {
+                const next = { ...prev }
+
+                // Nombre (solo si está vacío)
+                if (!String(prev.nombre || '').trim() && data.name) {
+                    next.nombre = String(data.name)
+                }
+
+                // Teléfono (solo si está vacío)
+                if (!String(prev.celular || '').trim() && data.phone) {
+                    next.celular = String(data.phone)
+                    next.esMismoCelular = 'si'
+                }
+
+                return next
+            })
+        }
+
+        prefillFromLead()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, leadId])
 
     // --- NAVEGACIÓN ---
     const nextStep = () => setStep(prev => prev + 1)

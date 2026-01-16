@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Search, Download, Filter, Eye, Trash2, X, MessageSquare, StickyNote, RefreshCw, Database } from "lucide-react"
+import { Search, Download, Filter, Eye, Trash2, X, MessageSquare, StickyNote, RefreshCw, Database, Users } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +27,6 @@ export function OpsDatabase({ onSelectOp }: any) {
     const [searchTerm, setSearchTerm] = useState("")
     
     // --- ESTADO DE DATOS PROPIO (GLOBAL) ---
-    // Ya no dependemos de lo que venga del padre, cargamos TODO aquí.
     const [fullDatabase, setFullDatabase] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -46,16 +45,18 @@ export function OpsDatabase({ onSelectOp }: any) {
                 id: l.id,
                 entryDate: l.created_at,
                 status: l.status ? l.status.toLowerCase() : 'desconocido',
-                clientName: l.client_name || l.name, // Ajuste por si usas campos distintos
+                clientName: l.client_name || l.name, 
                 dni: l.dni,
                 seller: l.agent_name,
                 prepaga: l.prepaga || l.quoted_prepaga || 'Sin Dato',
                 plan: l.plan || l.quoted_plan || 'General',
                 origen: l.source,
                 billing_period: l.billing_period,
-                chat: l.chat_history || [], // Asumiendo estructura
+                chat: l.chat_history || [], 
                 adminNotes: l.admin_notes || [],
-                history: l.history || []
+                history: l.history || [],
+                capitas: l.capitas || 1,
+                familia: l.family_members || l.hijos || []
             })))
         }
         setLoading(false)
@@ -105,9 +106,9 @@ export function OpsDatabase({ onSelectOp }: any) {
     // Función de colores
     const getBadgeColor = (status: string) => {
         switch (status?.toLowerCase()) {
-            case 'nuevo': return "bg-slate-100 text-slate-600 border-slate-300" // Venta temprana
-            case 'contactado': return "bg-blue-50 text-blue-600 border-blue-200" // Venta temprana
-            case 'en gestion': return "bg-orange-50 text-orange-600 border-orange-200" // Venta temprana
+            case 'nuevo': return "bg-slate-100 text-slate-600 border-slate-300"
+            case 'contactado': return "bg-blue-50 text-blue-600 border-blue-200"
+            case 'en gestion': return "bg-orange-50 text-orange-600 border-orange-200"
             case 'ingresado': return "bg-slate-200 text-slate-800 border-slate-300"
             case 'precarga': return "bg-blue-100 text-blue-700 border-blue-200"
             case 'medicas': return "bg-purple-100 text-purple-700 border-purple-200"
@@ -153,7 +154,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                 if (opOrigin !== filterOriginLower) return false
             }
 
-            // 3. BUSCADOR GLOBAL
+            // 3. BUSCADOR GLOBAL (Ahora incluye familiares)
             if (searchTerm) {
                 const searchLower = searchTerm.toLowerCase()
                 
@@ -161,6 +162,9 @@ export function OpsDatabase({ onSelectOp }: any) {
                 const notesContent = op.adminNotes?.map((n: any) => safeStr(n.text) + " " + safeStr(n.action)).join(" ") || ""
                 const historyContent = op.history?.map((h: any) => safeStr(h.action) + " " + safeStr(h.details)).join(" ") || ""
                 
+                // ✅ NUEVO: Concatenamos nombres y DNIs de la familia
+                const familyContent = op.familia?.map((f: any) => safeStr(f.nombre) + " " + safeStr(f.dni)).join(" ") || ""
+
                 const fullSearchString = `
                     ${safeStr(op.id)}
                     ${safeStr(op.clientName)} 
@@ -173,6 +177,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                     ${chatContent} 
                     ${notesContent} 
                     ${historyContent}
+                    ${familyContent} 
                 `
                 
                 if (!fullSearchString.includes(searchLower)) return false
@@ -279,7 +284,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                         </div>
                         <Input 
                             className="pl-10 bg-white border-slate-200 h-10 shadow-sm focus:bg-white transition-all font-medium focus:ring-2 focus:ring-blue-500/20" 
-                            placeholder="Buscar en TODO el sistema: ID, Cliente, Vendedor, Notas..." 
+                            placeholder="Buscar en TODO el sistema: ID, Cliente, Vendedor, Notas, Familiares..." 
                             value={searchTerm}
                             onChange={e=>setSearchTerm(e.target.value)}
                             disabled={loading}
@@ -390,7 +395,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                                 <TableHead className="w-[90px] font-bold text-slate-700 text-center">Acción</TableHead>
                                 <TableHead className="font-bold text-slate-700">Cliente</TableHead>
                                 <TableHead className="font-bold text-slate-700">DNI</TableHead>
-                                <TableHead className="font-bold text-slate-700">Detalle</TableHead>
+                                <TableHead className="font-bold text-slate-700">Plan & Familia</TableHead>
                                 <TableHead className="font-bold text-slate-700">Origen</TableHead>
                                 <TableHead className="font-bold text-slate-700">Estado</TableHead>
                                 <TableHead className="font-bold text-slate-700 text-center">Liq.</TableHead>
@@ -425,18 +430,57 @@ export function OpsDatabase({ onSelectOp }: any) {
                                         </Button>
                                     </TableCell>
                                     <TableCell>
-                                        <div className="font-bold text-slate-700 text-sm">{op.clientName || "Sin Nombre"}</div>
-                                        <div className="flex gap-1 mt-0.5">
-                                            {op.chat?.length > 0 && <MessageSquare size={10} className="text-blue-400"/>}
-                                            {op.adminNotes?.length > 0 && <StickyNote size={10} className="text-yellow-500"/>}
+                                        <div className="flex items-center gap-3">
+                                            <div>
+                                                <div className="font-bold text-slate-700 text-sm">{op.clientName || "Sin Nombre"}</div>
+                                                <div className="flex gap-1 mt-0.5">
+                                                    {op.chat?.length > 0 && <MessageSquare size={10} className="text-blue-400"/>}
+                                                    {op.adminNotes?.length > 0 && <StickyNote size={10} className="text-yellow-500"/>}
+                                                </div>
+                                            </div>
                                         </div>
                                     </TableCell>
                                     <TableCell className="font-mono text-xs text-slate-500">{op.dni || "-"}</TableCell>
-                                    <TableCell>
-                                        <Badge variant="outline" className="bg-white border-slate-200 text-slate-600 font-medium text-[10px]">
-                                            {op.prepaga || "S/D"} {op.plan && op.plan !== 'General' ? op.plan : ''}
-                                        </Badge>
+                                    
+                                    <TableCell onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex flex-col items-start gap-1">
+                                            <Badge variant="outline" className="bg-white border-slate-200 text-slate-600 font-medium text-[10px]">
+                                                {op.prepaga || "S/D"} {op.plan && op.plan !== 'General' ? op.plan : ''}
+                                            </Badge>
+                                            
+                                            {op.capitas > 1 && (
+                                                <Popover>
+                                                    <PopoverTrigger asChild>
+                                                        <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 cursor-help hover:bg-blue-100 transition-colors">
+                                                            <Users size={10} className="text-blue-500"/>
+                                                            <span className="text-[10px] font-bold text-blue-700">{op.capitas} Cápitas</span>
+                                                        </div>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-60 p-3 bg-white border-slate-200 shadow-xl">
+                                                        <h4 className="text-xs font-black text-slate-600 uppercase mb-2 border-b pb-1">Grupo Familiar</h4>
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs">
+                                                                <span className="font-bold text-slate-800 block">{op.clientName}</span>
+                                                                <span className="text-[10px] text-slate-400">Titular</span>
+                                                            </div>
+                                                            {op.familia && op.familia.length > 0 ? op.familia.map((f: any, i: number) => (
+                                                                <div key={i} className="text-xs border-t border-slate-50 pt-1 mt-1">
+                                                                    <span className="font-medium text-slate-700 block">{f.nombre}</span>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-[10px] text-slate-400">{f.dni}</span>
+                                                                        <span className="text-[9px] bg-slate-100 px-1 rounded text-slate-500 uppercase">{f.rol || 'Familiar'}</span>
+                                                                    </div>
+                                                                </div>
+                                                            )) : (
+                                                                <p className="text-[10px] text-red-400 italic">No hay datos de familiares cargados.</p>
+                                                            )}
+                                                        </div>
+                                                    </PopoverContent>
+                                                </Popover>
+                                            )}
+                                        </div>
                                     </TableCell>
+
                                     <TableCell className="text-xs text-slate-500 truncate max-w-[100px]" title={op.origen}>
                                         {op.origen || "-"}
                                     </TableCell>

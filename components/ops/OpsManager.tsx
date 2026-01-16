@@ -82,6 +82,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     
     // --- ESTADO PRINCIPAL ---
     const [operations, setOperations] = useState<Operation[]>([])
+    // ✅ Ref de operaciones para mantener orden estable al refrescar
+    const operationsRef = useRef<Operation[]>([])
+    useEffect(() => { operationsRef.current = operations }, [operations])
+
+    // ✅ Ref del contenedor de lista para preservar scroll
+    const listScrollRef = useRef<HTMLDivElement | null>(null)
+
     const [profiles, setProfiles] = useState<any[]>([]) 
     
     // --- CONFIGURACIÓN GLOBAL ---
@@ -274,6 +281,13 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     // === FETCH OPERATIONS ===
     const fetchOperations = async () => {
         setIsLoading(true)
+
+        // ✅ Preservar scroll (para que al guardar desde el modal no vuelva arriba)
+        const viewport = listScrollRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
+        const prevScrollTop = viewport?.scrollTop ?? 0
+
+        // ✅ Orden estable: mantenemos el orden previo aunque cambie last_update
+        const prevOrderIds = operationsRef.current.map(o => o.id)
         
         const opsStatuses = [
             'ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 
@@ -359,7 +373,37 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                     post_sale_status: op.post_sale_status
                 }
             })
-            setOperations(mappedOps)
+            // Mantener orden previo para no saltar al top cuando se edita una venta
+            if (prevOrderIds.length === 0) {
+                setOperations(mappedOps)
+            } else {
+                const mapById = new Map(mappedOps.map((o: any) => [o.id, o]))
+                const seen = new Set<string>()
+
+                // 1) primero, todo lo que ya estaba, en el mismo orden
+                const stable: any[] = []
+                for (const id of prevOrderIds) {
+                    const found = mapById.get(id)
+                    if (found) {
+                        stable.push(found)
+                        seen.add(id)
+                    }
+                }
+
+                // 2) después, cualquier operación nueva (no existente antes) arriba
+                const newOnes: any[] = []
+                for (const opx of mappedOps) {
+                    if (!seen.has(opx.id)) newOnes.push(opx)
+                }
+
+                setOperations([...newOnes, ...stable])
+            }
+
+            // ✅ Restaurar scroll luego del setState
+            requestAnimationFrame(() => {
+                const vp = listScrollRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
+                if (vp) vp.scrollTop = prevScrollTop
+            })
         }
         setIsLoading(false)
     }
@@ -792,7 +836,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                             />
                         </div>
                     ) : (
-                        <ScrollArea className="flex-1 h-full">
+                        <div ref={listScrollRef} className="flex-1 h-full">
+                        <ScrollArea className="h-full">
                             <div className="p-6">
                                 {viewMode === 'dashboard' && <><OpsDashboard operations={operations} activeFilter={currentStageFilter} setActiveFilter={setCurrentStageFilter} /><div className="mt-8 border-t border-slate-200 pt-6"><OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} /></div></>}
                                 
@@ -812,6 +857,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                 {viewMode === 'history' && role === 'admin_god' && <OpsHistory />} 
                             </div>
                         </ScrollArea>
+                    </div>
                     )}
                 </div>
             </main>

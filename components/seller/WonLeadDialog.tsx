@@ -158,6 +158,9 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
       await uploadFilesToLeadDocuments(passData.files, "Seller")
 
       // ✅ ALINEADO A OPSMODAL
+      // ✅ FIX QUIRÚRGICO: evitar pisar el teléfono con null cuando viene vacío
+      const passPhoneDigits = cleanDigits(passData.phone)
+
       const dbData = {
         type: "pass",
         source: "pass", // ✅ clave para que OpsModal lo detecte como PASS
@@ -167,7 +170,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
 
         name: cleanStr(passData.fullName),
         dni: cleanDigits(passData.dni),
-        phone: cleanDigits(passData.phone),
+        ...(passPhoneDigits ? { phone: passPhoneDigits } : {}),
 
         prepaga: cleanStr(passData.prepaga),
         plan: cleanStr(passData.plan),
@@ -190,6 +193,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
   if (saleType === "alta") {
     return (
       <SaleWizardDialog
+        leadId={leadId}
         open={open}
         onOpenChange={handleOpenChange}
         onConfirm={async (wizardData: any) => {
@@ -197,6 +201,9 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
             setIsUploading(true)
 
             const obsVentaLimpia = cleanTextForNotes(wizardData.obs_venta)
+
+            // ✅ FIX QUIRÚRGICO: evitar pisar el teléfono con null cuando viene vacío
+            const phoneDigits = cleanDigits(wizardData.celular)
 
             // ✅ subimos archivos reales (wizardData.archivos es File[])
             await uploadFilesToLeadDocuments((wizardData.archivos || []) as File[], "Seller")
@@ -225,6 +232,12 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
             const catMono = cleanStr(wizardData.catMonotributo)
             const banco = cleanStr(wizardData.bancoEmisor)
 
+            // ✅ NUEVO (quirúrgico): Guardar condición fiscal (empleado/monotributo) y categoría en columnas reales
+            // - labor_condition: "empleado" | "monotributo"
+            // - monotributo_category: "A".."K" (solo si es monotributo)
+            const laborConditionRaw = cleanStr(wizardData.condicion)
+            const laborCondition = laborConditionRaw ? laborConditionRaw.toLowerCase() : null
+
             const notesBase =
               `Clave Fiscal: ${claveFiscal || "-"} - Cat: ${catMono || "-"} - Banco: ${banco || "-"}` +
               (obsVentaLimpia ? `\n\n[OBS VENTA]: ${obsVentaLimpia}` : "")
@@ -242,7 +255,7 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
               cuit: cleanDigits(wizardData.cuit),
               dob: cleanDate(wizardData.nacimiento),
               email: cleanStr(wizardData.email),
-              phone: cleanDigits(wizardData.celular),
+              ...(phoneDigits ? { phone: phoneDigits } : {}),
 
               // domicilio (OpsModal usa address_*)
               address_street: cleanStr(wizardData.domicilio),
@@ -266,6 +279,10 @@ export function WonLeadDialog({ open, onOpenChange, onConfirm, leadId }: WonLead
               condicion_laboral: String(wizardData.origen || "") === "voluntario" ? "Voluntario" : "Obligatorio",
               cuit_empleador: cleanDigits(wizardData.cuitEmpleador),
               clave_fiscal: cleanStr(wizardData.claveFiscal),
+
+              // ✅ condición fiscal (SaleWizardDialog) -> columnas reales en Supabase
+              ...(laborCondition ? { labor_condition: laborCondition } : {}),
+              ...(laborCondition === "monotributo" && catMono ? { monotributo_category: catMono } : {}),
 
               // ✅ pago (OpsModal)
               metodo_pago: mapMetodoPago(wizardData.tipoPago),

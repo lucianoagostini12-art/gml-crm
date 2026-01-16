@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,10 @@ import {
   Check, Trash2, Megaphone, Key, ShieldCheck, ShieldAlert
 } from "lucide-react"
 import { getStatusColor, getSubStateStyle } from "./data"
+
+// --- CACHE SIMPLE PARA ORIGENES (evita refetch constante y escala mejor) ---
+const ___OPS_ORIGINS_CACHE_TTL_MS = 10 * 60 * 1000
+let __opsOriginsCache: { values: string[]; fetchedAt: number } | null = null
 
 // --- COMPONENTES UI INTERNOS ---
 
@@ -168,7 +172,29 @@ export function OpsModal({
     const [newSeller, setNewSeller] = useState("")
     const [sellersList, setSellersList] = useState<any[]>([])
 
+    // ✅ Orígenes dinámicos desde Supabase (toma todo lo que exista hoy y a futuro)
+    const [dbOrigins, setDbOrigins] = useState<string[]>([])
+    const [isLoadingOrigins, setIsLoadingOrigins] = useState(false)
+    const [originsError, setOriginsError] = useState<string | null>(null)
+
     const fileInputRef = useRef<HTMLInputElement>(null)
+
+    // ✅ Origen real (marketing): mostrar SIEMPRE lo que está guardado.
+    // Nota: priorizamos `source` (campo existente). Si tu tabla tiene `origen_dato`, lo tomamos como fallback.
+    const currentOriginValue = useMemo(() => {
+        const raw = (localOp?.source ?? localOp?.origen_dato ?? "") as any
+        return (raw ?? "").toString()
+    }, [localOp?.source, localOp?.origen_dato])
+
+    // ✅ Lista de orígenes future-proof: mezcla config + DB + valor actual (para que jamás quede vacío)
+    const originsList = useMemo(() => {
+        const configOrigins = (globalConfig?.origins || []) as string[]
+        const raw = [...configOrigins, ...dbOrigins, currentOriginValue]
+        const cleaned = raw
+            .map((s) => (s ?? "").toString().trim())
+            .filter((s) => s.length > 0)
+        return Array.from(new Set(cleaned)).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+    }, [globalConfig?.origins, dbOrigins, currentOriginValue])
 
     const STATE_SEQUENCE = ['ingresado', 'precarga', 'medicas', 'legajo', 'cumplidas']
     const STATE_LABELS: Record<string, string> = {
@@ -239,6 +265,7 @@ export function OpsModal({
         fetchRealChat(leadId)
         fetchRealHistory(leadId)
         fetchSellers()
+        fetchOriginsDistinct()
     }
 
     const fetchRealDocs = async (leadId: string) => {
@@ -259,6 +286,71 @@ export function OpsModal({
             setSellersList(data)
         }
     }
+
+
+    // ✅ Orígenes: cargar todos los valores existentes en Supabase (hoy y a futuro)
+    const fetchOriginsDistinct = async () => {
+        const now = Date.now()
+        if (__opsOriginsCache && (now - __opsOriginsCache.fetchedAt) < ___OPS_ORIGINS_CACHE_TTL_MS) {
+            setDbOrigins(__opsOriginsCache.values)
+            return
+        }
+
+        if (isLoadingOrigins) return
+        setIsLoadingOrigins(true)
+        try {
+            // 1) RPC ideal (recomendado). Si no existe, cae al fallback.
+            const { data: rpcData, error: rpcErr } = await supabase.rpc('get_distinct_lead_sources')
+            if (!rpcErr && Array.isArray(rpcData) && rpcData.length > 0) {
+                const values = rpcData
+                    .map((r: any) => (typeof r === 'string' ? r : (r?.source ?? r?.value ?? r?.lead_source ?? '')))
+                    .map((s: any) => (s ?? '').toString().trim())
+                    .filter((s: string) => s.length > 0)
+
+                const uniqueSorted = Array.from(new Set(values))
+                    .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+
+                __opsOriginsCache = { values: uniqueSorted, fetchedAt: now }
+                setDbOrigins(uniqueSorted)
+                return
+            }
+
+            // 2) Fallback compatible: paginar y deduplicar en front
+            const pageSize = 1000
+            const maxPages = 200 // hasta 200k filas como techo
+            const found = new Set<string>()
+
+            for (let page = 0; page < maxPages; page++) {
+                const from = page * pageSize
+                const to = from + pageSize - 1
+
+                const { data, error } = await supabase
+                    .from('leads')
+                    .select('source')
+                    .not('source', 'is', null)
+                    .range(from, to)
+
+                if (error) break
+                if (!data || data.length === 0) break
+
+                for (const row of data as any[]) {
+                    const s = (row?.source ?? '').toString().trim()
+                    if (s) found.add(s)
+                }
+
+                if (data.length < pageSize) break
+            }
+
+            const uniqueSorted = Array.from(found)
+                .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+
+            __opsOriginsCache = { values: uniqueSorted, fetchedAt: now }
+            setDbOrigins(uniqueSorted)
+        } finally {
+            setIsLoadingOrigins(false)
+        }
+    }
+
 
     // ✅ NUEVO: Función auxiliar para enviar notificaciones
     const sendNotification = async (targetUser: string, title: string, body: string, type: 'info'|'alert'|'success') => {
@@ -289,6 +381,16 @@ export function OpsModal({
         }
         
         setTimeout(() => setIsSaving(false), 500)
+    }
+
+    // ✅ Guardado de origen future-proof:
+    // - Siempre guardamos en `source` (es el campo real que ya existe y usa el CRM).
+    // - Si en tu schema existe `origen_dato`, lo mantenemos sincronizado para no perder compatibilidad.
+    const setOriginValue = async (val: string) => {
+        await updateField('source', val)
+        if (localOp && Object.prototype.hasOwnProperty.call(localOp, 'origen_dato')) {
+            await updateField('origen_dato', val)
+        }
     }
 
     // ✅ FUNCIÓN PARA CAMBIAR ENTRE ALTA Y PASS AL CLICKEAR ICONO
@@ -502,7 +604,7 @@ export function OpsModal({
     const prepagasList = globalConfig?.prepagas || []
     const availablePlans = prepagasList.find((p: any) => p.name === (localOp.prepaga || "Otra"))?.plans || []
     const subStatesList = globalConfig?.subStates?.[localOp.status] || []
-    const originsList = globalConfig?.origins || []
+    // `originsList` se calcula con useMemo arriba (config + DB + valor actual)
 
     const nextStateLabel = getNextState() ? STATE_LABELS[getNextState()!] : 'FINALIZAR'
     const prevStateLabel = getPrevState() ? STATE_LABELS[getPrevState()!] : 'ANTERIOR'
@@ -584,10 +686,17 @@ export function OpsModal({
                                         <SelectContent>{availablePlans.map((p:string)=><SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                                     </Select>
 
-                                    {/* Origen de Datos */}
-                                    <Select value={localOp.source} onValueChange={(val) => updateField('source', val)}>
-                                        <SelectTrigger className="h-8 text-xs bg-white border-slate-300 w-[140px] shadow-sm text-slate-500"><Megaphone size={12} className="mr-2"/> <SelectValue placeholder="Origen"/></SelectTrigger>
-                                        <SelectContent>{originsList.map((o:string)=><SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                                    {/* Origen de Datos (SIEMPRE muestra el valor real y lista todo lo existente hoy y a futuro) */}
+                                    <Select value={currentOriginValue} onValueChange={(val) => setOriginValue(val)}>
+                                        <SelectTrigger className="h-8 text-xs bg-white border-slate-300 w-[220px] shadow-sm text-slate-500">
+                                            <Megaphone size={12} className="mr-2"/>
+                                            <SelectValue placeholder={isLoadingOrigins ? "Cargando orígenes..." : "Origen"}/>
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {originsList.map((o: string) => (
+                                                <SelectItem key={o} value={o}>{o}</SelectItem>
+                                            ))}
+                                        </SelectContent>
                                     </Select>
 
                                     <Popover open={isSellerChangeOpen} onOpenChange={setIsSellerChangeOpen}>
@@ -752,6 +861,41 @@ export function OpsModal({
                                             </Select>
                                         </div>
 
+                                        {/* ✅ NUEVO: Condición Laboral (Empleado / Monotributo) */}
+                                        <div className="flex flex-col gap-1 w-full">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">Situación</span>
+                                            <Select value={localOp.labor_condition || ""} onValueChange={(v) => updateField('labor_condition', v)}>
+                                                <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="empleado">Empleado</SelectItem>
+                                                    <SelectItem value="monotributo">Monotributista</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {/* ✅ NUEVO: Categoría Monotributo (solo si corresponde) */}
+                                        {localOp.labor_condition === 'monotributo' && (
+                                            <div className="flex flex-col gap-1 w-full">
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">Categoría Monotributo</span>
+                                                <Select value={localOp.monotributo_category || ""} onValueChange={(v) => updateField('monotributo_category', v)}>
+                                                    <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="A">A</SelectItem>
+                                                        <SelectItem value="B">B</SelectItem>
+                                                        <SelectItem value="C">C</SelectItem>
+                                                        <SelectItem value="D">D</SelectItem>
+                                                        <SelectItem value="E">E</SelectItem>
+                                                        <SelectItem value="F">F</SelectItem>
+                                                        <SelectItem value="G">G</SelectItem>
+                                                        <SelectItem value="H">H</SelectItem>
+                                                        <SelectItem value="I">I</SelectItem>
+                                                        <SelectItem value="J">J</SelectItem>
+                                                        <SelectItem value="K">K</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+
                                         {localOp.condicion_laboral !== 'Voluntario' && (
                                             <>
                                                 <EditableField label="CUIT Empleador" value={localOp.cuit_empleador} onBlur={(v: string) => updateField('cuit_empleador', v)} />
@@ -866,7 +1010,7 @@ export function OpsModal({
                                             <p className="text-sm font-bold text-slate-600">{isUploading ? "Subiendo..." : "Arrastrá y soltá archivos aquí"}</p>
                                             <p className="text-xs text-slate-400 mt-1">o hacé click para explorar (PDF, JPG, PNG)</p>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4 mt-2 pb-10">
+                                        <div className="flex flex-col gap-3 mt-2 pb-10">
                                             {realDocs.map((file) => (
                                                 <FileCard 
                                                     key={file.id} 

@@ -65,8 +65,8 @@ type AgentPulse = {
 const AR_TZ = "America/Argentina/Buenos_Aires"
 
 // Horas para el heatmap
-const HEAT_HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const
-const HEAT_KEYS = ["h09", "h10", "h11", "h12", "h13", "h14", "h15", "h16", "h17", "h18"] as const
+const HEAT_HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21] as const
+const HEAT_KEYS = ["h09", "h10", "h11", "h12", "h13", "h14", "h15", "h16", "h17", "h18", "h19", "h20", "h21"] as const
 
 const DAY_LABELS = [
   { key: "Lunes", label: "Lun" }, { key: "Martes", label: "Mar" }, { key: "Miérc", label: "Mié" },
@@ -150,12 +150,13 @@ function getARWeekdayHour(iso: string): { weekday: string; hour: number } {
 }
 
 function mapWeekdayToLabel(weekdayLower: string) {
-  if (weekdayLower.includes("lunes")) return "Lunes"
-  if (weekdayLower.includes("martes")) return "Martes"
-  if (weekdayLower.includes("miércoles") || weekdayLower.includes("miercoles")) return "Miérc"
-  if (weekdayLower.includes("jueves")) return "Jueves"
-  if (weekdayLower.includes("viernes")) return "Viernes"
-  if (weekdayLower.includes("sábado") || weekdayLower.includes("sabado")) return "Sábado"
+  // Debe matchear con DAY_LABELS.label (Lun/Mar/Mié/Jue/Vie/Sáb)
+  if (weekdayLower.includes("lunes")) return "Lun"
+  if (weekdayLower.includes("martes")) return "Mar"
+  if (weekdayLower.includes("miércoles") || weekdayLower.includes("miercoles")) return "Mié"
+  if (weekdayLower.includes("jueves")) return "Jue"
+  if (weekdayLower.includes("viernes")) return "Vie"
+  if (weekdayLower.includes("sábado") || weekdayLower.includes("sabado")) return "Sáb"
   return null
 }
 
@@ -168,7 +169,69 @@ function speedStatus(avgMin: number) {
 
 const CLOSED_STATUSES = new Set(["vendido", "perdido", "cumplidas", "rechazado", "rechazados"])
 // ✅ ESTADOS QUE CUENTAN COMO VENTA (Comercial + Admin)
-const SALE_STATUSES = ["vendido", "precarga", "medicas", "legajo", "demoras", "cumplidas", "finalizada", "ingresado"]
+const SALE_STATUSES = ["ingresado", "precarga", "medicas", "legajo", "demoras", "cumplidas", "rechazado"]
+
+// ✅ PASS unificado (igual que AdminConteo)
+const isPass = (l: any) => {
+  const t = String(l?.type ?? "").toLowerCase()
+  const ss = String(l?.sub_state ?? l?.substate ?? "").toLowerCase()
+  const so = String(l?.source ?? l?.origen ?? "").toLowerCase()
+  return t === "pass" || ss === "auditoria_pass" || so === "pass"
+}
+
+// ✅ Capitas: AMPF cuenta 1 por registro; resto suma capitas (fallback 1)
+const pointsByCapitas = (items: any[]) => {
+  return (items || []).reduce((acc: number, l: any) => {
+    const prep = ((l?.prepaga || l?.quoted_prepaga || "") + "").trim().toLowerCase()
+    if (prep === "ampf") return acc + 1
+    const c = Number(l?.capitas)
+    return acc + (Number.isFinite(c) && c > 0 ? c : 1)
+  }, 0)
+}
+
+// --- REGLAS DE CÁLCULO (Espejo OpsBilling - Neto) ---
+const INITIAL_CALC_RULES = {
+  taxRate: 0.105,
+  prevencionVat: 0.21,
+  doctoRed: { base: 1.8, specialPlan: "500" },
+  ampf: { multiplier: 2.0 },
+  prevencion: { A1: 0.9, "A1 CP": 0.9, A2: 1.3, "A2 CP": 1.3, A4: 1.5, A5: 1.5, default: 1.3 },
+  generalGroup: { multiplier: 1.8 },
+}
+
+// ✅ Neto oficial: billing_price_override manda; si no, cálculo espejo OpsBilling
+const calculateBillingNeto = (op: any) => {
+  let val = 0
+  if (op?.billing_price_override !== null && op?.billing_price_override !== undefined) {
+    val = parseFloat(op.billing_price_override.toString())
+    return Number(val.toFixed(2))
+  }
+
+  const full = parseFloat(op.full_price || op.price || "0")
+  const aportes = parseFloat(op.aportes || "0")
+  const desc = parseFloat(op.descuento || "0")
+  const p = (op.prepaga || op.quoted_prepaga || "").toLowerCase()
+  const plan = op.plan || op.quoted_plan || ""
+  const condicionLaboral = op.labor_condition || op.condicionLaboral || ""
+
+  if (p.includes("preven")) {
+    const base = full - desc
+    // @ts-ignore
+    const rate = INITIAL_CALC_RULES.prevencion[plan] || INITIAL_CALC_RULES.prevencion.default
+    val = base * rate
+  } else if (p.includes("ampf")) {
+    val = full * INITIAL_CALC_RULES.ampf.multiplier
+  } else {
+    let base = full * (1 - INITIAL_CALC_RULES.taxRate)
+    if (p.includes("doctored") && String(plan).includes("500") && String(condicionLaboral) === "empleado") {
+      base = aportes * (1 - INITIAL_CALC_RULES.taxRate)
+    }
+    val = base * INITIAL_CALC_RULES.generalGroup.multiplier
+  }
+
+  return Number(val.toFixed(2))
+}
+
 
 export function AdminMetrics() {
   const supabase = createClient()
@@ -224,7 +287,7 @@ export function AdminMetrics() {
   const heatMapBase = useMemo(() => {
     return DAY_LABELS.map((d) => ({
       day: d.label,
-      h09: 0, h10: 0, h11: 0, h12: 0, h13: 0, h14: 0, h15: 0, h16: 0, h17: 0, h18: 0
+      h09: 0, h10: 0, h11: 0, h12: 0, h13: 0, h14: 0, h15: 0, h16: 0, h17: 0, h18: 0, h19: 0, h20: 0, h21: 0
     }))
   }, [])
 
@@ -245,12 +308,19 @@ export function AdminMetrics() {
   const fetchData = async () => {
     setLoading(true)
 
-    // A. FECHAS
-    const currentStart = new Date(`${dateStart}T00:00:00`)
-    const currentEnd = new Date(`${dateEnd}T23:59:59`)
+    // A. FECHAS (Rango seleccionado)
+    const currentStart = new Date(`${dateStart}T00:00:00-03:00`)
+    const currentEnd = new Date(`${dateEnd}T23:59:59-03:00`)
     const diffTime = Math.abs(currentEnd.getTime() - currentStart.getTime());
     const prevEnd = new Date(currentStart.getTime() - 86400000); 
     const prevStart = new Date(prevEnd.getTime() - diffTime);
+
+    const monthStartStr = `${currentStart.getFullYear()}-${String(currentStart.getMonth() + 1).padStart(2, '0')}-01`
+    const nextMonth = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 1)
+    const monthEndExclusiveStr = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`
+    const targetPeriod = `${currentStart.getFullYear()}-${String(currentStart.getMonth() + 1).padStart(2, '0')}`
+    const prevPeriodDate = new Date(currentStart.getFullYear(), currentStart.getMonth() - 1, 1)
+    const prevPeriod = `${prevPeriodDate.getFullYear()}-${String(prevPeriodDate.getMonth() + 1).padStart(2, '0')}`
 
     // B. QUERIES
     let leadsQuery = supabase.from("leads").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
@@ -268,6 +338,56 @@ export function AdminMetrics() {
     const leads = (resLeads.data || []) as Lead[]
     const prevLeads = (resPrev.data || []) as any[]
     const events = (resHistory.data || []) as StatusEvent[]
+
+
+    // ✅ Ventas OPS del mes por fecha_ingreso (CAPITAS + PASS/ALTAS)
+    let salesOps: any[] = []
+    try {
+      let salesQ = supabase
+        .from("leads")
+        .select("id, agent_name, status, fecha_ingreso, prepaga, quoted_prepaga, capitas, type, sub_state, source")
+        .in("status", SALE_STATUSES)
+        .not("fecha_ingreso", "is", null)
+        .gte("fecha_ingreso", monthStartStr)
+        .lt("fecha_ingreso", monthEndExclusiveStr)
+
+      if (agent !== "global") salesQ = salesQ.eq("agent_name", agent)
+
+      const { data: salesData } = await salesQ
+      if (salesData) salesOps = salesData
+    } catch {}
+
+    // ✅ Liquidación oficial del mes (OpsBilling) para Ticket Promedio por Cápita
+    let billingOps: any[] = []
+    let prevBillingOps: any[] = []
+    try {
+      let billQ = supabase
+        .from("leads")
+        .select("id, agent_name, status, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, capitas, type, sub_state, source")
+        .eq("status", "cumplidas")
+        .eq("billing_approved", true)
+        .eq("billing_period", targetPeriod)
+
+      if (agent !== "global") billQ = billQ.eq("agent_name", agent)
+
+      const { data: billData } = await billQ
+      if (billData) billingOps = billData
+    } catch {}
+
+    try {
+      let prevBillQ = supabase
+        .from("leads")
+        .select("id, agent_name, status, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, capitas, type, sub_state, source")
+        .eq("status", "cumplidas")
+        .eq("billing_approved", true)
+        .eq("billing_period", prevPeriod)
+
+      if (agent !== "global") prevBillQ = prevBillQ.eq("agent_name", agent)
+
+      const { data: prevBillData } = await prevBillQ
+      if (prevBillData) prevBillingOps = prevBillData
+    } catch {}
+
 
     // --- 🚦 CÁLCULO DE SEMÁFORO (TEAM PULSE) ---
 // La forma robusta es NO inferir desde leads (porque el lead sigue moviéndose),
@@ -360,23 +480,47 @@ if (agentsList.length > 0) {
       let s = norm(l.status)
       if(s.includes('doc')) s = 'documentacion'
       if(s.includes('cotiz')) s = 'cotizacion'
+      // ✅ "Sin trabajar" cuenta como NUEVO
+      if (s.includes('sin trabajar') || s.includes('sin_trabajar') || s.includes('sintrabajar')) s = 'nuevo'
 
       if (counts[s] !== undefined) counts[s]++
       else if (SALE_STATUSES.includes(s)) counts['ingresado']++ 
-
-      if (SALE_STATUSES.includes(s) || s === 'cotizacion') {
-        totalRevenue += Number(l.price) || Number(l.quoted_price) || 0
-      }
     })
+
+    const totalNeto = billingOps.reduce((acc: number, op: any) => acc + calculateBillingNeto(op), 0)
+    const billingCapitas = pointsByCapitas(billingOps)
+    const avgTicketPerCapita = billingCapitas > 0 ? totalNeto / billingCapitas : 0
+
+    const prevTotalNeto = prevBillingOps.reduce((acc: number, op: any) => acc + calculateBillingNeto(op), 0)
+    const prevBillingCapitas = pointsByCapitas(prevBillingOps)
+    const prevAvgTicketPerCapita = prevBillingCapitas > 0 ? prevTotalNeto / prevBillingCapitas : 0
+
+    // Facturación (card): Ticket promedio por cápita (liquidación oficial)
+    totalRevenue = avgTicketPerCapita
 
     const totalLeads = leads.length
     const activeLeads = counts.contactado + counts.cotizacion + counts.documentacion
-    const salesCount = SALE_STATUSES.reduce((acc, s) => acc + (counts[s] || 0), 0)
+    const salesCapitasTotal = pointsByCapitas(salesOps)
+    const salesCapitasPass = pointsByCapitas(salesOps.filter((l:any) => isPass(l)))
+    const salesCapitasAltas = Math.max(0, salesCapitasTotal - salesCapitasPass)
 
-    const prevSalesCount = prevLeads.filter((l:any) => SALE_STATUSES.includes(norm(l.status))).length
-    const prevRevenue = prevLeads.reduce((acc: number, l:any) => {
-        return acc + (SALE_STATUSES.includes(norm(l.status)) || norm(l.status) === 'cotizacion' ? (l.price || l.quoted_price || 0) : 0)
-    }, 0)
+    const salesCount = salesCapitasTotal
+
+    let prevSalesCapitasTotal = 0
+    try {
+      let prevSalesQ = supabase
+        .from("leads")
+        .select("id, prepaga, quoted_prepaga, capitas, type, sub_state, source")
+        .in("status", SALE_STATUSES)
+        .not("fecha_ingreso", "is", null)
+        .gte("fecha_ingreso", toISODate(prevStart))
+        .lt("fecha_ingreso", toISODate(currentStart))
+      if (agent !== "global") prevSalesQ = prevSalesQ.eq("agent_name", agent)
+      const { data: prevSalesData } = await prevSalesQ
+      if (prevSalesData) prevSalesCapitasTotal = pointsByCapitas(prevSalesData as any[])
+    } catch {}
+    const prevSalesCount = prevSalesCapitasTotal
+    const prevRevenue = prevAvgTicketPerCapita
 
     const getTrend = (curr: number, prev: number) => {
         if (prev === 0) return { val: 100, dir: 'up' }
@@ -387,8 +531,8 @@ if (agentsList.length > 0) {
     const salesTrend = getTrend(salesCount, prevSalesCount)
     const revTrend = getTrend(totalRevenue, prevRevenue)
 
-    const rpl = totalLeads > 0 ? Math.round(totalRevenue / totalLeads).toString() : "0"
-    const strikeRate = totalLeads > 0 ? ((salesCount / totalLeads) * 100).toFixed(1) : "0.0"
+    const rpl = totalLeads > 0 ? Math.round(totalNeto / totalLeads).toString() : "0"
+    const strikeRate = totalLeads > 0 ? ((salesOps.length / totalLeads) * 100).toFixed(1) : "0.0"
 
     // --- VELOCIDAD ---
     const firstEventByLead = new Map<string, string>()
@@ -398,7 +542,7 @@ if (agentsList.length > 0) {
 
     let speedSum = 0; let speedSample = 0
     leads.forEach((l) => {
-      const created = safeDate(l.created_at)
+      const created = safeDate((l as any).assigned_at) || safeDate((l as any).picked_at) || safeDate(l.created_at)
       if (!created) return
       const fc = safeDate(l.first_contact_at) || safeDate(firstEventByLead.get(l.id) || null)
       if (!fc) return
@@ -513,8 +657,8 @@ if (agentsList.length > 0) {
     const pacingStatus = goalPct >= timePct ? "ontrack" : "behind"
 
     setMetrics({
-      sales: { count: salesCount, trend: salesTrend },     
-      revenue: { total: totalRevenue, trend: revTrend },   
+      sales: { count: salesCount, pass: salesCapitasPass, altas: salesCapitasAltas, trend: salesTrend },     
+      revenue: { total: totalRevenue, neto: totalNeto, capitas: billingCapitas, trend: revTrend },   
       inventory: { newLeads: counts.nuevo, activeLeads, sales: salesCount, goal },
       killerMetrics: { speed: { value: speedValue, status: speedSt, sample: speedSample }, rpl, strikeRate },
       advanced: { radar: radarData, coach: coachAdvice, daily },
@@ -902,16 +1046,16 @@ if (agentsList.length > 0) {
                 </CardHeader>
                 <CardContent>
                     <div className="w-full overflow-x-auto">
-                        <div className="min-w-[500px]">
+                        <div className="min-w-[720px]">
                             {/* Header de horas Fijo */}
-                            <div className="grid grid-cols-[40px_repeat(10,1fr)] gap-1 mb-2">
+                            <div className="grid grid-cols-[40px_repeat(13,1fr)] gap-1 mb-2">
                                 <span></span>
                                 {HEAT_KEYS.map(k => <span key={k} className="text-[10px] font-bold text-slate-400 text-center">{k.replace('h','')}hs</span>)}
                             </div>
                             {/* Filas de días */}
                             <div className="space-y-1">
                                 {metrics.heatMap.map((d:any, i:number) => (
-                                    <div key={i} className="grid grid-cols-[40px_repeat(10,1fr)] gap-1 items-center">
+                                    <div key={i} className="grid grid-cols-[40px_repeat(13,1fr)] gap-1 items-center">
                                         <span className="text-[10px] font-bold text-slate-600 uppercase text-right pr-2">{d.day}</span>
                                         {HEAT_KEYS.map(k => (
                                             <div key={k} className={`h-8 rounded-sm flex items-center justify-center text-[10px] transition-all hover:scale-110 cursor-default ${getHeatColor(d[k])}`}>

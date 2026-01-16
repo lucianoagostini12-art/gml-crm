@@ -12,9 +12,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame, MessageCircle, RefreshCw, PenLine, Tag, Zap, Bot } from "lucide-react"
+import { Sliders, Plus, Trash2, Clock, UserPlus, Upload, Pencil, XCircle, Save, Eye, EyeOff, ShieldAlert, Crown, Briefcase, Headset, Globe, Snowflake, Flame, MessageCircle, RefreshCw, PenLine, Tag, Zap, Bot, HelpCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 export function AdminConfig() {
     const supabase = createClient()
@@ -45,7 +46,7 @@ export function AdminConfig() {
     // ✅ NUEVO: Reglas de Etiquetado y Orígenes
     const [taggingRules, setTaggingRules] = useState<any[]>([])
     const [origins, setOrigins] = useState<string[]>([]) // Para llenar el select
-    const [newRule, setNewRule] = useState({ trigger: "", source: "", matchType: "contains" })
+    const [newRule, setNewRule] = useState({ trigger: "", source: "", matchType: "contains", priority: 50 })
 
     // Formulario Usuario
     const [formData, setFormData] = useState({
@@ -155,8 +156,10 @@ export function AdminConfig() {
     // --- MANEJO REGLAS ETIQUETADO ---
     const addRule = () => {
         if (!newRule.trigger || !newRule.source) return alert("Falta disparador o etiqueta")
-        setTaggingRules([...taggingRules, { ...newRule, id: Date.now() }])
-        setNewRule({ trigger: "", source: "", matchType: "contains" })
+        const pr = Number((newRule as any).priority)
+        const safePriority = Number.isFinite(pr) ? pr : 0
+        setTaggingRules([...taggingRules, { ...newRule, priority: safePriority, id: Date.now() }])
+        setNewRule({ trigger: "", source: "", matchType: "contains", priority: 50 })
     }
 
     const deleteRule = (index: number) => {
@@ -165,7 +168,7 @@ export function AdminConfig() {
         setTaggingRules(newRules)
     }
 
-    const updateRuleField = (index: number, field: string, value: string) => {
+    const updateRuleField = (index: number, field: string, value: any) => {
         const newRules = [...taggingRules]
         newRules[index] = { ...newRules[index], [field]: value }
         setTaggingRules(newRules)
@@ -449,6 +452,53 @@ export function AdminConfig() {
                                     </Select>
                                 </div>
 
+                                {/* PRIORIDAD */}
+                                <div className="space-y-1 w-full md:w-[140px]">
+                                    <Label className="text-xs font-bold uppercase text-slate-500 flex items-center gap-1">
+                                        Prioridad
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className="inline-flex items-center justify-center rounded-full h-5 w-5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 transition"
+                                                    title="¿Qué es la prioridad?"
+                                                >
+                                                    <HelpCircle className="h-4 w-4" />
+                                                </button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-80">
+                                                <div className="space-y-2">
+                                                    <div className="font-bold text-slate-800">¿Qué es “Prioridad”?</div>
+                                                    <div className="text-sm text-slate-600 leading-relaxed">
+                                                        Pensalo como una <span className="font-bold">fila que gana</span> cuando varias reglas coinciden.
+                                                        <br />
+                                                        <span className="font-bold">Número más alto = gana primero.</span>
+                                                    </div>
+                                                    <div className="text-sm text-slate-600">
+                                                        Guía rápida:
+                                                        <ul className="list-disc pl-5 mt-1 space-y-1">
+                                                            <li><span className="font-bold">100</span> = reglas con emoji / anuncios súper específicos</li>
+                                                            <li><span className="font-bold">90</span> = campañas muy claras (ej: “Video IA”)</li>
+                                                            <li><span className="font-bold">50</span> = Google Ads (“doctored”, “prevencion”)</li>
+                                                            <li><span className="font-bold">20</span> = genéricas (ej: “ctwa”)</li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </PopoverContent>
+                                        </Popover>
+                                    </Label>
+                                    <div className="relative">
+                                        <Clock className="absolute left-2.5 top-2.5 h-4 w-4 text-purple-500" />
+                                        <Input
+                                            type="number"
+                                            placeholder="Ej: 100"
+                                            className="pl-9 font-mono"
+                                            value={(newRule as any).priority}
+                                            onChange={(e) => setNewRule({ ...newRule, priority: Number(e.target.value) })}
+                                        />
+                                    </div>
+                                </div>
+
                                 <div className="space-y-1 w-full md:w-1/3">
                                     <Label className="text-xs font-bold uppercase text-slate-500">Asignar Etiqueta</Label>
                                     <div className="relative">
@@ -524,6 +574,17 @@ export function AdminConfig() {
                                         
                                         <div className="text-[10px] uppercase font-bold text-slate-400 px-2 bg-slate-50 rounded border">
                                             {rule.matchType === 'contains' ? 'Contiene' : rule.matchType === 'exact' ? 'Exacto' : 'Empieza'}
+                                        </div>
+
+                                        {/* Priority inline */}
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] uppercase font-bold text-slate-400">P</span>
+                                            <Input
+                                                type="number"
+                                                className="h-8 w-[80px] font-mono text-xs"
+                                                value={Number(rule.priority ?? 0)}
+                                                onChange={(e) => updateRuleField(i, "priority", Number(e.target.value))}
+                                            />
                                         </div>
 
                                         <div className="flex-1">

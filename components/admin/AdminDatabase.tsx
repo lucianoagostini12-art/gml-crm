@@ -27,10 +27,24 @@ type LeadNote = {
 
 type LeadEvent = {
   id: string
-  lead_id: string
-  type?: string | null
+  lead_id: string | null
+  source?: string | null
+  event_type?: string | null
+  actor_name?: string | null
+  summary?: string | null
   payload?: any
   created_at: string
+}
+
+type AuditLogRow = {
+  id: string
+  created_at: string
+  level?: "info" | "warning" | "critical" | string
+  event_type?: string | null
+  actor_name?: string | null
+  action?: string | null
+  details?: string | null
+  lead_id?: string | null
 }
 
 type StatusLog = {
@@ -84,7 +98,7 @@ export function AdminDatabase() {
 
   // Tabs data
   const [webhookEvents, setWebhookEvents] = useState<LeadEvent[]>([])
-  const [statusLogs, setStatusLogs] = useState<StatusLog[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([])
   const [notes, setNotes] = useState<LeadNote[]>([])
 
   // Acciones del modal
@@ -94,6 +108,36 @@ export function AdminDatabase() {
   const [modalNote, setModalNote] = useState("")
   const [savingModal, setSavingModal] = useState(false)
   const [clearingNotes, setClearingNotes] = useState(false)
+
+  // Confirmaciones
+  const [confirmClearNotesOpen, setConfirmClearNotesOpen] = useState(false)
+  const [confirmReactivateOpen, setConfirmReactivateOpen] = useState(false)
+
+  // ✅ NUEVO: nombre del usuario logueado (para author en notas)
+  const [currentUserName, setCurrentUserName] = useState("")
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const { data } = await supabase.auth.getUser()
+        const u: any = data?.user
+        const meta: any = u?.user_metadata || {}
+        const best =
+          meta?.full_name ||
+          meta?.name ||
+          meta?.display_name ||
+          u?.email ||
+          u?.phone ||
+          "Admin"
+        setCurrentUserName(String(best || "Admin"))
+      } catch {
+        setCurrentUserName("Admin")
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+
 
   // Helpers
   const tryFetchSimpleList = async (table: string, column: string) => {
@@ -275,7 +319,7 @@ export function AdminDatabase() {
     setDetailLoading(true)
     setLeadDetail(null)
     setWebhookEvents([])
-    setStatusLogs([])
+    setAuditLogs([])
     setNotes([])
 
     try {
@@ -287,15 +331,15 @@ export function AdminDatabase() {
         setModalLossReason(lead.loss_reason || "")
       }
 
-      // Webhook history
-      const webhookAttempts = ["lead_webhook_logs", "webhook_logs", "lead_events"]
-      for (const t of webhookAttempts) {
-        const { data: ev, error } = await supabase.from(t).select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(200)
-        if (!error && ev) {
-          setWebhookEvents(ev as any)
-          break
-        }
-      }
+      // ✅ Webhook / Eventos: fuente única = lead_events
+      const { data: ev, error: evErr } = await supabase
+        .from("lead_events")
+        .select("id, lead_id, source, event_type, actor_name, summary, payload, created_at")
+        .eq("lead_id", id)
+        .order("created_at", { ascending: false })
+        .limit(300)
+
+      if (!evErr && ev) setWebhookEvents(ev as any)
 
       // Fallback webhook synthetic
       try {
@@ -310,7 +354,10 @@ export function AdminDatabase() {
             {
               id: `lead_${id}_payload`,
               lead_id: id,
-              type: `lead.${found.key}`,
+              source: "lead",
+              event_type: `lead.${found.key}`,
+              actor_name: "Sistema",
+              summary: `Payload legacy: ${found.key}`,
               payload: found.value,
               created_at: (lead as any)?.created_at || new Date().toISOString(),
             } as any,
@@ -318,15 +365,15 @@ export function AdminDatabase() {
         }
       } catch {}
 
-      // Status logs
-      const statusAttempts = ["lead_status_logs", "status_logs", "lead_logs"]
-      for (const t of statusAttempts) {
-        const { data: lg, error } = await supabase.from(t).select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(300)
-        if (!error && lg) {
-          setStatusLogs(lg as any)
-          break
-        }
-      }
+      // ✅ Logs del vendedor/acciones: audit_logs por lead_id
+      const { data: lg, error: lgErr } = await supabase
+        .from("audit_logs")
+        .select("id, created_at, level, event_type, actor_name, action, details, lead_id")
+        .eq("lead_id", id)
+        .order("created_at", { ascending: false })
+        .limit(300)
+
+      if (!lgErr && lg) setAuditLogs(lg as any)
 
       // Notes
       const notesAttempts = ["lead_notes", "notes", "lead_notes_logs"]
@@ -346,7 +393,7 @@ export function AdminDatabase() {
     setOpenLeadId(null)
     setLeadDetail(null)
     setWebhookEvents([])
-    setStatusLogs([])
+    setAuditLogs([])
     setNotes([])
     setModalAgent("")
     setModalStatus("")
@@ -362,12 +409,38 @@ export function AdminDatabase() {
     return vv
   }
 
+  // ✅ helper para insertar nota con fallback (con author / sin author)
+  const insertNoteWithFallback = async (leadId: string, noteText: string) => {
+    const noteTables = ["lead_notes", "notes", "lead_notes_logs"]
+    const basePayload: any = {
+      lead_id: leadId,
+      note: noteText,
+      created_at: new Date().toISOString(),
+    }
+
+    const payloadWithAuthor: any = {
+      ...basePayload,
+      author: (currentUserName || "Admin").toString(),
+    }
+
+    for (const t of noteTables) {
+      const { error: err1 } = await supabase.from(t).insert(payloadWithAuthor as any)
+      if (!err1) return true
+
+      const { error: err2 } = await supabase.from(t).insert(basePayload as any)
+      if (!err2) return true
+    }
+
+    return false
+  }
+
+
   const saveModalChanges = async () => {
     if (!openLeadId) return
     setSavingModal(true)
 
     const payload: any = {
-      agent_name: noneToNull(modalAgent) ,
+      agent_name: noneToNull(modalAgent),
       status: (modalStatus || "").trim() || null,
       last_update: new Date().toISOString(),
     }
@@ -384,16 +457,8 @@ export function AdminDatabase() {
     }
 
     if (modalNote.trim()) {
-      const notePayload = {
-        lead_id: openLeadId,
-        note: modalNote.trim(),
-        created_at: new Date().toISOString(),
-      }
-      const noteTables = ["lead_notes", "notes", "lead_notes_logs"]
-      for (const t of noteTables) {
-        const { error: nerr } = await supabase.from(t).insert(notePayload as any)
-        if (!nerr) break
-      }
+      const ok = await insertNoteWithFallback(openLeadId, modalNote.trim())
+      if (!ok) console.error("No se pudo insertar nota en ninguna tabla (lead_notes/notes/lead_notes_logs).")
     }
 
     setModalNote("")
@@ -425,7 +490,7 @@ export function AdminDatabase() {
         status: "nuevo",
         loss_reason: null,
         last_update: new Date().toISOString(),
-        agent_name: noneToNull(modalAgent) ,
+        agent_name: noneToNull(modalAgent),
       })
       .eq("id", openLeadId)
 
@@ -453,6 +518,14 @@ export function AdminDatabase() {
     } catch {
       return d
     }
+  }
+
+  const noteAuthor = (n: any) => {
+    return (n?.author || n?.user_name || n?.actor_name || "Asesor").toString()
+  }
+
+  const noteBody = (n: any) => {
+    return (n?.note || n?.body || "").toString()
   }
 
   return (
@@ -634,6 +707,68 @@ export function AdminDatabase() {
         </DialogContent>
       </Dialog>
 
+      {/* CONFIRMAR: LIMPIAR NOTAS */}
+      <Dialog open={confirmClearNotesOpen} onOpenChange={setConfirmClearNotesOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" /> ¿Borrar notas del lead?
+            </DialogTitle>
+            <DialogDescription>
+              Esto va a limpiar <b>todas</b> las notas del dato: el campo <b>notes</b> del lead y las notas guardadas en la tabla.
+              <br />
+              <b>Es irreversible.</b>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmClearNotesOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                setConfirmClearNotesOpen(false)
+                await clearNotes()
+              }}
+              disabled={clearingNotes}
+            >
+              Sí, borrar notas
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CONFIRMAR: REACTIVAR COMO NUEVO */}
+      <Dialog open={confirmReactivateOpen} onOpenChange={setConfirmReactivateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900">
+              <BadgeCheck className="h-5 w-5 text-emerald-600" /> ¿Reactivar como NUEVO?
+            </DialogTitle>
+            <DialogDescription>
+              Este dato va a volver al estado <b>nuevo</b> para que el equipo lo gestione otra vez.
+              <br />
+              Se va a borrar el <b>motivo de pérdida</b> (si tenía) y va a quedar con el vendedor que tengas seleccionado en el modal.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmReactivateOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-slate-900 hover:bg-slate-800 text-white font-bold"
+              onClick={async () => {
+                setConfirmReactivateOpen(false)
+                await reactivateAsNew()
+              }}
+              disabled={savingModal}
+            >
+              Sí, reactivar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* MODAL PREMIUM: DETALLE LEAD (CON SCROLL NATIVO) */}
       <Dialog open={!!openLeadId} onOpenChange={(o) => (!o ? closeLead() : null)}>
         <DialogContent className="sm:max-w-[1100px] w-full max-h-[85vh] p-0 overflow-hidden border-0 shadow-2xl flex flex-col rounded-xl">
@@ -675,10 +810,20 @@ export function AdminDatabase() {
                       <div className="pt-3 border-t">
                         <Label className="text-xs text-slate-500 font-bold uppercase">Acciones rápidas</Label>
                         <div className="mt-2 flex flex-col gap-2">
-                          <Button variant="outline" className="justify-start" onClick={reactivateAsNew} disabled={savingModal}>
+                          <Button
+                            variant="outline"
+                            className="justify-start"
+                            onClick={() => setConfirmReactivateOpen(true)}
+                            disabled={savingModal}
+                          >
                             <BadgeCheck className="h-4 w-4 mr-2 text-slate-600" /> Reactivar como <b className="ml-1">NUEVO</b>
                           </Button>
-                          <Button variant="outline" className="justify-start" onClick={clearNotes} disabled={clearingNotes}>
+                          <Button
+                            variant="outline"
+                            className="justify-start"
+                            onClick={() => setConfirmClearNotesOpen(true)}
+                            disabled={clearingNotes}
+                          >
                             <StickyNote className="h-4 w-4 mr-2 text-slate-600" /> Limpiar notas
                           </Button>
                         </div>
@@ -749,14 +894,24 @@ export function AdminDatabase() {
                           <TabsTrigger value="notes" className="gap-2 rounded-lg"><StickyNote className="h-4 w-4" /> Notas</TabsTrigger>
                         </TabsList>
                         <TabsContent value="webhook" className="mt-4">
-                          {webhookEvents.length === 0 ? <div className="text-sm text-slate-400 py-8 text-center">No hay historial.</div> : (
+                          {webhookEvents.length === 0 ? <div className="text-sm text-slate-400 py-8 text-center">No hay eventos.</div> : (
                             <div className="max-h-[420px] overflow-y-auto space-y-2">
                               {webhookEvents.map((e: any) => (
                                 <div key={e.id} className="border border-slate-200/70 dark:border-white/10 rounded-xl p-3 bg-white dark:bg-slate-950/20 shadow-sm">
                                   <div className="flex items-center justify-between">
-                                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200">{e.type || "Evento"} <span className="text-slate-400 font-normal ml-2">{formatDT(e.created_at)}</span></div>
-                                    <Badge variant="outline" className="text-[10px]">{(e.provider || e.source || "webhook").toString()}</Badge>
+                                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                                      {(e.event_type || "Evento").toString()} <span className="text-slate-400 font-normal ml-2">{formatDT(e.created_at)}</span>
+                                    </div>
+                                    <Badge variant="outline" className="text-[10px]">{(e.source || "webhook").toString()}</Badge>
                                   </div>
+                                  {(e.summary || e.actor_name) ? (
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      {e.summary ? (<><span className="font-bold">Resumen:</span> {String(e.summary)}</>) : null}
+                                      {e.actor_name ? (
+                                        <span className="ml-2 text-slate-400">• <span className="font-bold">Actor:</span> {String(e.actor_name)}</span>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                   <pre className="mt-2 text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-900/40 p-2 rounded-md overflow-x-auto">{JSON.stringify(e.payload || e.body || e.data || e, null, 2)}</pre>
                                 </div>
                               ))}
@@ -764,35 +919,49 @@ export function AdminDatabase() {
                           )}
                         </TabsContent>
                         <TabsContent value="logs" className="mt-4">
-                          {statusLogs.length === 0 ? <div className="text-sm text-slate-400 py-8 text-center">No hay logs.</div> : (
+                          {auditLogs.length === 0 ? <div className="text-sm text-slate-400 py-8 text-center">No hay logs.</div> : (
                             <div className="max-h-[420px] overflow-y-auto space-y-2">
-                              {statusLogs.map((l: any) => (
+                              {auditLogs.map((l: any) => (
                                 <div key={l.id} className="border border-slate-200/70 dark:border-white/10 rounded-xl p-3 bg-white dark:bg-slate-950/20 shadow-sm">
                                   <div className="flex items-center justify-between">
-                                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200">{(l.from_status || "—").toString().toUpperCase()} → {(l.to_status || l.status || "—").toString().toUpperCase()}</div>
+                                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200">{(l.action || "Evento").toString()}</div>
                                     <div className="text-[11px] text-slate-400">{formatDT(l.created_at)}</div>
                                   </div>
-                                  <div className="mt-1 text-[11px] text-slate-500"><span className="font-bold">Actor:</span> {l.actor || l.user_name || "—"}</div>
+                                  <div className="mt-1 text-[11px] text-slate-500"><span className="font-bold">Actor:</span> {l.actor_name || "Sistema"}</div>
+                                  {l.details ? (<div className="mt-2 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{String(l.details)}</div>) : null}
                                 </div>
                               ))}
                             </div>
                           )}
                         </TabsContent>
                         <TabsContent value="notes" className="mt-4">
-                          {(notes.length === 0 && !leadDetail?.notes) ? <div className="text-sm text-slate-400 py-10 text-center">No hay notas.</div> : (
+                          {notes.length === 0 && !leadDetail?.notes ? (
+                            <div className="text-sm text-slate-400 py-10 text-center">No hay notas.</div>
+                          ) : (
                             <div className="max-h-[420px] overflow-y-auto space-y-3">
-                              {leadDetail?.notes && (
+                              {leadDetail?.notes ? (
                                 <div className="border border-amber-200/60 dark:border-white/10 rounded-2xl p-4 bg-gradient-to-r from-amber-50/70 to-white dark:from-slate-950/30 dark:to-slate-950/10 shadow-sm">
-                                  <div className="flex items-center justify-between gap-3"><div className="text-xs font-black text-slate-800 dark:text-white flex items-center gap-2"><StickyNote className="h-4 w-4 text-amber-600" /> Notas del lead</div></div>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-xs font-black text-slate-800 dark:text-white flex items-center gap-2">
+                                      <StickyNote className="h-4 w-4 text-amber-600" /> Notas antiguas (campo notes)
+                                    </div>
+                                  </div>
                                   <div className="mt-3 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{leadDetail.notes}</div>
                                 </div>
-                              )}
+                              ) : null}
+
                               {notes.map((n: any) => (
-                                <div key={n.id} className="border border-slate-200/70 dark:border-white/10 rounded-2xl p-4 bg-white dark:bg-slate-950/20 shadow-sm">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div><div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{n.author || n.user_name || "Vendedora"}</div><div className="text-[11px] text-slate-400">{formatDT(n.created_at)}</div></div>
+                                <div key={n.id} className="flex justify-end">
+                                  <div className="max-w-[92%] w-fit rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white dark:bg-slate-950/20 shadow-sm px-4 py-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="text-[11px] text-slate-400 font-mono">{formatDT(n.created_at)}</div>
+                                      <Badge variant="outline" className="text-[10px]">Nota</Badge>
+                                    </div>
+                                    <div className="mt-2 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{noteBody(n)}</div>
+                                    <div className="mt-2 text-[11px] text-slate-500">
+                                      <span className="font-bold">Asesor:</span> {noteAuthor(n)}
+                                    </div>
                                   </div>
-                                  <div className="mt-3 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{n.note || n.body || ""}</div>
                                 </div>
                               ))}
                             </div>

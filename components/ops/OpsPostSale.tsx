@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, RefreshCw, Trash2, Undo2, Users, LayoutList } from "lucide-react"
+import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, RefreshCw, Trash2, Undo2, Users, LayoutList, Copy, Check } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
@@ -56,6 +56,43 @@ const getPrepagaBadgeColor = (prepaga: string) => {
     return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
+// --- HELPER DE COPIA INTELIGENTE (CUIT -> DNI) ---
+function CopyDniButton({ cuit, dni }: { cuit?: string, dni: string }) {
+    const [copied, setCopied] = useState(false)
+
+    const handleCopy = (e: React.MouseEvent) => {
+        e.stopPropagation() // Evitar abrir el modal al clickear
+        let textToCopy = dni
+        
+        // Lógica: Si hay CUIT (11 dígitos), sacamos los del medio.
+        // Ej: 20-12345678-9 -> 12345678
+        if (cuit) {
+            const cleanCuit = cuit.replace(/\D/g, '') // Sacar guiones
+            if (cleanCuit.length === 11) {
+                textToCopy = cleanCuit.substring(2, 10)
+            } else {
+                textToCopy = cleanCuit // Fallback
+            }
+        }
+
+        navigator.clipboard.writeText(textToCopy)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
+
+    return (
+        <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-4 w-4 ml-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50" 
+            onClick={handleCopy}
+            title="Copiar DNI (Extraído del CUIT)"
+        >
+            {copied ? <Check size={10} className="text-green-600" /> : <Copy size={10} />}
+        </Button>
+    )
+}
+
 // ✅ Recibimos globalConfig como prop
 export function OpsPostSale({ globalConfig }: any) {
     const supabase = createClient()
@@ -75,13 +112,16 @@ export function OpsPostSale({ globalConfig }: any) {
         prepaga: "all",
         mora: "all",
         action: "all",
-        province: "all"
+        province: "all",
+        date: "" // ✅ Nuevo Filtro de Fecha (Mes de Ingreso)
     })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     
     // Obtener listas dinámicas o usar defaults si aún no cargaron
     const financialOptions = globalConfig?.postventa?.financial_status || ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO']
     const actionOptions = globalConfig?.postventa?.action_status || ['OK', 'PRESENTACION', 'CAMBIO DE PASS', 'MENSAJE MORA']
+    // ✅ Lista de Prepagas desde Supabase
+    const prepagasOptions = globalConfig?.prepagas || []
 
     // --- 1. CARGA DE DATOS ---
     const fetchPortfolio = async () => {
@@ -101,6 +141,7 @@ export function OpsPostSale({ globalConfig }: any) {
                 clientName: c.name || "Sin Nombre", 
                 name: c.name || "Sin Nombre",
                 dni: c.dni || "-",
+                cuit: c.cuit, // ✅ Agregamos CUIT al mapa
                 dob: c.dob || "2000-01-01", 
                 prepaga: c.prepaga || c.quoted_prepaga || "Sin Asignar",
                 plan: c.plan || c.quoted_plan || "-",
@@ -199,6 +240,7 @@ export function OpsPostSale({ globalConfig }: any) {
         return clients.filter(c => {
             const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                                   c.dni.includes(searchTerm) || 
+                                  (c.cuit && c.cuit.includes(searchTerm)) || // Busqueda por CUIT
                                   c.prepaga.toLowerCase().includes(searchTerm.toLowerCase())
             
             if (!matchesSearch) return false
@@ -208,12 +250,15 @@ export function OpsPostSale({ globalConfig }: any) {
             if (filters.action !== "all" && c.actionStatus !== filters.action) return false
             if (filters.province !== "all" && c.province !== filters.province) return false
             
+            // ✅ Filtro de Fecha (Mes de Ingreso)
+            if (filters.date && !c.saleDate.startsWith(filters.date)) return false
+            
             return true
         })
     }, [clients, searchTerm, filters])
 
     const uniqueSellers = Array.from(new Set(clients.map(c => c.seller))).filter(Boolean)
-    const activeFiltersCount = Object.values(filters).filter(v => v !== "all").length
+    const activeFiltersCount = Object.values(filters).filter(v => v !== "all" && v !== "").length
 
     const getWhatsAppLink = (client: any) => {
         const msg = `¡Hola ${client.name.split(' ')[0]}! 🎂 Desde GML Salud te deseamos un muy feliz cumpleaños. ¡Que tengas un día excelente!`
@@ -265,7 +310,33 @@ export function OpsPostSale({ globalConfig }: any) {
                             <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2"><LayoutList size={16}/> Filtrar Cartera</h4>
                             <Separator/>
                             <div className="space-y-3">
-                                {/* FILTRO DE MORA DINÁMICO */}
+                                {/* ✅ FILTRO POR PREPAGA (Desde Supabase) */}
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Prepaga</label>
+                                    <Select value={filters.prepaga} onValueChange={v => setFilters({...filters, prepaga: v})}>
+                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todas"/></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Todas</SelectItem>
+                                            {prepagasOptions.map((p: any) => (
+                                                <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                
+                                {/* ✅ FILTRO POR FECHA (Mes de Ingreso) */}
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Mes de Ingreso</label>
+                                    <Input 
+                                        type="month" 
+                                        className="h-8 text-xs" 
+                                        value={filters.date} 
+                                        onChange={(e) => setFilters({...filters, date: e.target.value})}
+                                    />
+                                </div>
+
+                                <Separator />
+
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Estado Mora</label>
                                     <Select value={filters.mora} onValueChange={v => setFilters({...filters, mora: v})}>
@@ -298,7 +369,15 @@ export function OpsPostSale({ globalConfig }: any) {
                                     <TableCell>
                                         <div className="flex items-start gap-3">
                                             <div className="relative"><Avatar className="h-9 w-9 border border-slate-200"><AvatarFallback className="bg-slate-100 text-xs font-bold text-slate-600">{client.name.substring(0,2)}</AvatarFallback></Avatar>{isBirthdayThisMonth(client.dob) && <div className="absolute -top-1 -right-1 bg-pink-100 p-0.5 rounded-full text-pink-500"><Cake size={10}/></div>}</div>
-                                            <div><div className="font-bold text-slate-800 text-sm flex items-center gap-2">{client.name}{isBirthdayToday(client.dob) && <Badge className="bg-pink-500 text-[9px] h-4 px-1">Hoy!</Badge>}</div><div className="text-[11px] font-mono text-slate-400 mt-0.5">{client.dni}</div></div>
+                                            <div>
+                                                <div className="font-bold text-slate-800 text-sm flex items-center gap-2">{client.name}{isBirthdayToday(client.dob) && <Badge className="bg-pink-500 text-[9px] h-4 px-1">Hoy!</Badge>}</div>
+                                                
+                                                {/* ✅ CAMBIO AQUÍ: MOSTRAR CUIT Y BOTÓN DE COPIAR DNI */}
+                                                <div className="flex items-center gap-1 mt-0.5">
+                                                    <span className="text-[11px] font-mono text-slate-400">{client.cuit || client.dni}</span>
+                                                    <CopyDniButton cuit={client.cuit} dni={client.dni} />
+                                                </div>
+                                            </div>
                                         </div>
                                     </TableCell>
                                     <TableCell><div className="flex items-center gap-1 text-xs text-slate-600"><MapPin size={12} className="text-slate-400"/> {client.province}</div></TableCell>

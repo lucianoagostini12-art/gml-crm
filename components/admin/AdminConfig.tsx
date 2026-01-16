@@ -25,7 +25,12 @@ export function AdminConfig() {
     const [isUserModalOpen, setIsUserModalOpen] = useState(false)
     const [editingUserId, setEditingUserId] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
-    const [newReason, setNewReason] = useState("")
+
+    // --- Motivos de pérdida (catálogo) ---
+    // Opción B: el CODE se autogenera desde el texto (label), pero se puede editar.
+    const [newReasonLabel, setNewReasonLabel] = useState("")
+    const [newReasonCode, setNewReasonCode] = useState("")
+    const [reasonCodeDirty, setReasonCodeDirty] = useState(false)
 
     const [showPassword, setShowPassword] = useState(false)
 
@@ -58,6 +63,18 @@ export function AdminConfig() {
         fetchWppTemplates()
     }, [])
 
+    // Autogenerar CODE desde el label mientras el usuario no lo haya editado manualmente
+    useEffect(() => {
+        if (reasonCodeDirty) return
+        const label = (newReasonLabel || "").trim()
+        if (!label) {
+            setNewReasonCode("")
+            return
+        }
+        setNewReasonCode(slugifyCode(label))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [newReasonLabel, reasonCodeDirty])
+
     const fetchUsers = async () => {
         const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
         if (data) {
@@ -75,6 +92,19 @@ export function AdminConfig() {
     const fetchLossReasons = async () => {
         const { data } = await supabase.from('loss_reasons').select('*').order('id', { ascending: true })
         if (data) setLossReasons(data)
+    }
+
+    // slug simple para CODE (métricas estables)
+    const slugifyCode = (input: string) => {
+        return String(input || "")
+            .toLowerCase()
+            .trim()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9\s_-]/g, "")
+            .replace(/[\s-]+/g, "_")
+            .replace(/_+/g, "_")
+            .replace(/^_+|_+$/g, "")
     }
 
     const fetchWppTemplates = async () => {
@@ -265,9 +295,30 @@ export function AdminConfig() {
     }
     const removeRange = (list: any[], setList: any, id: number) => { setList(list.filter(i => i.id !== id)) }
     const addLossReason = async () => {
-        if (!newReason.trim()) return
-        const { error } = await supabase.from('loss_reasons').insert({ reason: newReason })
-        if (!error) { setNewReason(""); fetchLossReasons() }
+        const label = (newReasonLabel || "").trim()
+        if (!label) return
+
+        const code = (newReasonCode || "").trim() || slugifyCode(label)
+        if (!code) return alert("No se pudo generar un código válido")
+
+        const { error } = await supabase.from('loss_reasons').insert({ reason: label, code, is_active: true })
+        if (!error) {
+            setNewReasonLabel("")
+            setNewReasonCode("")
+            setReasonCodeDirty(false)
+            fetchLossReasons()
+        } else {
+            alert("Error al crear motivo. Puede que el código ya exista.")
+        }
+    }
+
+    const toggleLossReasonActive = async (id: number, next: boolean) => {
+        const { error } = await supabase.from('loss_reasons').update({ is_active: next }).eq('id', id)
+        if (error) {
+            alert("Error al actualizar estado")
+            return
+        }
+        fetchLossReasons()
     }
     const deleteLossReason = async (id: number) => {
         if (!confirm("¿Borrar?")) return
@@ -505,8 +556,67 @@ export function AdminConfig() {
                     <Card className="mt-4">
                         <CardHeader><CardTitle className="flex items-center gap-2"><XCircle className="h-5 w-5 text-red-500"/> Motivos de Pérdida</CardTitle></CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="flex gap-2"><Input placeholder="Nuevo motivo..." value={newReason} onChange={(e) => setNewReason(e.target.value)} /><Button onClick={addLossReason}><Plus className="h-4 w-4"/></Button></div>
-                            <div className="space-y-2 max-h-[200px] overflow-y-auto">{lossReasons.map((r) => <div key={r.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border"><span className="text-sm">{r.reason}</span><Button variant="ghost" size="sm" onClick={() => deleteLossReason(r.id)}><Trash2 className="h-3 w-3 text-red-400"/></Button></div>)}</div>
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                <div className="md:col-span-7 space-y-1">
+                                    <Label className="text-xs text-slate-500 font-bold uppercase">Texto visible (label)</Label>
+                                    <Input
+                                        placeholder="Ej: No le interesa"
+                                        value={newReasonLabel}
+                                        onChange={(e) => {
+                                            setNewReasonLabel(e.target.value)
+                                            // el useEffect genera el code automáticamente mientras no esté 'dirty'
+                                        }}
+                                    />
+                                </div>
+                                <div className="md:col-span-4 space-y-1">
+                                    <Label className="text-xs text-slate-500 font-bold uppercase">Código (métricas)</Label>
+                                    <Input
+                                        placeholder="Ej: no_interesa"
+                                        value={newReasonCode}
+                                        onChange={(e) => {
+                                            setNewReasonCode(e.target.value)
+                                            setReasonCodeDirty(true)
+                                        }}
+                                        className="font-mono"
+                                    />
+                                    <div className="text-[10px] text-slate-400">Se autogenera desde el texto, pero podés editarlo.</div>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <Button onClick={addLossReason} className="w-full" title="Agregar">
+                                        <Plus className="h-4 w-4"/>
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                                {lossReasons.map((r) => (
+                                    <div key={r.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="text-sm font-bold text-slate-800 truncate">{r.reason}</span>
+                                                {r.code ? (
+                                                    <Badge variant="outline" className="text-[10px] font-mono bg-white">
+                                                        {r.code}
+                                                    </Badge>
+                                                ) : null}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] text-slate-500 font-bold uppercase">Activo</span>
+                                                <Switch
+                                                    checked={(r.is_active ?? true) !== false}
+                                                    onCheckedChange={(v) => toggleLossReasonActive(r.id, Boolean(v))}
+                                                />
+                                            </div>
+                                            <Button variant="ghost" size="sm" onClick={() => deleteLossReason(r.id)} title="Borrar">
+                                                <Trash2 className="h-3 w-3 text-red-400"/>
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </CardContent>
                     </Card>
                 </TabsContent>

@@ -53,6 +53,36 @@ const normalizePhoneCanon = (raw: any) => {
   return d.length > 10 ? d.slice(-10) : d
 }
 
+// ✅ helper: log de eventos sin romper el webhook si falla
+async function safeLeadEvent(
+  supabase: any,
+  evt: {
+    lead_id?: string | null
+    phone_canon?: string | null
+    source: string
+    event_type: string
+    actor_name?: string | null
+    summary?: string | null
+    payload?: any
+  }
+) {
+  try {
+    const { error } = await supabase.from("lead_events").insert({
+      lead_id: evt.lead_id ?? null,
+      phone_canon: evt.phone_canon ?? null,
+      source: evt.source,
+      event_type: evt.event_type,
+      actor_name: evt.actor_name ?? null,
+      summary: evt.summary ?? null,
+      payload: evt.payload ?? null,
+    })
+
+    if (error) console.error("❌ lead_events insert error:", error)
+  } catch (e: any) {
+    console.error("❌ lead_events insert fatal:", e?.message || e)
+  }
+}
+
 export async function POST(request: Request) {
   const supabase = createClient()
 
@@ -112,6 +142,17 @@ export async function POST(request: Request) {
         sourceId: body.sourceId,
       })
     )
+
+    // ✅ 4.5) EVENTO INBOUND (aunque todavía no sepamos lead_id)
+    await safeLeadEvent(supabase, {
+      lead_id: null,
+      phone_canon: phoneCanon,
+      source: "wati",
+      event_type: "wati_inbound",
+      actor_name: "Cliente",
+      summary: String(finalMessage || "").slice(0, 160),
+      payload: body,
+    })
 
     // =====================================================================
     // 5) 🧠 MOTOR DE REGLAS
@@ -259,6 +300,21 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: updErr.message }, { status: 500 })
       }
 
+      // ✅ EVENTO: lead actualizado por mensaje WATI
+      await safeLeadEvent(supabase, {
+        lead_id: existingLead.id,
+        phone_canon: phoneCanon,
+        source: "wati",
+        event_type: "lead_updated",
+        actor_name: "Sistema",
+        summary: `WATI: mensaje (${String(finalMessage || "").slice(0, 80)})`,
+        payload: {
+          wati: body,
+          applied: { detectedSource, detectedPrepaga },
+          updates,
+        },
+      })
+
       return NextResponse.json({ success: true, action: "updated", source: detectedSource }, { status: 200 })
     }
 
@@ -277,11 +333,32 @@ export async function POST(request: Request) {
       last_update: now,
     }
 
-    const { error: insErr } = await supabase.from("leads").insert(newLeadData)
+    // ✅ Cambio mínimo: devolvemos el id para loguear evento
+    const { data: insertedLead, error: insErr } = await supabase
+      .from("leads")
+      .insert(newLeadData)
+      .select("id")
+      .single()
+
     if (insErr) {
       console.error("❌ Error insert lead:", insErr)
       return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
+
+    // ✅ EVENTO: lead creado por WATI
+    await safeLeadEvent(supabase, {
+      lead_id: insertedLead?.id || null,
+      phone_canon: phoneCanon,
+      source: "wati",
+      event_type: "lead_created",
+      actor_name: "Sistema",
+      summary: `Lead creado desde WATI (${String(finalMessage || "").slice(0, 80)})`,
+      payload: {
+        wati: body,
+        newLeadData,
+        applied: { detectedSource, detectedPrepaga },
+      },
+    })
 
     return NextResponse.json({ success: true, action: "created", source: detectedSource }, { status: 200 })
   } catch (e: any) {

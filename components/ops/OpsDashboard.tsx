@@ -1,8 +1,10 @@
 "use client"
 import { useState, useEffect } from "react"
-import { Inbox, FileText, ShieldAlert, Lock, AlertTriangle, ChevronRight, CheckCircle2, XCircle, ChevronLeft, Calendar } from "lucide-react"
+import { Inbox, FileText, ShieldAlert, Lock, AlertTriangle, ChevronRight, CheckCircle2, XCircle, ChevronLeft, Calendar, Filter } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+// ✅ NUEVOS IMPORTS
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 function FlowCard({ label, count, color, icon, active, onClick }: any) {
     const colors: any = { 
@@ -43,7 +45,7 @@ const getCurrentMonthISO = () => {
 }
 
 // ✅ SE AGREGA "onMonthChange" A LAS PROPS
-export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMonthChange }: any) {
+export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMonthChange, filterPrepaga, setFilterPrepaga, prepagas }: any) {
     
     // Iniciamos siempre en el mes corriente
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthISO())
@@ -88,6 +90,9 @@ export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMont
     const getFilteredOps = (status: string) => {
         return operations.filter((o: any) => {
             if (o.status?.toLowerCase() !== status) return false
+            // ✅ FILTRO NUEVO: PREPAGA
+            if (filterPrepaga && filterPrepaga !== 'all' && o.prepaga !== filterPrepaga) return false
+            
             const opMonth = getEffectiveMonth(o)
             return opMonth === selectedMonth
         })
@@ -105,7 +110,7 @@ export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMont
     return (
         <div className="mb-6 flex flex-col items-center animate-in fade-in slide-in-from-top-4 w-full">
             
-            {/* --- CONTROLES DE MES --- */}
+            {/* --- CONTROLES DE MES Y PREPAGA --- */}
             <div className="flex items-center gap-4 bg-white p-2 rounded-xl border border-slate-200 shadow-sm mb-6">
                 <Button variant="ghost" size="icon" onClick={() => changeMonth(-1)} className="h-8 w-8 text-slate-500 hover:text-slate-800">
                     <ChevronLeft size={18}/>
@@ -119,6 +124,25 @@ export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMont
                 <Button variant="ghost" size="icon" onClick={() => changeMonth(1)} className="h-8 w-8 text-slate-500 hover:text-slate-800">
                     <ChevronRight size={18}/>
                 </Button>
+
+                {/* Separador */}
+                <div className="h-8 w-px bg-slate-200 mx-1"></div>
+
+                {/* ✅ FILTRO DE PREPAGA */}
+                <div className="flex items-center gap-2 pr-2">
+                    <Filter className="h-4 w-4 text-slate-400" />
+                    <Select value={filterPrepaga} onValueChange={setFilterPrepaga}>
+                        <SelectTrigger className="w-[180px] h-8 text-xs font-bold border-none shadow-none text-slate-600 bg-transparent focus:ring-0">
+                            <SelectValue placeholder="Todas las Prepagas" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">🏢 Todas</SelectItem>
+                            {prepagas && prepagas.map((p: any) => (
+                                <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
 
             {/* --- FLOW CARDS (Inteligentes por mes) --- */}

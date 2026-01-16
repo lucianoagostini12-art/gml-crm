@@ -146,6 +146,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const [alarmLead, setAlarmLead] = useState<Lead | null>(null)
     const [leadProcessingId, setLeadProcessingId] = useState<string | null>(null)
     const [ignoredAlarmIds, setIgnoredAlarmIds] = useState<string[]>([])
+    const [ackZombieIds, setAckZombieIds] = useState<string[]>([])
 
     // Dialogs
     const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null) 
@@ -162,6 +163,33 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
+
+    // --- ACK LOCAL DE ALERTA ZOMBIE (para que no vuelva a molestar con el pop-up) ---
+    const ZOMBIE_ACK_STORAGE_KEY = `kanban_zombie_ack:${CURRENT_USER}`
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            const raw = localStorage.getItem(ZOMBIE_ACK_STORAGE_KEY)
+            if (!raw) { setAckZombieIds([]); return }
+            const parsed = JSON.parse(raw)
+            setAckZombieIds(Array.isArray(parsed) ? parsed : [])
+        } catch {
+            setAckZombieIds([])
+        }
+    }, [ZOMBIE_ACK_STORAGE_KEY])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            localStorage.setItem(ZOMBIE_ACK_STORAGE_KEY, JSON.stringify(ackZombieIds))
+        } catch {}
+    }, [ackZombieIds, ZOMBIE_ACK_STORAGE_KEY])
+
+    const acknowledgeZombie = (leadId?: string | null) => {
+        if (!leadId) return
+        setAckZombieIds(prev => (prev.includes(leadId) ? prev : [...prev, leadId]))
+    }
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
 
@@ -386,7 +414,11 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         }
     }, [zombieLead, alarmLead, overdueLead]);
 
-    useEffect(() => { const found = leads.find((l: any) => l.warning_sent === true); if (found) setZombieLead(found); }, [leads]);
+    useEffect(() => {
+        const found = leads.find((l: any) => l.warning_sent === true && !ackZombieIds.includes(l.id));
+        if (found) setZombieLead(found);
+        else setZombieLead(null);
+    }, [leads, ackZombieIds]);
     useEffect(() => { const found = leads.find(l => isLeadOverdue(l.lastUpdate, l.status)); if (found && !found.warning_sent) setOverdueLead(found); }, [leads]);
 
     const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
@@ -589,10 +621,10 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
 
             {/* ALERTA ZOMBIE */}
-            <Dialog open={!!zombieLead} onOpenChange={() => { setZombieLead(null); stopAudio(); }}>
+            <Dialog open={!!zombieLead} onOpenChange={() => { acknowledgeZombie(zombieLead?.id); setZombieLead(null); stopAudio(); }}>
                 <DialogContent className="border-4 border-red-500 max-w-md shadow-[0_0_50px_rgba(220,38,38,0.5)] animate-in zoom-in duration-300 bg-white" aria-describedby="zombie-desc">
                     <DialogHeader className="text-center"><div className="mx-auto bg-red-100 p-4 rounded-full mb-4 w-fit border-2 border-red-500 animate-pulse"><Skull className="h-10 w-10 text-red-600" /></div><DialogTitle className="text-3xl font-black text-red-600 uppercase tracking-tight">¡ALERTA DE SUPERVISIÓN!</DialogTitle><DialogDescription id="zombie-desc" className="text-lg text-slate-700 mt-2 font-bold">El lead <span className="text-xl bg-red-100 px-2 rounded text-red-800">{zombieLead?.name}</span> lleva más de 72hs inactivo.</DialogDescription></DialogHeader>
-                    <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black text-lg gap-2 shadow-lg" onClick={() => window.open(`https://wa.me/${zombieLead?.phone}?text=Hola! Te escribo para retomar tu consulta.`, '_blank')}><MessageCircle size={24} fill="currentColor" /> RECUPERAR AHORA</Button><Button variant="outline" className="w-full h-10 text-slate-400" onClick={() => { setZombieLead(null); stopAudio(); }}>Entendido, lo gestionaré.</Button></div>
+                    <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black text-lg gap-2 shadow-lg" onClick={() => { acknowledgeZombie(zombieLead?.id); window.open(`https://wa.me/${zombieLead?.phone}?text=Hola! Te escribo para retomar tu consulta.`, '_blank'); }}><MessageCircle size={24} fill="currentColor" /> RECUPERAR AHORA</Button><Button variant="outline" className="w-full h-10 text-slate-400" onClick={() => { acknowledgeZombie(zombieLead?.id); setZombieLead(null); stopAudio(); }}>Entendido, lo gestionaré.</Button></div>
                 </DialogContent>
             </Dialog>
             

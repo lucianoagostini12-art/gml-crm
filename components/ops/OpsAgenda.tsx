@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calendar as CalendarIcon, Plus, Phone, MessageCircle, StickyNote, ChevronLeft, ChevronRight, CheckSquare, Save, User, Users, Clock, RefreshCw, Zap, Trash2, CheckCircle2 } from "lucide-react"
+import { Calendar as CalendarIcon, Plus, MessageCircle, ChevronLeft, ChevronRight, User, Users, Clock, RefreshCw, Zap, CheckCircle2, CalendarDays, Copy } from "lucide-react"
 import { Reminder, Operation } from "./data"
 
 export function OpsAgenda({ operations, generalTasks, setGeneralTasks, onSelectOp, updateOp, userName, role }: any) {
@@ -56,6 +56,16 @@ export function OpsAgenda({ operations, generalTasks, setGeneralTasks, onSelectO
     }
     const changeMonth = (offset: number) => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + offset)))
 
+    // Helper WhatsApp
+    const openWhatsApp = (e: any, phone: string) => {
+        e.stopPropagation()
+        if (!phone) return
+        // Limpiar número y asegurar formato Argentina (si aplica, o genérico)
+        const cleanPhone = phone.replace(/\D/g, '')
+        const finalPhone = cleanPhone.startsWith('54') ? cleanPhone : `549${cleanPhone}`
+        window.open(`https://wa.me/${finalPhone}`, '_blank')
+    }
+
     // --- DATOS UNIFICADOS (Clientes + Generales) ---
     const getAllReminders = () => {
         let all: {op: Operation | null, r: Reminder}[] = []
@@ -66,7 +76,12 @@ export function OpsAgenda({ operations, generalTasks, setGeneralTasks, onSelectO
         // Tareas generales (vienen de team_tasks)
         generalTasks.forEach((r: Reminder) => { if(!r.done) all.push({op: null, r}) })
         
-        return all.sort((a, b) => new Date(a.r.date + 'T' + (a.r.time || '00:00')).getTime() - new Date(b.r.date + 'T' + (b.r.time || '00:00')).getTime())
+        // ✅ ORDENAMIENTO ROBUSTO POR FECHA Y HORA
+        return all.sort((a, b) => {
+            const dateA = new Date(`${a.r.date}T${a.r.time || '00:00'}`)
+            const dateB = new Date(`${b.r.date}T${b.r.time || '00:00'}`)
+            return dateA.getTime() - dateB.getTime()
+        })
     }
     
     const allReminders = getAllReminders()
@@ -236,19 +251,49 @@ export function OpsAgenda({ operations, generalTasks, setGeneralTasks, onSelectO
             </div>
             
             <div className="flex gap-6 h-full overflow-hidden">
-                {/* LISTA LATERAL */}
+                {/* ✅ LISTA LATERAL CON SELECCIÓN PREMIUM */}
                 <div className="w-[280px] flex flex-col gap-4 shrink-0 overflow-y-auto">
-                    <div onClick={() => setAgendaTypeFilter('today')} className={`p-5 bg-white rounded-xl shadow-sm border border-slate-100 cursor-pointer transition-all hover:shadow-md ${agendaTypeFilter==='today'?'ring-2 ring-blue-500':''}`}>
-                        <div className="flex justify-between items-center mb-2"><h4 className="text-xs font-black text-slate-400">HOY</h4><Badge variant="secondary" className="bg-blue-50 text-blue-600">{tasksToday.length}</Badge></div>
-                        <div className="text-3xl font-black text-slate-800">{tasksToday.length}</div>
+                    
+                    {/* HOY */}
+                    <div onClick={() => setAgendaTypeFilter('today')} 
+                         className={`p-5 rounded-xl border shadow-sm cursor-pointer transition-all duration-300 relative overflow-hidden group
+                         ${agendaTypeFilter === 'today' 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xl shadow-blue-900/20 scale-[1.02]' 
+                            : 'bg-white text-slate-600 border-slate-100 hover:border-blue-200 hover:shadow-md'}
+                         `}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h4 className={`text-xs font-black ${agendaTypeFilter === 'today' ? 'text-blue-100' : 'text-slate-400'}`}>HOY</h4>
+                            <Badge variant="secondary" className={`${agendaTypeFilter === 'today' ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-600'}`}>{tasksToday.length}</Badge>
+                        </div>
+                        <div className={`text-3xl font-black ${agendaTypeFilter === 'today' ? 'text-white' : 'text-slate-800'}`}>{tasksToday.length}</div>
                     </div>
-                    <div onClick={() => setAgendaTypeFilter('overdue')} className={`p-5 bg-white rounded-xl shadow-sm border border-slate-100 cursor-pointer transition-all hover:shadow-md ${agendaTypeFilter==='overdue'?'ring-2 ring-red-500':''}`}>
-                        <div className="flex justify-between items-center mb-2"><h4 className="text-xs font-black text-red-400">VENCIDAS</h4><Badge variant="secondary" className="bg-red-50 text-red-600">{tasksOverdue.length}</Badge></div>
-                        <div className="text-3xl font-black text-red-600">{tasksOverdue.length}</div>
+
+                    {/* VENCIDAS */}
+                    <div onClick={() => setAgendaTypeFilter('overdue')} 
+                         className={`p-5 rounded-xl border shadow-sm cursor-pointer transition-all duration-300 relative overflow-hidden group
+                         ${agendaTypeFilter === 'overdue' 
+                            ? 'bg-red-600 text-white border-red-600 shadow-xl shadow-red-900/20 scale-[1.02]' 
+                            : 'bg-white text-slate-600 border-slate-100 hover:border-red-200 hover:shadow-md'}
+                         `}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h4 className={`text-xs font-black ${agendaTypeFilter === 'overdue' ? 'text-red-100' : 'text-slate-400'}`}>VENCIDAS</h4>
+                            <Badge variant="secondary" className={`${agendaTypeFilter === 'overdue' ? 'bg-white/20 text-white' : 'bg-red-50 text-red-600'}`}>{tasksOverdue.length}</Badge>
+                        </div>
+                        <div className={`text-3xl font-black ${agendaTypeFilter === 'overdue' ? 'text-white' : 'text-slate-800'}`}>{tasksOverdue.length}</div>
                     </div>
-                    <div onClick={() => setAgendaTypeFilter('future')} className={`p-5 bg-white rounded-xl shadow-sm border border-slate-100 cursor-pointer transition-all hover:shadow-md ${agendaTypeFilter==='future'?'ring-2 ring-slate-400':''}`}>
-                         <div className="flex justify-between items-center mb-2"><h4 className="text-xs font-black text-slate-400">PRÓXIMAS</h4><Badge variant="secondary" className="bg-slate-100 text-slate-600">{tasksFuture.length}</Badge></div>
-                        <div className="text-3xl font-black text-slate-700">{tasksFuture.length}</div>
+
+                    {/* PRÓXIMAS */}
+                    <div onClick={() => setAgendaTypeFilter('future')} 
+                         className={`p-5 rounded-xl border shadow-sm cursor-pointer transition-all duration-300 relative overflow-hidden group
+                         ${agendaTypeFilter === 'future' 
+                            ? 'bg-slate-800 text-white border-slate-800 shadow-xl shadow-slate-900/20 scale-[1.02]' 
+                            : 'bg-white text-slate-600 border-slate-100 hover:border-slate-300 hover:shadow-md'}
+                         `}>
+                         <div className="flex justify-between items-center mb-2">
+                            <h4 className={`text-xs font-black ${agendaTypeFilter === 'future' ? 'text-slate-300' : 'text-slate-400'}`}>PRÓXIMAS</h4>
+                            <Badge variant="secondary" className={`${agendaTypeFilter === 'future' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'}`}>{tasksFuture.length}</Badge>
+                        </div>
+                        <div className={`text-3xl font-black ${agendaTypeFilter === 'future' ? 'text-white' : 'text-slate-800'}`}>{tasksFuture.length}</div>
                     </div>
                 </div>
 
@@ -261,24 +306,63 @@ export function OpsAgenda({ operations, generalTasks, setGeneralTasks, onSelectO
                             {visibleAgendaTasks.map((task, i) => {
                                 const {op, r} = task
                                 return (
-                                <div key={i} className="p-4 hover:bg-slate-50 flex items-start gap-4 cursor-pointer group transition-colors">
-                                    <div onClick={(e) => handleComplete(task, e)} className={`mt-1 h-9 w-9 rounded-full flex items-center justify-center border cursor-pointer hover:bg-green-100 transition-colors ${r.type==='call'?'bg-blue-50 border-blue-100 text-blue-600':'bg-purple-50 border-purple-100 text-purple-600'}`}>
-                                        <CheckCircle2 size={18} className="text-slate-300 hover:text-green-600"/>
+                                <div key={i} className="p-4 hover:bg-slate-50 transition-all flex items-center gap-4 cursor-pointer group">
+                                    
+                                    {/* BUTTON CHECK REDISEÑADO */}
+                                    <div 
+                                        onClick={(e) => handleComplete(task, e)} 
+                                        className={`mt-0.5 h-8 w-8 rounded-full flex items-center justify-center border-2 cursor-pointer transition-all duration-200
+                                        ${r.type === 'call' 
+                                            ? 'border-blue-200 text-blue-300 hover:bg-blue-500 hover:border-blue-500 hover:text-white hover:scale-110 shadow-sm' 
+                                            : 'border-purple-200 text-purple-300 hover:bg-purple-500 hover:border-purple-500 hover:text-white hover:scale-110 shadow-sm'}
+                                        `}
+                                        title="Completar Tarea"
+                                    >
+                                        <CheckCircle2 size={16} strokeWidth={3} />
                                     </div>
+
                                     <div className="flex-1" onClick={() => op && onSelectOp(op)}>
                                         <div className="flex justify-between items-start">
-                                            <div>
-                                                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                                                    {op ? op.clientName : "★ Tarea General"}
-                                                    {r.type === 'call' && <Badge variant="outline" className="text-[9px] h-4 px-1">Llamado</Badge>}
-                                                </h4>
-                                                <p className="text-xs text-slate-600 mt-1">{r.note}</p>
-                                                {r.assignee && r.assignee !== userName && <span className="text-[9px] bg-indigo-50 text-indigo-600 border border-indigo-100 px-1.5 py-0.5 rounded mt-1 inline-block font-bold">Asignado a: {r.assignee}</span>}
+                                            <div className="flex flex-col gap-1">
+                                                {/* NOMBRE + CUIT + TIPO */}
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                                                        {op ? op.clientName : "★ Tarea General"}
+                                                    </h4>
+                                                    
+                                                    {/* ✅ CUIT DEL CLIENTE VISIBLE */}
+                                                    {op && op.cuit && (
+                                                        <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-mono text-slate-500 bg-slate-50 border-slate-200 flex items-center gap-1" title="Copiar CUIT">
+                                                            <span className="opacity-50 font-sans font-bold">CUIT:</span> {op.cuit}
+                                                        </Badge>
+                                                    )}
+
+                                                    {r.type === 'call' && <Badge variant="outline" className="text-[9px] h-5 px-1 bg-blue-50 text-blue-700 border-blue-200">Llamado</Badge>}
+                                                </div>
+
+                                                <p className="text-xs text-slate-600 font-medium mt-0.5 line-clamp-1">{r.note}</p>
+                                                {r.assignee && r.assignee !== userName && <span className="text-[9px] bg-indigo-50 text-indigo-600 border border-indigo-100 px-1.5 py-0.5 rounded mt-1 inline-block font-bold w-fit">Asignado a: {r.assignee}</span>}
                                             </div>
-                                            <div className="flex flex-col items-end gap-1">
-                                                <span className="text-[10px] font-bold text-slate-400">{r.time}</span>
-                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-slate-300 hover:text-orange-500 hover:bg-orange-50" onClick={(e) => handleSnooze(task, e)} title="Pasar a mañana"><Zap size={12}/></Button>
+                                            
+                                            {/* ✅ HORA Y FECHA CLARAS A LA DERECHA */}
+                                            <div className="flex flex-col items-end gap-0.5 text-right min-w-[100px]">
+                                                <div className="flex items-center gap-1.5 text-slate-900 bg-slate-100 px-2 py-1 rounded-md mb-1">
+                                                    <Clock size={14} className="text-blue-600"/> 
+                                                    <span className="text-base font-black tracking-tight leading-none">{r.time || "00:00"}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                                                    <CalendarDays size={10} />
+                                                    {new Date(`${r.date}T12:00:00`).toLocaleDateString('es-ES', {weekday: 'short', day: '2-digit', month: 'short'})}
+                                                </div>
+                                                
+                                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
+                                                    {/* ✅ BOTÓN DE WHATSAPP */}
+                                                    {op && op.phone && (
+                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-full" onClick={(e) => openWhatsApp(e, op.phone)} title="Abrir WhatsApp">
+                                                            <MessageCircle size={14} />
+                                                        </Button>
+                                                    )}
+                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-slate-300 hover:text-orange-500 hover:bg-orange-50 rounded-full" onClick={(e) => handleSnooze(task, e)} title="Pasar a mañana"><Zap size={12}/></Button>
                                                 </div>
                                             </div>
                                         </div>
@@ -310,7 +394,18 @@ export function OpsAgenda({ operations, generalTasks, setGeneralTasks, onSelectO
             <Dialog open={isTaskModalOpen} onOpenChange={setIsTaskModalOpen}>
                 <DialogContent className="sm:max-w-sm"><DialogHeader><DialogTitle>Nueva Tarea</DialogTitle></DialogHeader>
                    <div className="grid gap-4 py-4">
-                        <Select value={newTaskOpId} onValueChange={setNewTaskOpId}><SelectTrigger><SelectValue placeholder="Cliente (Opcional)"/></SelectTrigger><SelectContent><SelectItem value="general">★ Tarea General</SelectItem>{operations.map((o:any)=><SelectItem key={o.id} value={o.id}>{o.clientName}</SelectItem>)}</SelectContent></Select>
+                        <Select value={newTaskOpId} onValueChange={setNewTaskOpId}>
+                            <SelectTrigger><SelectValue placeholder="Cliente (Opcional)"/></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="general">★ Tarea General</SelectItem>
+                                {/* ✅ CUIT TAMBIÉN EN EL SELECTOR */}
+                                {operations.map((o:any)=>(
+                                    <SelectItem key={o.id} value={o.id}>
+                                        {o.clientName} {o.cuit ? `(${o.cuit})` : ''}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                         <div className="flex gap-2"><Input type="date" value={newTaskDate} onChange={e=>setNewTaskDate(e.target.value)}/><Input type="time" value={newTaskTime} onChange={e=>setNewTaskTime(e.target.value)}/></div>
                         
                         {role === 'admin_god' && (

@@ -39,6 +39,36 @@ function normalizePhoneCanon(raw: any) {
   return d.length > 10 ? d.slice(-10) : d
 }
 
+// ✅ helper: log de eventos sin romper el webhook si falla
+async function safeLeadEvent(
+  supabase: any,
+  evt: {
+    lead_id?: string | null
+    phone_canon?: string | null
+    source: string
+    event_type: string
+    actor_name?: string | null
+    summary?: string | null
+    payload?: any
+  }
+) {
+  try {
+    const { error } = await supabase.from("lead_events").insert({
+      lead_id: evt.lead_id ?? null,
+      phone_canon: evt.phone_canon ?? null,
+      source: evt.source,
+      event_type: evt.event_type,
+      actor_name: evt.actor_name ?? null,
+      summary: evt.summary ?? null,
+      payload: evt.payload ?? null,
+    })
+
+    if (error) console.error("❌ lead_events insert error:", error)
+  } catch (e: any) {
+    console.error("❌ lead_events insert fatal:", e?.message || e)
+  }
+}
+
 export async function POST(req: Request) {
   const supabase = createClient()
 
@@ -60,6 +90,17 @@ export async function POST(req: Request) {
       // No cortamos con 400 para no romper frontends
       return NextResponse.json({ success: false, error: "No phone" }, { headers: corsHeaders() })
     }
+
+    // ✅ Evento inbound (form submit) aunque todavía no sepamos lead_id
+    await safeLeadEvent(supabase, {
+      lead_id: null,
+      phone_canon: phoneCanon,
+      source: "landing",
+      event_type: "form_submit",
+      actor_name: "Cliente",
+      summary: `Formulario: ${nombre} (${telefono})`,
+      payload: body,
+    })
 
     // ✅ CAMBIO: Tag por defecto + override por landing
     let finalTag = sourceFromLanding || "Formulario - DoctoRed"
@@ -138,33 +179,59 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: updErr.message }, { headers: corsHeaders() })
       }
 
+      // ✅ Evento: lead actualizado por formulario
+      await safeLeadEvent(supabase, {
+        lead_id: existingLead.id,
+        phone_canon: phoneCanon,
+        source: "landing",
+        event_type: "lead_updated",
+        actor_name: "Sistema",
+        summary: `Formulario actualizó lead (source=${finalTag})`,
+        payload: { body, finalTag, updates },
+      })
+
       return NextResponse.json({ success: true, action: "updated" }, { headers: corsHeaders() })
     }
 
-    // 3) Si NO existe: insert
-    const { error: insErr } = await supabase.from("leads").insert({
-      name: nombre,
-      phone: telefono,
-      phone_canon: phoneCanon, // ✅ NUEVO
-      source: finalTag,
-      status: "nuevo",
-      notes: extraNotes || null,
-      province: provincia || null,
-      zip: cp || null,
-      created_at: now,
-      last_update: now,
+    // 3) Si NO existe: insert (✅ devolvemos id para loguear evento)
+    const { data: insertedLead, error: insErr } = await supabase
+      .from("leads")
+      .insert({
+        name: nombre,
+        phone: telefono,
+        phone_canon: phoneCanon, // ✅ NUEVO
+        source: finalTag,
+        status: "nuevo",
+        notes: extraNotes || null,
+        province: provincia || null,
+        zip: cp || null,
+        created_at: now,
+        last_update: now,
 
-      // ✅ CLAVE para que aparezca en AdminLeadFactory:
-      agent_name: null,
+        // ✅ CLAVE para que aparezca en AdminLeadFactory:
+        agent_name: null,
 
-      // Opcional prolijo: tu tabla tiene assigned_to
-      assigned_to: null,
-    })
+        // Opcional prolijo: tu tabla tiene assigned_to
+        assigned_to: null,
+      })
+      .select("id")
+      .single()
 
     if (insErr) {
       console.error("Error insertando lead:", insErr)
       return NextResponse.json({ success: false, error: insErr.message }, { headers: corsHeaders() })
     }
+
+    // ✅ Evento: lead creado por formulario
+    await safeLeadEvent(supabase, {
+      lead_id: insertedLead?.id || null,
+      phone_canon: phoneCanon,
+      source: "landing",
+      event_type: "lead_created",
+      actor_name: "Sistema",
+      summary: `Lead creado desde Formulario (source=${finalTag})`,
+      payload: { body, finalTag },
+    })
 
     return NextResponse.json({ success: true, action: "created" }, { headers: corsHeaders() })
   } catch (error: any) {

@@ -42,6 +42,46 @@ const getPrepagaBadgeColor = (prepaga?: string | null) => {
 export function AdminTeam() {
   const supabase = createClient()
 
+  // Helpers (solo UI)
+  const formatDateTime = (value?: any) => {
+    if (!value) return "—"
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) return "—"
+    const date = d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" })
+    const time = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
+    return `${date} ${time}`
+  }
+
+  // ✅ Split de notas legacy agrupadas (WATI + notas) por separador "|||SEP_NOTE|"
+  const splitNotesChunks = (raw?: string | null) => {
+    if (!raw || !String(raw).trim()) return [] as string[]
+    const str = String(raw).trim()
+    if (str.includes("|||SEP_NOTE|")) {
+      return str
+        .split("|||SEP_NOTE|")
+        .map(s => s.trim())
+        .filter(Boolean)
+    }
+    // fallback: separar por saltos de linea
+    return str
+      .split(/\n+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  }
+
+  // Intenta extraer metadata tipo "fecha|autor|texto" sin romper el texto
+  const parseChunk = (chunk: string) => {
+    const parts = chunk.split("|").map(p => p.trim()).filter(Boolean)
+    if (parts.length >= 3) {
+      return {
+        ts: parts[0],
+        who: parts[1],
+        text: parts.slice(2).join(" | ").trim(),
+      }
+    }
+    return { ts: "", who: "", text: chunk }
+  }
+
   // Estados Principales
   const [salesAgents, setSalesAgents] = useState<any[]>([])
   const [staffMembers, setStaffMembers] = useState<any[]>([])
@@ -434,7 +474,7 @@ export function AdminTeam() {
                                       </span>
                                     ) : (
                                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                                        <Clock className="h-3 w-3" /> {lead.last_update ? new Date(lead.last_update).toLocaleDateString() : "-"}
+                                        <Clock className="h-3 w-3" /> Sin agenda
                                       </span>
                                     )}
 
@@ -443,6 +483,12 @@ export function AdminTeam() {
                                         $ {lead.quoted_price || '-'}
                                       </span>
                                     )}
+                                  </div>
+
+                                  {/* Fechas (sutil) */}
+                                  <div className="mt-2 text-[10px] text-slate-400/80 font-semibold flex items-center justify-between gap-2">
+                                    <span className="truncate">Ing: {lead.created_at ? formatDateTime(lead.created_at) : "—"}</span>
+                                    <span className="whitespace-nowrap shrink-0">Mod: {lead.last_update ? formatDateTime(lead.last_update) : "—"}</span>
                                   </div>
                                 </div>
                               </div>
@@ -604,9 +650,38 @@ export function AdminTeam() {
                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-2">
                           <FileText className="h-4 w-4" /> Notas del Vendedor
                         </h4>
-                        <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-sm text-slate-700 italic leading-relaxed shadow-sm">
-                          {selectedLead.notes ? `"${selectedLead.notes}"` : "Sin observaciones registradas."}
-                        </div>
+                        {selectedLead.notes ? (
+                          <div className="space-y-2">
+                            {splitNotesChunks(selectedLead.notes).map((chunk, idx) => {
+                              const { ts, who, text } = parseChunk(chunk)
+                              // ts a veces viene como hora ("01:05 p. m.") o como fecha ("14/01/26, 13:08").
+                              // Lo mostramos tal cual, y solo si es ISO parseable lo normalizamos.
+                              const normalized = formatDateTime(ts)
+                              const tsLabel = normalized !== "—" ? normalized : (ts || "—")
+
+                              return (
+                                <div
+                                  key={`${selectedLead.id}_note_${idx}`}
+                                  className="bg-yellow-50 border border-yellow-200 rounded-2xl shadow-sm px-4 py-3"
+                                >
+                                  <div className="flex items-center justify-between gap-3 mb-1">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-xs font-black text-slate-700 truncate">{who || "Nota"}</span>
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-500 whitespace-nowrap shrink-0">{tsLabel}</span>
+                                  </div>
+                                  <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                    {text}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-sm text-slate-700 italic leading-relaxed shadow-sm">
+                            Sin observaciones registradas.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </ScrollArea>

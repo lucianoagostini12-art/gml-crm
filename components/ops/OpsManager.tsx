@@ -79,6 +79,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }, [viewMode])
     
     const [currentStageFilter, setCurrentStageFilter] = useState<string | null>(null)
+    // ✅ NUEVO: Filtro de Prepaga
+    const [filterPrepaga, setFilterPrepaga] = useState<string>("all")
     
     // --- ESTADO PRINCIPAL ---
     const [operations, setOperations] = useState<Operation[]>([])
@@ -515,6 +517,10 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         if (filterStatus !== 'all' && op.status !== filterStatus) return false
         if (filterSubState !== 'all' && op.subState !== filterSubState) return false
         if (filterSeller !== 'all' && op.seller !== filterSeller) return false
+        
+        // ✅ FILTRO DE PREPAGA (Conectado al Dashboard)
+        if (filterPrepaga !== 'all' && op.prepaga !== filterPrepaga) return false
+
         if (dateFilter.start && op.entryDate < dateFilter.start) return false
         if (dateFilter.end && op.entryDate > dateFilter.end) return false
         return true
@@ -839,7 +845,21 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         <div ref={listScrollRef} className="flex-1 h-full">
                         <ScrollArea className="h-full">
                             <div className="p-6">
-                                {viewMode === 'dashboard' && <><OpsDashboard operations={operations} activeFilter={currentStageFilter} setActiveFilter={setCurrentStageFilter} /><div className="mt-8 border-t border-slate-200 pt-6"><OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} /></div></>}
+                                {viewMode === 'dashboard' && (
+                                    <>
+                                        <OpsDashboard 
+                                            operations={operations} 
+                                            activeFilter={currentStageFilter} 
+                                            setActiveFilter={setCurrentStageFilter} 
+                                            filterPrepaga={filterPrepaga}
+                                            setFilterPrepaga={setFilterPrepaga}
+                                            prepagas={globalConfig.prepagas}
+                                        />
+                                        <div className="mt-8 border-t border-slate-200 pt-6">
+                                            <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} />
+                                        </div>
+                                    </>
+                                )}
                                 
                                 {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} />}
                                 

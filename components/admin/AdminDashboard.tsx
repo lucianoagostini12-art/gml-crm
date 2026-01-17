@@ -7,6 +7,7 @@ import {
   Users,
   Layers,
   BarChart4,
+  BarChart3, // ✅ AGREGADO PARA REPORTES
   LogOut,
   Database,
   Sliders,
@@ -31,7 +32,7 @@ import {
   Trophy,
   MessageCircle,
   FileText,
-  TrendingUp // ✅ IMPORTADO
+  TrendingUp
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -58,7 +59,8 @@ import { AdminCommissions } from "@/components/admin/AdminCommissions"
 import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
 import { AdminRanking } from "@/components/admin/AdminRanking"
-import { AdminPerformance } from "@/components/admin/AdminPerformance" // ✅ IMPORTADO
+import { AdminPerformance } from "@/components/admin/AdminPerformance"
+import AdminReports from "@/components/admin/AdminReports" // ✅ IMPORTADO NUEVO COMPONENTE
 
 // --- FORMATO DE HORA CORREGIDO (ARGENTINA) ---
 const formatTime = (dateString: string) => {
@@ -320,6 +322,9 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                         <SidebarBtn active={view === 'performance'} onClick={() => setView('performance')} icon={<TrendingUp size={20} className="text-pink-500"/>} label="Rendimiento" />
                         <SidebarBtn active={view === 'ranking'} onClick={() => setView('ranking')} icon={<Trophy size={20} className="text-yellow-500"/>} label="Ranking" />
                         <SidebarBtn active={view === 'commissions'} onClick={() => setView('commissions')} icon={<Banknote size={20} className="text-green-400"/>} label="Liquidación" />
+                        
+                        {/* ✅ NUEVO ITEM DE REPORTES */}
+                        <SidebarBtn active={view === 'reports'} onClick={() => setView('reports')} icon={<BarChart3 size={20} className="text-emerald-500"/>} label="Reportes" />
                     </div>
                 )}
 
@@ -672,6 +677,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           {view === "setter" && <AdminSetterManager />}
           {view === "health" && <AdminPipelineHealth />}
           {view === "announcements" && <AdminAnnouncements />}
+          {view === "reports" && <AdminReports />}
         </ScrollArea>
       </main>
     </div>

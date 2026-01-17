@@ -33,7 +33,7 @@ const planesPorEmpresa: Record<string, string[]> = {
   "Avalian": ["Plan Cerca", "Plan Integral", "Plan Superior", "Plan Selecta", "Plan Hoy (Joven)"],
   "Swiss Medical": ["Plan S1", "Plan S2", "SMG 20", "SMG 30", "SMG 40", "SMG 50"],
   "Galeno": ["Plan Azul 200", "Plan Azul 220", "Plan Plata 300", "Plan Plata 330", "Plan Oro 440"],
-  "AMPF": ["Plan Base", "Plan Familiar", "Plan PMO"],
+  "AMPF": ["Plan Superior"],
 }
 
 export function QuotationDialog({

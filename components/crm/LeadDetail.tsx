@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pencil, Check, X, TrendingUp, MessageCircle, AlertCircle } from "lucide-react"
+import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pencil, Check, X, TrendingUp, MessageCircle, AlertCircle, Trash2 } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -44,6 +44,11 @@ interface LeadDetailProps {
 export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const supabase = createClient()
 
+  // --- Usuario logueado (autor real para notas/logs/chat) ---
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserName, setCurrentUserName] = useState<string>("")
+  const [currentUserAvatar, setCurrentUserAvatar] = useState<string>("")
+
   const [scheduledFor, setScheduledFor] = useState("")
   const [obs, setObs] = useState("")
   const [prepaga, setPrepaga] = useState("")
@@ -63,6 +68,42 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const [isEditingPhone, setIsEditingPhone] = useState(false)
   const [phoneDraft, setPhoneDraft] = useState("")
   const [omniLink, setOmniLink] = useState<string>("")
+
+  // Carga autor real (auth + profile). Importante: NO usar lead.agent para autoría.
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    ;(async () => {
+      const { data, error } = await supabase.auth.getUser()
+      if (!alive) return
+      if (error) {
+        console.warn("[LeadDetail] auth.getUser error", error)
+        return
+      }
+      const uid = data?.user?.id ?? null
+      setCurrentUserId(uid)
+      if (!uid) return
+
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", uid)
+        .maybeSingle()
+
+      if (!alive) return
+      if (profErr) {
+        console.warn("[LeadDetail] profiles lookup error", profErr)
+        return
+      }
+
+      setCurrentUserName(prof?.full_name || "")
+      setCurrentUserAvatar(prof?.avatar_url || "")
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   useEffect(() => {
     if (lead && open) {
@@ -116,13 +157,19 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const { data } = await supabase.from("audit_logs").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false })
     if (data) {
         setAuditLogs(data)
-        const uniqueUsers = Array.from(new Set(data.map((l: any) => l.user_name))).filter(Boolean)
-        if (uniqueUsers.length > 0) {
-            const { data: profiles } = await supabase.from('profiles').select('full_name, avatar_url').in('full_name', uniqueUsers)
-            const avatarMap: Record<string, string> = {}
-            profiles?.forEach((p: any) => { if (p.full_name && p.avatar_url) avatarMap[p.full_name] = p.avatar_url })
-            setLogAvatars(avatarMap)
+        // ✅ Avatar por actor_user_id (estable). Fallback a actor_name si no hay user_id.
+        const uniqueActorIds = Array.from(new Set(data.map((l: any) => l.actor_user_id))).filter(Boolean)
+        const avatarMap: Record<string, string> = {}
+        if (uniqueActorIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, avatar_url")
+            .in("id", uniqueActorIds)
+          profiles?.forEach((p: any) => {
+            if (p.id && p.avatar_url) avatarMap[p.id] = p.avatar_url
+          })
         }
+        setLogAvatars(avatarMap)
     }
   }
 
@@ -167,7 +214,13 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     if (!lead || !scheduledFor) return
     const isoDate = new Date(scheduledFor).toISOString()
     await supabase.from("leads").update({ scheduled_for: isoDate, last_update: new Date().toISOString() }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Agenda actualizada", details: `Nueva cita: ${fmtDateTime24(new Date(scheduledFor))}` })
+    await supabase.from("audit_logs").insert({
+      lead_id: lead.id,
+      actor_user_id: currentUserId,
+      actor_name: currentUserName || "Sistema",
+      action: "Agenda actualizada",
+      details: `Nueva cita: ${fmtDateTime24(new Date(scheduledFor))}`,
+    })
     lead.scheduled_for = isoDate
     fetchAuditLogs()
   }
@@ -175,10 +228,17 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const saveNote = async () => {
     if (!lead || !obs.trim()) return
     const timestamp = fmtDateTime24(new Date())
-    const newNoteLine = `SEP_NOTE|${timestamp}|${lead.agent}|${obs.trim()}`
+    const author = currentUserName || "Sistema"
+    const newNoteLine = `SEP_NOTE|${timestamp}|${author}|${obs.trim()}`
     const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + newNoteLine
     await supabase.from("leads").update({ notes: updatedNotes, last_update: new Date().toISOString() }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Nota agregada", details: obs.trim() })
+    await supabase.from("audit_logs").insert({
+      lead_id: lead.id,
+      actor_user_id: currentUserId,
+      actor_name: author,
+      action: "Nota agregada",
+      details: obs.trim(),
+    })
     lead.notes = updatedNotes
     setObs("")
     fetchAuditLogs()
@@ -187,10 +247,19 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const handleAddQuote = async () => {
     if (!lead || !newQuotePrepaga || !newQuotePlan || !newQuotePrice) return
     const isMain = quotes.length === 0
-    const price = parseFloat(newQuotePrice)
+    // ✅ Soporta 136.900 / 136,900 / 136900
+    const cleaned = newQuotePrice.replace(/\s/g, "").replace(/\./g, "").replace(/,/g, ".")
+    const price = Number(cleaned)
+    if (!Number.isFinite(price)) return
     const { data: inserted, error } = await supabase.from("quotes").insert({ lead_id: lead.id, prepaga: newQuotePrepaga, plan: newQuotePlan, price, is_main: isMain }).select().single()
     if (error) return
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Cotización creada", details: `${newQuotePrepaga} - ${newQuotePlan} ($${newQuotePrice})${isMain ? " [PRINCIPAL]" : ""}` })
+    await supabase.from("audit_logs").insert({
+      lead_id: lead.id,
+      actor_user_id: currentUserId,
+      actor_name: currentUserName || "Sistema",
+      action: "Cotización creada",
+      details: `${newQuotePrepaga} - ${newQuotePlan} ($${newQuotePrice})${isMain ? " [PRINCIPAL]" : ""}`,
+    })
     if (isMain) {
       await supabase.from("leads").update({ quoted_prepaga: newQuotePrepaga, quoted_plan: newQuotePlan, quoted_price: price, last_update: new Date().toISOString() }).eq("id", lead.id)
       lead.quoted_prepaga = newQuotePrepaga as any; lead.quoted_plan = newQuotePlan as any; lead.quoted_price = price as any
@@ -207,13 +276,65 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     await supabase.from("quotes").update({ is_main: true }).eq("id", quoteId)
     await supabase.from("leads").update({ quoted_prepaga: newMain.prepaga, quoted_plan: newMain.plan, quoted_price: newMain.price, last_update: new Date().toISOString() }).eq("id", lead.id)
     lead.quoted_prepaga = newMain.prepaga as any; lead.quoted_plan = newMain.plan as any; lead.quoted_price = newMain.price as any
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Cotización principal cambiada", details: `Anterior: ${currentMain ? `${currentMain.prepaga} - ${currentMain.plan} ($${currentMain.price})` : "(ninguna)"} → Nueva: ${newMain.prepaga} - ${newMain.plan} ($${newMain.price})` })
+    await supabase.from("audit_logs").insert({
+      lead_id: lead.id,
+      actor_user_id: currentUserId,
+      actor_name: currentUserName || "Sistema",
+      action: "Cotización principal cambiada",
+      details: `Anterior: ${currentMain ? `${currentMain.prepaga} - ${currentMain.plan} ($${currentMain.price})` : "(ninguna)"} → Nueva: ${newMain.prepaga} - ${newMain.plan} ($${newMain.price})`,
+    })
     fetchQuotes(); fetchAuditLogs()
+  }
+
+  const deleteQuote = async (quoteId: string) => {
+    if (!lead) return
+    const q = quotes.find((x) => x.id === quoteId)
+    if (!q) return
+
+    const { error } = await supabase.from("quotes").delete().eq("id", quoteId)
+    if (error) return
+
+    await supabase.from("audit_logs").insert({
+      lead_id: lead.id,
+      actor_user_id: currentUserId,
+      actor_name: currentUserName || "Sistema",
+      action: "Cotización eliminada",
+      details: `${q.prepaga} - ${q.plan} ($${q.price})${q.is_main ? " [PRINCIPAL]" : ""}`,
+    })
+
+    // Si borraron la principal, elegimos otra como principal o limpiamos el lead
+    if (q.is_main) {
+      const remaining = quotes.filter((x) => x.id !== quoteId)
+      const next = remaining[0]
+      if (next) {
+        await supabase.from("quotes").update({ is_main: false }).eq("lead_id", lead.id)
+        await supabase.from("quotes").update({ is_main: true }).eq("id", next.id)
+        await supabase
+          .from("leads")
+          .update({ quoted_prepaga: next.prepaga, quoted_plan: next.plan, quoted_price: next.price, last_update: new Date().toISOString() })
+          .eq("id", lead.id)
+        lead.quoted_prepaga = next.prepaga as any
+        lead.quoted_plan = next.plan as any
+        lead.quoted_price = next.price as any
+      } else {
+        await supabase
+          .from("leads")
+          .update({ quoted_prepaga: null, quoted_plan: null, quoted_price: null, last_update: new Date().toISOString() })
+          .eq("id", lead.id)
+        lead.quoted_prepaga = null as any
+        lead.quoted_plan = null as any
+        lead.quoted_price = null as any
+      }
+    }
+
+    fetchQuotes()
+    fetchAuditLogs()
   }
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !lead) return
-    const messageData = { lead_id: lead.id, sender: lead.agent, text: newMessage.trim(), target_role: "supervisión" }
+    const senderName = currentUserName || "Sistema"
+    const messageData = { lead_id: lead.id, sender: senderName, text: newMessage.trim(), target_role: "supervisión" }
     const { data, error } = await supabase.from("lead_messages").insert(messageData).select().single()
     if (!error && data) setNewMessage("")
   }
@@ -224,7 +345,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     const oldPhone = (lead.phone || "").trim()
     if (!newPhone || newPhone === oldPhone) { setIsEditingPhone(false); setPhoneDraft(oldPhone); return }
     await supabase.from("leads").update({ phone: newPhone, last_update: new Date().toISOString() }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Número cambiado", details: `Anterior: ${oldPhone || "(vacío)"} → Nuevo: ${newPhone}` })
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, actor_user_id: currentUserId, actor_name: currentUserName || "Sistema", action: "Número cambiado", details: `Anterior: ${oldPhone || "(vacío)"} → Nuevo: ${newPhone}` })
     lead.phone = newPhone; setIsEditingPhone(false); fetchAuditLogs()
   }
 
@@ -239,7 +360,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     if (isBurned) newStatus = "perdido"
     lead.calls = newCallCount as any; lead.notes = updatedNotes as any; lead.status = newStatus as any
     await supabase.from("leads").update({ calls: newCallCount, notes: updatedNotes, status: newStatus, last_update: new Date().toISOString(), loss_reason: isBurned ? "Dato quemado (7 llamados)" : null }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, user_name: lead.agent, action: "Llamada registrada", details: `Llamada #${newCallCount}${isBurned ? " (Dato quemado)" : ""}` })
+    await supabase.from("audit_logs").insert({ lead_id: lead.id, actor_user_id: currentUserId, actor_name: currentUserName || "Sistema", action: "Llamada registrada", details: `Llamada #${newCallCount}${isBurned ? " (Dato quemado)" : ""}` })
     fetchAuditLogs()
   }
 
@@ -457,7 +578,14 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                 </div>
 
                 <div className="flex gap-2">
-                  <Input type="number" placeholder="Precio Final $" className="bg-white" value={newQuotePrice} onChange={(e) => setNewQuotePrice(e.target.value)} />
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Precio Final $"
+                    className="bg-white"
+                    value={newQuotePrice}
+                    onChange={(e) => setNewQuotePrice(e.target.value)}
+                  />
                   <Button onClick={handleAddQuote} className="bg-slate-900 text-white font-black px-6">AGREGAR</Button>
                 </div>
               </div>
@@ -484,7 +612,20 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                         {q.plan} — <span className="text-slate-900">${q.price.toLocaleString()}</span>
                       </p>
                     </div>
-                    {q.is_main ? <Star className="h-5 w-5 text-yellow-500 fill-yellow-500" /> : <Star className="h-5 w-5 text-slate-200" />}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteQuote(q.id)
+                        }}
+                        className="h-7 w-7 inline-flex items-center justify-center rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700"
+                        title="Borrar cotización"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                      {q.is_main ? <Star className="h-5 w-5 text-yellow-500 fill-yellow-500" /> : <Star className="h-5 w-5 text-slate-200" />}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -503,18 +644,21 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                       <p className="text-[11px] font-black uppercase tracking-[0.2em] text-center">Inicia una conversación<br/>con el supervisor</p>
                     </div>
                   ) : (
-                    messages.map((m, i) => (
-                      <div key={i} className={`flex flex-col ${m.sender === (lead.agent || lead.agent_name) ? "items-end" : "items-start animate-in slide-in-from-left-3 duration-300"}`}>
-                        <span className="text-[9px] text-slate-400 font-black mb-1.5 uppercase px-2 tracking-widest">{m.sender}</span>
-                        <div className={`px-5 py-3 rounded-2xl max-w-[85%] text-[14px] shadow-sm font-semibold leading-relaxed border transition-all ${
-                          m.sender === (lead.agent || lead.agent_name)
-                            ? "bg-blue-600 text-white rounded-tr-none border-blue-500"
-                            : "bg-white border-slate-200 rounded-tl-none text-slate-700"
-                        }`}>
-                          {m.text}
+                    messages.map((m, i) => {
+                      const me = m.sender === (currentUserName || lead.agent || lead.agent_name)
+                      return (
+                        <div key={i} className={`flex flex-col ${me ? "items-end" : "items-start animate-in slide-in-from-left-3 duration-300"}`}>
+                          <span className="text-[9px] text-slate-400 font-black mb-1.5 uppercase px-2 tracking-widest">{m.sender}</span>
+                          <div className={`px-5 py-3 rounded-2xl max-w-[85%] text-[14px] shadow-sm font-semibold leading-relaxed border transition-all ${
+                            me
+                              ? "bg-blue-600 text-white rounded-tr-none border-blue-500"
+                              : "bg-white border-slate-200 rounded-tl-none text-slate-700"
+                          }`}>
+                            {m.text}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      )
+                    })
                   )}
                   <div ref={chatEndRef} />
                 </div>
@@ -546,9 +690,15 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   <div key={i} className="flex gap-4 relative">
                     {i !== auditLogs.length - 1 && <div className="absolute left-4 top-10 bottom-[-32px] w-0.5 bg-slate-100"></div>}
                     <Avatar className="h-10 w-10 border-2 border-white shadow-md z-10 shrink-0 mt-1">
-                      {/* ✅ 4. AVATAR ACTUALIZADO CON FOTO REAL */}
-                      <AvatarImage src={logAvatars[log.user_name] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${log.user_name}`} className="object-cover" />
-                      <AvatarFallback className="bg-blue-600 text-white text-[10px] font-black">{log.user_name?.[0]}</AvatarFallback>
+                      {/* ✅ Avatar por actor_user_id (estable). */}
+                      <AvatarImage
+                        src={
+                          (log.actor_user_id ? logAvatars[log.actor_user_id] : "") ||
+                          (log.actor_name ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(log.actor_name)}` : "")
+                        }
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="bg-blue-600 text-white text-[10px] font-black">{(log.actor_name || "S")[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col flex-1">
                       <div className="flex items-center gap-2 mb-1 justify-between">
@@ -558,7 +708,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                         </span>
                         {/* ✅ 6. NOMBRE GARANTIZADO SIEMPRE VISIBLE */}
                         <Badge variant="outline" className="text-[9px] h-5 border-slate-200 text-slate-400 font-black uppercase italic tracking-tighter bg-slate-50/50">
-                          vía {log.user_name || "Sistema"}
+                          vía {log.actor_name || "Sistema"}
                         </Badge>
                       </div>
                       <span className="text-[14px] font-black text-slate-800 leading-tight">{log.action}</span>

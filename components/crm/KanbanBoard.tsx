@@ -163,9 +163,26 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
     // --- ACK LOCAL DE ALERTA ZOMBIE (para que no vuelva a molestar con el pop-up) ---
     const ZOMBIE_ACK_STORAGE_KEY = `kanban_zombie_ack:${CURRENT_USER}`
+
+    // --- USER ID (para announcement_reads, que usa auth.users) ---
+    useEffect(() => {
+        let alive = true
+        ;(async () => {
+            const { data, error } = await supabase.auth.getUser()
+            if (!alive) return
+            if (error) {
+                console.warn('[KanbanBoard] supabase.auth.getUser error', error)
+                return
+            }
+            setCurrentUserId(data?.user?.id ?? null)
+        })()
+        return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     useEffect(() => {
         if (typeof window === 'undefined') return
@@ -208,19 +225,56 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     }
 
     const checkUrgentMessage = async () => {
-        const { data } = await supabase.from('announcements').select('*').eq('is_blocking', true).order('created_at', { ascending: false }).limit(1).single()
-        if (data) {
-            const { data: read } = await supabase.from('announcement_reads').select('*').eq('announcement_id', data.id).eq('user_name', CURRENT_USER).single()
-            if (!read) {
-                setUrgentMessage(data.message)
-                setAnnouncementId(data.id)
-            }
+        // 1) Traer el ultimo comunicado bloqueante
+        const { data: ann, error: annErr } = await supabase
+            .from('announcements')
+            .select('*')
+            .eq('is_blocking', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+        if (annErr) {
+            console.warn('[KanbanBoard] checkUrgentMessage announcements error', annErr)
+            return
+        }
+        if (!ann) return
+
+        // 2) Ver si ya fue leido por este usuario (announcement_reads usa user_id)
+        const uid = currentUserId
+        if (!uid) return
+
+        const { data: read, error: readErr } = await supabase
+            .from('announcement_reads')
+            .select('id')
+            .eq('announcement_id', ann.id)
+            .eq('user_id', uid)
+            .limit(1)
+            .maybeSingle()
+
+        if (readErr) {
+            console.warn('[KanbanBoard] checkUrgentMessage reads error', readErr)
+            return
+        }
+
+        if (!read) {
+            setUrgentMessage(ann.message)
+            setAnnouncementId(ann.id)
         }
     }
 
     const dismissUrgentMessage = async () => {
         if (announcementId) {
-            await supabase.from('announcement_reads').insert({ announcement_id: announcementId, user_name: CURRENT_USER, read_at: new Date().toISOString() })
+            const uid = currentUserId
+            if (uid) {
+                const { error } = await supabase
+                    .from('announcement_reads')
+                    .upsert(
+                        { announcement_id: announcementId, user_id: uid, read_at: new Date().toISOString() },
+                        { onConflict: 'announcement_id,user_id' }
+                    )
+                if (error) console.warn('[KanbanBoard] dismissUrgentMessage upsert error', error)
+            }
         }
         setUrgentMessage(null)
         setAnnouncementId(null)
@@ -248,7 +302,6 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     useEffect(() => {
         requestNotificationPermission();
         fetchLeads()
-        checkUrgentMessage()
 
         // --- 1. CANAL DE LEADS (Solo mis datos) ---
         const leadsChannel = supabase.channel('kanban_leads_vfinal')
@@ -387,6 +440,12 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             stopAudio();
         }
     }, [CURRENT_USER])
+
+    // Chequeo de comunicado bloqueante cuando ya tenemos el user_id
+    useEffect(() => {
+        if (!currentUserId) return
+        checkUrgentMessage()
+    }, [currentUserId, CURRENT_USER])
 
     // MONITOR AGENDA
     useEffect(() => {

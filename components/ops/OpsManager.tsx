@@ -180,21 +180,46 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }
 
     // --- 💾 HELPER DE NOTIFICACIONES (BACKEND) ---
-    // Esta función GUARDA en DB. Al guardar, el listener lo detecta y llama a notifyOPS.
-    // ¡Ciclo cerrado!
-    const dispatchNotification = async (title: string, body: string, target: string = 'OPS', type: 'info'|'success'|'warning' = 'info', leadId?: string) => {
-        await supabase.from('notifications').insert({
-            user_name: target,
-            title,
-            body,
-            type,
-            read: false,
-            lead_id: leadId,
-            created_at: new Date().toISOString()
-        })
-    }
+// Esta función GUARDA en DB. Al guardar, el listener lo detecta y llama a notifyOPS.
+// ¡Ciclo cerrado!
+// Nota: en DB usamos:
+// - type = nivel visual (info/success/warning)
+// - event_type = tipo funcional (venta_ingresada / archivo_subido / chat_venta / cambio_estado / opschat)
+const inferEventType = (title: string, body: string) => {
+    const t = (title || "").toLowerCase()
+    const b = (body || "").toLowerCase()
 
-    const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'success') => { 
+    if (t.includes("venta nueva") || t.includes("venta registrada") || t.includes("nueva venta")) return "venta_ingresada"
+    if (t.includes("movimiento de estado") || t.includes("cambio de estado") || t.includes("stage") || t.includes("estado")) return "cambio_estado"
+    if (t.includes("archivo") || b.includes("archivo") || b.includes("subió un archivo") || b.includes("subio un archivo")) return "archivo_subido"
+    if (t.includes("opschat") || b.includes("opschat")) return "opschat"
+    if (t.includes("nuevo mensaje") || t.includes("nueva nota") || b.includes("escrib")) return "chat_venta"
+
+    return "generic"
+}
+
+const dispatchNotification = async (
+    title: string,
+    body: string,
+    target: string,
+    level: 'info' | 'success' | 'warning' = 'info',
+    leadId?: string
+) => {
+    const event_type = inferEventType(title, body)
+
+    await supabase.from('notifications').insert({
+        user_name: target,
+        title,
+        body,
+        type: level,
+        event_type,
+        read: false,
+        lead_id: leadId,
+        created_at: new Date().toISOString()
+    })
+}
+
+const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'success') => { 
         setToast({ msg, type }); 
         setTimeout(() => setToast(null), 5000) 
     }
@@ -233,15 +258,18 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- NOTIFICACIONES ---
     const fetchNotifications = async () => {
-        // Escuchar notificaciones MÍAS, de "OPS" o de "Administración"
-        const { data } = await supabase
-            .from('notifications')
-            .select('*')
-            .or(`user_name.eq.${userName},user_name.eq.OPS,user_name.eq.Administración`) 
-            .eq('read', false)
-            .order('created_at', { ascending: false })
-            .limit(20)
-        
+        // Campanita: en OPS mostramos solo eventos funcionales (persistentes) que necesita el equipo.
+        const allowedOpsEvents = ['venta_ingresada', 'archivo_subido', 'chat_venta', 'cambio_estado', 'opschat']
+
+        const base = supabase.from('notifications').select('*').eq('read', false).order('created_at', { ascending: false }).limit(20)
+
+        // Escuchar notificaciones MÍAS, de "OPS" o de "Administración" (admin)
+        // En OPS filtramos además por event_type para evitar ruido de Seller.
+        const q = (role === 'ops' || role === 'ops_manager')
+            ? base.or(`user_name.eq.${userName},user_name.eq.OPS`).in('event_type', allowedOpsEvents)
+            : base.or(`user_name.eq.${userName},user_name.eq.OPS,user_name.eq.Administración`)
+
+        const { data } = await q
         if (data) setNotifications(data)
     }
 

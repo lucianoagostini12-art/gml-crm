@@ -265,7 +265,9 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
 
         // Escuchar notificaciones MÍAS, de "OPS" o de "Administración" (admin)
         // En OPS filtramos además por event_type para evitar ruido de Seller.
-        const q = (role === 'ops' || role === 'ops_manager')
+        const roleStr = String(role || '')
+
+        const q = (roleStr === 'ops' || roleStr === 'ops_manager')
             ? base.or(`user_name.eq.${userName},user_name.eq.OPS`).in('event_type', allowedOpsEvents)
             : base.or(`user_name.eq.${userName},user_name.eq.OPS,user_name.eq.Administración`)
 

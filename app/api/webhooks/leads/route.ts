@@ -363,8 +363,18 @@ export async function POST(request: Request) {
       }
 
       if (!existingLead.prepaga && detectedPrepaga) updates.prepaga = detectedPrepaga
-      if ((!existingLead.source || existingLead.source === "WATI / Bot") && detectedSource !== "WATI / Bot") {
-        updates.source = detectedSource
+
+      // ✅ PREMIUM: si Matcheó una regla, "subimos" el source aunque venga como Meta Ads (ID)
+      // y si el source actual es genérico (vacío / WATI / Meta Ads (123...)) también lo actualizamos.
+      const metaIdRe = /^Meta Ads \(\d+\)$/
+      const hasMatchedRule = !!matchedRule
+      const existingIsGeneric =
+        !existingLead.source || existingLead.source === "WATI / Bot" || metaIdRe.test(existingLead.source)
+
+      if (detectedSource && detectedSource !== "WATI / Bot") {
+        if (hasMatchedRule || existingIsGeneric) {
+          updates.source = detectedSource
+        }
       }
 
       const { error: updErr } = await supabase.from("leads").update(updates).eq("id", existingLead.id)

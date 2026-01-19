@@ -505,9 +505,23 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
             })
             // Escuchar tabla notifications para alertas directas
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
-                // Filtro: Si es para MÍ, o para OPS, o para ADMIN (si soy admin)
+                // Filtro robusto: respeta rol + event_type (evita que a OPS le suenen cosas de otros módulos)
                 const target = payload.new.user_name;
-                if (target === userName || target === 'OPS' || (role.includes('admin') && target === 'Administración')) {
+                const eventType = (payload.new.event_type || 'generic') as string;
+
+                // ✅ Lista blanca de eventos que corresponden a OPS (debe matchear fetchNotifications)
+                const allowedOpsEvents = ['venta_ingresada', 'archivo_subido', 'chat_venta', 'cambio_estado', 'opschat'];
+
+                // 1) Notificación personal: siempre entra
+                const isPersonal = target === userName;
+
+                // 2) Broadcast OPS: solo entra si es un evento permitido de OPS
+                const isOpsBroadcast = target === 'OPS' && allowedOpsEvents.includes(eventType);
+
+                // 3) Canal Administración: solo si soy admin
+                const isAdminBroadcast = role.includes('admin') && target === 'Administración';
+
+                if (isPersonal || isOpsBroadcast || isAdminBroadcast) {
                     setNotifications(prev => [payload.new, ...prev])
                     // ✅ AQUÍ ES DONDE SUENA Y SE MUESTRA EL TOAST
                     notifyOPS(payload.new.title, payload.new.body, payload.new.type || 'info');

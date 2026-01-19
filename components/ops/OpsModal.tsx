@@ -852,51 +852,106 @@ export function OpsModal({
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-5">
                                         <div className="flex flex-col gap-1 w-full">
                                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">Condición</span>
-                                            <Select value={localOp.condicion_laboral} onValueChange={(v) => updateField('condicion_laboral', v)}>
-                                                <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="Obligatorio">Obligatorio</SelectItem>
-                                                    <SelectItem value="Voluntario">Voluntario</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                                            <div className="flex items-center gap-2">
+                                                <Select value={localOp.condicion_laboral || ""} onValueChange={(v) => updateField('condicion_laboral', v)}>
+                                                    <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0 flex-1"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="Obligatorio">Obligatorio</SelectItem>
+                                                        <SelectItem value="Voluntario">Voluntario</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                {!!localOp.condicion_laboral && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50"
+                                                        title="Limpiar"
+                                                        onClick={async () => {
+                                                            // Limpieza premium: vuelve a vacío y limpia dependencias
+                                                            await updateField('condicion_laboral', "")
+                                                            await updateField('cuit_empleador', "")
+                                                            await updateField('clave_fiscal', "")
+                                                        }}
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </div>
 
                                         {/* ✅ NUEVO: Condición Laboral (Empleado / Monotributo) */}
                                         <div className="flex flex-col gap-1 w-full">
                                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">Situación</span>
-                                            <Select value={localOp.labor_condition || ""} onValueChange={(v) => updateField('labor_condition', v)}>
-                                                <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="empleado">Empleado</SelectItem>
-                                                    <SelectItem value="monotributo">Monotributista</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                                            <div className="flex items-center gap-2">
+                                                <Select value={localOp.labor_condition || ""} onValueChange={async (v) => {
+                                                    await updateField('labor_condition', v)
+                                                    // Si cambia a algo que no sea monotributo, limpiamos categoría para evitar basura oculta
+                                                    if (v !== 'monotributo') {
+                                                        await updateField('monotributo_category', "")
+                                                    }
+                                                }}>
+                                                    <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0 flex-1"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="empleado">Empleado</SelectItem>
+                                                        <SelectItem value="monotributo">Monotributista</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                {!!localOp.labor_condition && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50"
+                                                        title="Limpiar"
+                                                        onClick={async () => {
+                                                            await updateField('labor_condition', "")
+                                                            await updateField('monotributo_category', "")
+                                                        }}
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </div>
 
                                         {/* ✅ NUEVO: Categoría Monotributo (solo si corresponde) */}
                                         {localOp.labor_condition === 'monotributo' && (
                                             <div className="flex flex-col gap-1 w-full">
                                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">Categoría Monotributo</span>
-                                                <Select value={localOp.monotributo_category || ""} onValueChange={(v) => updateField('monotributo_category', v)}>
-                                                    <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="A">A</SelectItem>
-                                                        <SelectItem value="B">B</SelectItem>
-                                                        <SelectItem value="C">C</SelectItem>
-                                                        <SelectItem value="D">D</SelectItem>
-                                                        <SelectItem value="E">E</SelectItem>
-                                                        <SelectItem value="F">F</SelectItem>
-                                                        <SelectItem value="G">G</SelectItem>
-                                                        <SelectItem value="H">H</SelectItem>
-                                                        <SelectItem value="I">I</SelectItem>
-                                                        <SelectItem value="J">J</SelectItem>
-                                                        <SelectItem value="K">K</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <div className="flex items-center gap-2">
+                                                    <Select value={localOp.monotributo_category || ""} onValueChange={(v) => updateField('monotributo_category', v)}>
+                                                        <SelectTrigger className="h-7 text-sm font-medium border-0 border-b rounded-none px-0 flex-1"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="A">A</SelectItem>
+                                                            <SelectItem value="B">B</SelectItem>
+                                                            <SelectItem value="C">C</SelectItem>
+                                                            <SelectItem value="D">D</SelectItem>
+                                                            <SelectItem value="E">E</SelectItem>
+                                                            <SelectItem value="F">F</SelectItem>
+                                                            <SelectItem value="G">G</SelectItem>
+                                                            <SelectItem value="H">H</SelectItem>
+                                                            <SelectItem value="I">I</SelectItem>
+                                                            <SelectItem value="J">J</SelectItem>
+                                                            <SelectItem value="K">K</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    {!!localOp.monotributo_category && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50"
+                                                            title="Limpiar"
+                                                            onClick={async () => {
+                                                                await updateField('monotributo_category', "")
+                                                            }}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </Button>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
 
-                                        {localOp.condicion_laboral !== 'Voluntario' && (
+                                        {!!localOp.condicion_laboral && localOp.condicion_laboral !== 'Voluntario' && (
                                             <>
                                                 <EditableField label="CUIT Empleador" value={localOp.cuit_empleador} onBlur={(v: string) => updateField('cuit_empleador', v)} />
                                                 {/* ✅ Clave Fiscal */}
@@ -908,13 +963,35 @@ export function OpsModal({
                                             {/* ✅ Selector de Método de Pago SIN EFECTIVO */}
                                             <div className="flex flex-col gap-1 w-full">
                                                 <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">Método de Pago</span>
-                                                <Select value={localOp.metodo_pago} onValueChange={(v) => updateField('metodo_pago', v)}>
-                                                    <SelectTrigger className="h-7 text-sm font-bold text-emerald-800 border-0 border-b rounded-none px-0 bg-transparent"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="CBU">CBU (Débito)</SelectItem>
-                                                        <SelectItem value="Tarjeta">Tarjeta Crédito</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <div className="flex items-center gap-2">
+                                                    <Select value={localOp.metodo_pago || ""} onValueChange={async (v) => {
+                                                        await updateField('metodo_pago', v)
+                                                        // Si el método queda vacío, limpiamos el número para evitar datos colgados
+                                                        if (!v) {
+                                                            await updateField('cbu_tarjeta', "")
+                                                        }
+                                                    }}>
+                                                        <SelectTrigger className="h-7 text-sm font-bold text-emerald-800 border-0 border-b rounded-none px-0 bg-transparent flex-1"><SelectValue placeholder="Seleccionar..."/></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="CBU">CBU (Débito)</SelectItem>
+                                                            <SelectItem value="Tarjeta">Tarjeta Crédito</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    {!!localOp.metodo_pago && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-7 w-7 text-emerald-300 hover:text-red-600 hover:bg-red-50"
+                                                            title="Limpiar"
+                                                            onClick={async () => {
+                                                                await updateField('metodo_pago', "")
+                                                                await updateField('cbu_tarjeta', "")
+                                                            }}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </Button>
+                                                    )}
+                                                </div>
                                             </div>
                                             
                                             <EditableField label="N° CBU / Tarjeta" value={localOp.cbu_tarjeta} onBlur={(v: string) => updateField('cbu_tarjeta', v)} />

@@ -20,6 +20,8 @@ import {
   CheckCircle2,
 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // --- TIPOS Y UTILIDADES ---
 type PerformanceMetrics = {
@@ -220,6 +222,22 @@ export function AdminPerformance() {
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().getMonth().toString())
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString())
 
+  // Drilldown Matriz Semanal
+  const [drillOpen, setDrillOpen] = useState(false)
+  const [drillSellerName, setDrillSellerName] = useState<string>("")
+  const [drillWeekIdx, setDrillWeekIdx] = useState<0 | 1 | 2 | 3 | 4 | 5>(1)
+  const [drillTab, setDrillTab] = useState<'altas' | 'pass'>('altas')
+  const [drillMode, setDrillMode] = useState<'ventas' | 'cumplidas'>('ventas')
+
+  const openDrill = (sellerName: string, weekIdx: 1 | 2 | 3 | 4 | 5, tab: 'altas' | 'pass' = 'altas') => {
+    setDrillSellerName(sellerName)
+    setDrillWeekIdx(weekIdx)
+    setDrillTab(tab)
+    setDrillOpen(true)
+  }
+
+
+
   // Mes seleccionado (selectedMonth es 0-based en este componente)
   const getPeriodRange = () => {
     const y = parseInt(selectedYear, 10)
@@ -229,6 +247,73 @@ export function AdminPerformance() {
     const targetPeriod = `${y}-${String(m0 + 1).padStart(2, "0")}`
     return { rangeStart: start, rangeEndExclusive: end, targetPeriod }
   }
+
+  const period = useMemo(() => getPeriodRange(), [selectedMonth, selectedYear])
+  const leadById = useMemo(() => {
+    const m = new Map<string, any>()
+    for (const l of allLeads) m.set(String(l.id), l)
+    return m
+  }, [allLeads])
+
+  const normalizedAllSales = useMemo(() => {
+    return buildNormalizedSales(allLeads, period.rangeStart, period.rangeEndExclusive, ingresadoAtByLeadRef.current)
+  }, [allLeads, period.rangeStart, period.rangeEndExclusive])
+
+  const drillItems = useMemo(() => {
+    if (!drillOpen || !drillSellerName) return []
+
+    if (drillMode === "ventas") {
+      const items = normalizedAllSales
+        .filter((x) => x.agentName === drillSellerName && (drillWeekIdx === 0 || x.weekIdx === drillWeekIdx))
+        .map((x) => ({ ...x, lead: leadById.get(String(x.leadId)) || null }))
+
+      items.sort((a: any, b: any) => {
+        if (a.kind !== b.kind) return a.kind === "ALTA" ? -1 : 1
+        return new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime()
+      })
+
+      return items
+    }
+
+    // Cumplidas oficiales del mes (liquidación): status=cumplidas + billing_approved + billing_period
+    const monthNum = Number(selectedMonth)
+    const pad2 = (n: number) => String(n).padStart(2, "0")
+    const targetPeriod = `${selectedYear}-${pad2(monthNum)}`
+
+    const completed = (allLeads || [])
+      .filter((l: any) => String(l.agent_name || "") === drillSellerName)
+      .filter(
+        (l: any) =>
+          norm(l.status) === "cumplidas" &&
+          l.billing_approved === true &&
+          String(l.billing_period || "") === targetPeriod
+      )
+      .map((l: any) => {
+        const kind: SaleKind = isPass(l) ? "PASS" : "ALTA"
+        const saleDate = safeDate(l.sold_at) || safeDate(l.last_update) || safeDate(l.created_at) || new Date()
+        return {
+          leadId: String(l.id),
+          agentName: drillSellerName,
+          source: String(l.source || "Desconocido"),
+          saleDate,
+          weekIdx: 1,
+          kind,
+          altasPoints: kind === "PASS" ? 0 : altasPointsOfLead(l),
+          passCount: kind === "PASS" ? 1 : 0,
+          lead: l,
+        }
+      })
+
+    completed.sort((a: any, b: any) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime())
+    return completed
+  }, [drillOpen, drillSellerName, drillWeekIdx, drillMode, normalizedAllSales, leadById, allLeads, selectedMonth, selectedYear])
+
+  const drillAltas = useMemo(() => drillItems.filter((x: any) => x.kind === "ALTA"), [drillItems])
+  const drillPass = useMemo(() => drillItems.filter((x: any) => x.kind === "PASS"), [drillItems])
+  const sumCapitas = (arr: any[]) => arr.reduce((acc, it) => acc + (Number(it?.lead?.capitas) || 1), 0)
+  const drillAltasCapitas = useMemo(() => sumCapitas(drillAltas as any), [drillAltas])
+  const drillPassCapitas = useMemo(() => sumCapitas(drillPass as any), [drillPass])
+
 
   // Espejo OpsBilling (NETO): billing_price_override manda; si no, calcula con reglas
   const calculateBillingNeto = (op: any) => {
@@ -289,9 +374,9 @@ export function AdminPerformance() {
       // 2) Leads
       const { data: leads } = await supabase
         .from("leads")
-        .select(
-          "id, agent_name, status, source, created_at, last_update, quoted_price, fecha_ingreso, capitas, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, type, sub_state, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento"
-        )
+        .select((
+          "id, agent_name, seller_name, status, sub_state, type, source, created_at, last_update, sold_at, fecha_ingreso, capitas, cuit, dni, name, prepaga, plan, quoted_prepaga, quoted_plan, quoted_price, billing_approved, billing_period, billing_price_override"
+        ))
       if (leads) setAllLeads(leads)
 
       // 3) Historial: primer ingresado (buffer por weekend->lunes)
@@ -523,7 +608,7 @@ export function AdminPerformance() {
     currentStats.totalLeads > 0 ? Math.round((currentStats.totalSales / currentStats.totalLeads) * 100) : 0
 
   return (
-    <div className="p-6 h-full overflow-y-auto max-w-7xl mx-auto space-y-8 bg-slate-50/50 min-h-screen">
+    <div className="p-6 h-full overflow-y-auto max-w-none w-full space-y-8 bg-slate-50/50 min-h-screen">
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div>
@@ -832,7 +917,8 @@ export function AdminPerformance() {
         </CardHeader>
 
         <CardContent className="p-0">
-          <Table>
+          <div className="w-full overflow-x-auto">
+                          <Table className="min-w-[980px] w-full">
             <TableHeader>
               <TableRow className="bg-slate-50 hover:bg-slate-50">
                 <TableHead className="w-[50px] text-center">#</TableHead>
@@ -869,7 +955,9 @@ export function AdminPerformance() {
                   {(["w1", "w2", "w3", "w4", "w5"] as const).map((wk) => (
                     <TableCell key={wk} className="text-center text-slate-500">
                       <div className="flex flex-col items-center">
-                        <span className="font-black text-slate-700">{seller.weekly[wk] || "-"}</span>
+                        <button type="button" className="font-black text-slate-700 hover:underline" onClick={() => { setDrillSellerName(seller.full_name); setDrillWeekIdx((wk === "w1" ? 1 : wk === "w2" ? 2 : wk === "w3" ? 3 : wk === "w4" ? 4 : 5) as any); setDrillOpen(true); }}>
+                          {seller.weekly[wk] || "-"}
+                        </button>
                         {(seller.weeklyPass?.[wk] || 0) > 0 && (
                           <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
                             +{seller.weeklyPass[wk]} pass
@@ -881,22 +969,18 @@ export function AdminPerformance() {
 
                   <TableCell className="text-right font-black text-base">
                     <div className="flex flex-col items-end">
-                      <span>{seller.stats.totalSales}</span>
+                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'ventas')} title="Ver detalle de ventas del mes">{seller.stats.totalSales}</button>
                       {(seller.stats.salesPass || 0) > 0 && (
-                        <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                          +{seller.stats.salesPass} pass
-                        </span>
+                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'ventas')} title="Ver detalle de PASS del mes">+{seller.stats.salesPass} pass</button>
                       )}
                     </div>
                   </TableCell>
 
                   <TableCell className="text-right font-black text-green-600 text-base">
                     <div className="flex flex-col items-end">
-                      <span>{seller.stats.totalCompleted}</span>
+                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'cumplidas')} title="Ver detalle de cumplidas del mes">{seller.stats.totalCompleted}</button>
                       {(seller.stats.completedPass || 0) > 0 && (
-                        <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                          +{seller.stats.completedPass} pass
-                        </span>
+                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'cumplidas')} title="Ver detalle de PASS cumplidas del mes">+{seller.stats.completedPass} pass</button>
                       )}
                     </div>
                   </TableCell>
@@ -955,8 +1039,139 @@ export function AdminPerformance() {
               </TableRow>
             </TableBody>
           </Table>
+                        </div>
         </CardContent>
       </Card>
+
+      {/* 🧾 Drilldown Matriz Semanal */}
+      <Dialog open={drillOpen} onOpenChange={setDrillOpen}>
+        <DialogContent className="max-w-[1100px] w-[92vw] max-h-[85vh] overflow-visible p-0 rounded-2xl shadow-2xl border">
+          <DialogHeader className="sticky top-0 z-10 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 px-6 pt-5 pb-4">
+            <DialogTitle className="flex flex-col gap-1">
+              <span>{drillSellerName} — Semana {drillWeekIdx}</span>
+              <span className="text-xs text-slate-500 font-normal">
+                Detalle por fecha_ingreso (verificación de semana)
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="px-6 pb-6 overflow-y-auto max-h-[68vh]">
+
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700">
+              Registros: <b>{drillItems.length}</b>
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700">
+              Altas: <b>{drillAltas.length}</b> · Capitas: <b>{drillAltasCapitas}</b>
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700">
+              Pass: <b>{drillPass.length}</b> · Capitas: <b>{drillPassCapitas}</b>
+            </span>
+          </div>
+
+          <Tabs value={drillTab} onValueChange={(v) => setDrillTab(v as any)} className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="altas">Altas</TabsTrigger>
+              <TabsTrigger value="pass">Pass</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="altas" className="mt-4">
+              <div className="rounded-xl border overflow-hidden">
+                <Table className="min-w-[980px] w-full">
+                  <TableHeader>
+                    <TableRow className="bg-slate-50 hover:bg-slate-50">
+                      <TableHead className="w-[80px]">Capitas</TableHead>
+                      <TableHead className="w-[120px]">Fecha ingreso</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead className="w-[140px]">CUIT</TableHead>
+                      <TableHead className="w-[160px]">Prepaga</TableHead>
+                      <TableHead className="w-[180px]">Plan</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {drillAltas.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                          No hay ALTAS para esa semana.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      drillAltas.map((it: any) => {
+                        const l = it.lead
+                        const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
+                        const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
+                        const cliente = l?.name || "-"
+                        const cuit = l?.cuit || l?.dni || "-"
+                        const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
+                        const plan = l?.quoted_plan || l?.plan || "-"
+                        return (
+                          <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
+                            <TableCell className="text-center">{Number(l?.capitas) || 1}</TableCell>
+                            <TableCell className="font-medium">{fechaTxt}</TableCell>
+                            <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
+                            <TableCell className="font-mono text-xs">{cuit}</TableCell>
+                            <TableCell>{prepaga}</TableCell>
+                            <TableCell>{plan}</TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="pass" className="mt-4">
+              <div className="rounded-xl border overflow-hidden">
+                <Table className="min-w-[980px] w-full">
+                  <TableHeader>
+                    <TableRow className="bg-slate-50 hover:bg-slate-50">
+                      <TableHead className="w-[80px]">Capitas</TableHead>
+                      <TableHead className="w-[120px]">Fecha ingreso</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead className="w-[140px]">CUIT</TableHead>
+                      <TableHead className="w-[160px]">Prepaga</TableHead>
+                      <TableHead className="w-[180px]">Plan</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {drillPass.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                          No hay PASS para esa semana.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      drillPass.map((it: any) => {
+                        const l = it.lead
+                        const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
+                        const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
+                        const cliente = l?.name || "-"
+                        const cuit = l?.cuit || l?.dni || "-"
+                        const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
+                        const plan = l?.quoted_plan || l?.plan || "-"
+                        return (
+                          <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
+                            <TableCell className="text-center">{Number(l?.capitas) || 1}</TableCell>
+                            <TableCell className="font-medium">{fechaTxt}</TableCell>
+                            <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
+                            <TableCell className="font-mono text-xs">{cuit}</TableCell>
+                            <TableCell>{prepaga}</TableCell>
+                            <TableCell>{plan}</TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </TabsContent>
+          </Tabs>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }

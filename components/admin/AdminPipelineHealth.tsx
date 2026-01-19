@@ -18,6 +18,10 @@ const supabase = createClient(
 
 export function AdminPipelineHealth() {
     const [loading, setLoading] = useState(true)
+
+    // IDs calculados (para que AVISAR/CEMENTERIO impacten SOLO el universo Seller)
+    const [freshZombieIds, setFreshZombieIds] = useState<string[]>([])
+    const [killableZombieIds, setKillableZombieIds] = useState<string[]>([])
     
     // Filtros
     const currentYear = new Date().getFullYear()
@@ -37,15 +41,45 @@ export function AdminPipelineHealth() {
 
     const fetchData = async () => {
         setLoading(true)
+        // Reset de IDs para evitar acciones sobre resultados viejos si falla un fetch
+        setFreshZombieIds([])
+        setKillableZombieIds([])
+
+        // --- UNIVERSOS ---
+        // Seller (Kanban) vs OPS (intocable).
+        // Nota: 'documentacion' existe en ambos mundos, por eso hay que desambiguar con lead_status_history.
+        const SELLER_STATUSES = ['nuevo', 'contactado', 'cotizacion', 'documentacion']
+        const OPS_STATUSES = ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'postventa', 'liquidacion final']
         
-        // 1. CARTERA ACTIVA 
-        // Lógica ajustada: 'rechazado' AHORA se considera activo (porque el vendedor debe corregirlo),
-        // por eso lo quitamos de la lista de exclusión.
-        const { data: activeLeads } = await supabase
+        // 1) CARTERA SELLER (solo kanban seller)
+        // Importante: acá NO se deben traer estados OPS.
+        const { data: rawSellerLeads } = await supabase
             .from('leads')
             .select('*')
-            .not('status', 'in', '("perdido","baja","vendido","cumplidas","finalizada")') 
+            .in('status', SELLER_STATUSES)
             .neq('agent_name', 'Zombie 🧟')
+
+        // 1.1) Desambiguación de DOCUMENTACION (si ya tocó OPS, NO aparece en Salud del Tubo)
+        let activeLeads = rawSellerLeads ?? []
+        try {
+            const docIds = activeLeads
+                .filter((l: any) => l?.status === 'documentacion' && l?.id)
+                .map((l: any) => l.id as string)
+
+            if (docIds.length > 0) {
+                const { data: docOpsRows } = await supabase
+                    .from('lead_status_history')
+                    .select('lead_id')
+                    .in('lead_id', docIds)
+                    .in('to_status', OPS_STATUSES)
+
+                const docOpsSet = new Set((docOpsRows ?? []).map((r: any) => r.lead_id))
+                activeLeads = activeLeads.filter((l: any) => !(l?.status === 'documentacion' && docOpsSet.has(l.id)))
+            }
+        } catch {
+            // Si algo falla acá, preferimos NO romper el panel.
+            // (Quedará como estaba, pero sin afectar OPS porque AVISAR/CEMENTERIO se hará por IDs calculados.)
+        }
 
         // 2. VENTAS DEL MES
         const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
@@ -70,7 +104,8 @@ export function AdminPipelineHealth() {
             })
 
             // 1. Frescos: No tienen aviso
-            const fresh = allZombies.filter(z => !z.warning_sent).length
+            const freshList = allZombies.filter(z => !z.warning_sent)
+            const fresh = freshList.length
 
             // 2. Avisados: Tienen aviso
             const warned = allZombies.filter(z => z.warning_sent)
@@ -79,6 +114,7 @@ export function AdminPipelineHealth() {
             let pending = 0
             let killable = 0
 
+            const killableIds: string[] = []
             warned.forEach(z => {
                 if (z.warning_date) {
                     const warnDate = new Date(z.warning_date)
@@ -88,11 +124,17 @@ export function AdminPipelineHealth() {
                         pending++ // En periodo de gracia
                     } else {
                         killable++ // Pasaron 24hs, listos para cementerio
+                        if (z.id) killableIds.push(z.id)
                     }
                 } else {
                     killable++
+                    if (z.id) killableIds.push(z.id)
                 }
             })
+
+            // Guardamos IDs para acciones seguras (solo Seller)
+            setFreshZombieIds(freshList.map((z: any) => z.id).filter(Boolean))
+            setKillableZombieIds(killableIds)
 
             // --- RATIOS Y COBERTURA ---
             const agentsWithStock = activeLeads.map(l => l.agent_name).filter(Boolean)
@@ -140,21 +182,24 @@ export function AdminPipelineHealth() {
 
     // --- ACCIÓN 1: AVISAR ---
     const handleSendWarning = async () => {
-        if (!confirm(`¿Enviar alerta a los dueños de ${stats.freshZombies} leads estancados?`)) return
-        
-        const limitDate = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
+        if (freshZombieIds.length === 0) {
+            alert("No hay leads para avisar.")
+            return
+        }
+        if (!confirm(`¿Enviar alerta a los dueños de ${freshZombieIds.length} leads estancados?`)) return
+
         const nowIso = new Date().toISOString()
 
-        const { error } = await supabase.from('leads')
-            .update({ 
-                warning_sent: true, 
-                warning_date: nowIso, 
-                last_update: nowIso   
+        // IMPORTANTE: update SOLO por IDs calculados en fetchData (universo Seller)
+        const { error } = await supabase
+            .from('leads')
+            .update({
+                warning_sent: true,
+                warning_date: nowIso,
+                last_update: nowIso,
             })
-            .lt('last_update', limitDate)
-            .not('status', 'in', '("cumplidas","vendido","perdido","baja","finalizada")') // "rechazado" entra aquí para recibir aviso si se duerme
-            .neq('agent_name', 'Zombie 🧟')
-            .is('warning_sent', false) 
+            .in('id', freshZombieIds)
+            .is('warning_sent', false)
         
         if (error) alert("Error al enviar avisos: " + error.message)
         else fetchData()
@@ -162,21 +207,25 @@ export function AdminPipelineHealth() {
 
     // --- ACCIÓN 2: MOVER A CEMENTERIO ---
     const handleExecuteKill = async () => {
-        if (!confirm(`¿Mover ${stats.killableZombies} leads al Cementerio Zombie 🧟?\nSolo se moverán los que recibieron aviso hace más de 24hs.`)) return
-        
-        const deadline24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        if (killableZombieIds.length === 0) {
+            alert("No hay leads listos para cementerio.")
+            return
+        }
+        if (!confirm(`¿Mover ${killableZombieIds.length} leads al Cementerio Zombie 🧟?\nSolo se moverán los que recibieron aviso hace más de 24hs.`)) return
 
-        const { error } = await supabase.from('leads')
-            .update({ 
+        // IMPORTANTE: update SOLO por IDs calculados en fetchData (universo Seller)
+        const { error } = await supabase
+            .from('leads')
+            .update({
                 agent_name: 'Zombie 🧟',
                 status: 'nuevo',
                 warning_sent: false,
                 warning_date: null,
                 notes: `[ZOMBIE]: Recuperado por inactividad post-aviso.`,
-                last_update: new Date().toISOString()
+                last_update: new Date().toISOString(),
             })
+            .in('id', killableZombieIds)
             .eq('warning_sent', true)
-            .lt('warning_date', deadline24h) 
         
         if (error) alert("Error al mover al cementerio: " + error.message)
         else fetchData()

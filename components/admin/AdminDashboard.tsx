@@ -7,7 +7,7 @@ import {
   Users,
   Layers,
   BarChart4,
-  BarChart3, // ✅ AGREGADO PARA REPORTES
+  FileBarChart, // ✅ CAMBIADO: Usamos este para "Reportes" (Documento con gráfico)
   LogOut,
   Database,
   Sliders,
@@ -323,8 +323,8 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                         <SidebarBtn active={view === 'ranking'} onClick={() => setView('ranking')} icon={<Trophy size={20} className="text-yellow-500"/>} label="Ranking" />
                         <SidebarBtn active={view === 'commissions'} onClick={() => setView('commissions')} icon={<Banknote size={20} className="text-green-400"/>} label="Liquidación" />
                         
-                        {/* ✅ NUEVO ITEM DE REPORTES */}
-                        <SidebarBtn active={view === 'reports'} onClick={() => setView('reports')} icon={<BarChart3 size={20} className="text-emerald-500"/>} label="Reportes" />
+                        {/* ✅ NUEVO ITEM DE REPORTES (ÍCONO CAMBIADO A FileBarChart) */}
+                        <SidebarBtn active={view === 'reports'} onClick={() => setView('reports')} icon={<FileBarChart size={20} className="text-emerald-500"/>} label="Reportes" />
                     </div>
                 )}
 

@@ -792,7 +792,8 @@ export function OpsModal({
                                         
                                         <div className="col-span-2 pt-1">
                                             <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={10}/> Domicilio</p>
-                                            <div className="grid grid-cols-3 gap-2">
+                                            <div className="grid grid-cols-4 gap-2">
+                                                <Input className="text-xs h-8" placeholder="Provincia" value={localOp.province || ""} onBlur={e => updateField('province', e.target.value)} onChange={e => setLocalOp({...localOp, province: e.target.value})} />
                                                 <Input className="text-xs h-8" placeholder="Calle y Nro" value={localOp.address_street || ""} onBlur={e => updateField('address_street', e.target.value)} onChange={e => setLocalOp({...localOp, address_street: e.target.value})} />
                                                 <Input className="text-xs h-8" placeholder="Localidad" value={localOp.address_city || ""} onBlur={e => updateField('address_city', e.target.value)} onChange={e => setLocalOp({...localOp, address_city: e.target.value})} />
                                                 <Input className="text-xs h-8" placeholder="CP" value={localOp.address_zip || ""} onBlur={e => updateField('address_zip', e.target.value)} onChange={e => setLocalOp({...localOp, address_zip: e.target.value})} />

@@ -13,6 +13,142 @@ import { Button } from "@/components/ui/button"
 // COLORES PARA GRAFICOS
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1']
 
+// --- HELPERS (FECHAS + GEO) ---
+const AR_TZ = "America/Argentina/Buenos_Aires"
+
+const safeString = (v: any) => (v === null || v === undefined ? "" : String(v))
+
+// Normaliza texto (trim, mayúsculas, sin tildes, sin signos raros)
+const normalizeText = (v: any) => {
+    const s = safeString(v)
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    return s
+}
+
+// Title Case suave para mostrar (no toca siglas)
+const toTitleCase = (v: string) =>
+    v
+        .toLowerCase()
+        .split(" ")
+        .filter(Boolean)
+        .map((w) => (w.length <= 2 ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+        .join(" ")
+
+// CP: si viene CPA (ej B7600XXX) se queda con dígitos; si no, limpia y retorna dígitos
+const normalizeCP = (v: any) => {
+    const raw = safeString(v).trim()
+    if (!raw) return ""
+    const digits = raw.replace(/\D/g, "")
+    return digits
+}
+
+// Canon de provincias (mínimo, extensible)
+const canonicalProvince = (provRaw: any) => {
+    const p = normalizeText(provRaw)
+    if (!p) return ""
+
+    const map: Record<string, string> = {
+        "CABA": "CABA",
+        "CAPITAL FEDERAL": "CABA",
+        "CIUDAD AUTONOMA DE BUENOS AIRES": "CABA",
+        "CIUDAD DE BUENOS AIRES": "CABA",
+        "BUENOS AIRES": "Buenos Aires",
+        "BS AS": "Buenos Aires",
+        "PBA": "Buenos Aires",
+        "CORDOBA": "Córdoba",
+        "SANTA FE": "Santa Fe",
+        "MENDOZA": "Mendoza",
+        "SAN LUIS": "San Luis",
+        "SAN JUAN": "San Juan",
+        "LA PAMPA": "La Pampa",
+        "NEUQUEN": "Neuquén",
+        "SANTA CRUZ": "Santa Cruz",
+        "TUCUMAN": "Tucumán",
+        "SAN MIGUEL DE TUCUMAN": "Tucumán",
+    }
+
+    return map[p] || toTitleCase(p)
+}
+
+const KNOWN_PROVINCES = new Set([
+    "CABA",
+    "Buenos Aires",
+    "Catamarca",
+    "Chaco",
+    "Chubut",
+    "Córdoba",
+    "Corrientes",
+    "Entre Ríos",
+    "Formosa",
+    "Jujuy",
+    "La Pampa",
+    "La Rioja",
+    "Mendoza",
+    "Misiones",
+    "Neuquén",
+    "Río Negro",
+    "Salta",
+    "San Juan",
+    "San Luis",
+    "Santa Cruz",
+    "Santa Fe",
+    "Santiago del Estero",
+    "Tierra del Fuego",
+    "Tucumán",
+])
+
+const isKnownProvince = (provCanon: string) => KNOWN_PROVINCES.has(provCanon)
+
+// Canon de localidades (con regla por CP)
+const canonicalLocality = (locRaw: any, cpNorm: string) => {
+    const l = normalizeText(locRaw)
+    if (!l) return ""
+
+    // Mar del Plata: unificación por alias y CP 7600
+    if (cpNorm === "7600") {
+        if (l === "MDP" || l === "MAR DEL PLATA" || l === "MARDELPLATA") return "Mar del Plata"
+    }
+    if (l === "MDP") return "Mar del Plata"
+
+    return toTitleCase(l)
+}
+
+// Fecha AR: devuelve YYYY-MM-DD en AR. Si viene YYYY-MM-DD, la devuelve tal cual (sin shifts).
+const toDateKeyAR = (dateLike: any) => {
+    const s = safeString(dateLike).trim()
+    if (!s) return ""
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return ""
+
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: AR_TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(d)
+
+    const y = parts.find((p) => p.type === "year")?.value
+    const m = parts.find((p) => p.type === "month")?.value
+    const da = parts.find((p) => p.type === "day")?.value
+    if (!y || !m || !da) return ""
+    return `${y}-${m}-${da}`
+}
+
+const getMonthYearFromDateKey = (dateKey: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return { y: NaN, m: NaN }
+    const y = Number(dateKey.slice(0, 4))
+    const m = Number(dateKey.slice(5, 7))
+    return { y, m }
+}
+
 // --- DEFINICIÓN DEL MUNDO OPS ---
 const OPS_SCOPE = [
     'vendido', 
@@ -27,123 +163,6 @@ const OPS_SCOPE = [
     'baja'
 ]
 
-
-
-// --- NORMALIZACIÓN DE FECHAS Y UBICACIONES (AGREGADO) ---
-const APP_TZ = 'America/Argentina/Buenos_Aires'
-
-const safeString = (v: any) => (v === null || v === undefined ? '' : String(v))
-
-const stripAccents = (str: string) =>
-    str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-
-const normalizeText = (v: any) => {
-    const s = stripAccents(safeString(v).trim().toUpperCase())
-    return s
-        .replace(/[^A-Z0-9\s]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-}
-
-const normalizeCP = (v: any) => {
-    const raw = safeString(v).trim().toUpperCase()
-    if (!raw) return ''
-    const digits = (raw.match(/\d+/g) || []).join('')
-    // En Argentina, el CP numérico clásico suele ser de 4 dígitos (ej: 7600). Tomamos los primeros 4.
-    if (digits.length >= 4) return digits.slice(0, 4)
-    return digits
-}
-
-const canonicalProvince = (prov: any) => {
-    const p = normalizeText(prov)
-    if (!p) return ''
-
-    const alias: Record<string, string> = {
-        'CABA': 'CABA',
-        'CAPITAL FEDERAL': 'CABA',
-        'CIUDAD AUTONOMA DE BUENOS AIRES': 'CABA',
-        'CIUDAD DE BUENOS AIRES': 'CABA',
-        'BUENOS AIRES': 'BUENOS AIRES',
-        'BS AS': 'BUENOS AIRES',
-        'B S AS': 'BUENOS AIRES',
-        'PBA': 'BUENOS AIRES',
-        'PROVINCIA DE BUENOS AIRES': 'BUENOS AIRES',
-        'CORDOBA': 'CÓRDOBA',
-        'SANTA FE': 'SANTA FE',
-        'MENDOZA': 'MENDOZA',
-        'ENTRE RIOS': 'ENTRE RÍOS',
-        'ENTRE RIOS ': 'ENTRE RÍOS',
-        'TUCUMAN': 'TUCUMÁN',
-        'SALTA': 'SALTA',
-        'CHACO': 'CHACO',
-        'CORRIENTES': 'CORRIENTES',
-        'MISIONES': 'MISIONES',
-        'NEUQUEN': 'NEUQUÉN',
-        'RIO NEGRO': 'RÍO NEGRO',
-        'CHUBUT': 'CHUBUT',
-        'SANTA CRUZ': 'SANTA CRUZ',
-        'TIERRA DEL FUEGO': 'TIERRA DEL FUEGO',
-        'LA PAMPA': 'LA PAMPA',
-        'SAN JUAN': 'SAN JUAN',
-        'SAN LUIS': 'SAN LUIS',
-        'LA RIOJA': 'LA RIOJA',
-        'CATAMARCA': 'CATAMARCA',
-        'JUJUY': 'JUJUY',
-        'FORMOSA': 'FORMOSA',
-        'SANTIAGO DEL ESTERO': 'SANTIAGO DEL ESTERO'
-    }
-
-    return alias[p] || (p.charAt(0) + p.slice(1).toLowerCase())
-}
-
-const canonicalLocality = (loc: any, cp: any, provCanon: string) => {
-    const l = normalizeText(loc)
-    const cpNorm = normalizeCP(cp)
-
-    // Caso especial Mar del Plata (MDP) con CP 7600
-    if (cpNorm == '7600') {
-        if (l === 'MDP' || l === 'MAR DEL PLATA' || l === 'MARDELPLATA') return 'Mar del Plata'
-    }
-
-    // Alias generales
-    if (l === 'MDP' && (provCanon === 'BUENOS AIRES' || provCanon === '')) return 'Mar del Plata'
-
-    if (!l) return ''
-
-    // Title case simple
-    return l
-        .split(' ')
-        .map(w => w.charAt(0) + w.slice(1).toLowerCase())
-        .join(' ')
-}
-
-const getMonthYearInTZ = (dateLike: any) => {
-    const d = new Date(dateLike)
-    if (Number.isNaN(d.getTime())) return { month: null as any, year: null as any }
-
-    const fmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: APP_TZ,
-        year: 'numeric',
-        month: '2-digit'
-    })
-
-    const parts = fmt.formatToParts(d)
-    const year = parts.find(p => p.type === 'year')?.value
-    const month = parts.find(p => p.type === 'month')?.value
-    return { month: month ? Number(month) : null, year: year ? Number(year) : null }
-}
-
-const formatDateInTZ = (dateLike: any) => {
-    const d = new Date(dateLike)
-    if (Number.isNaN(d.getTime())) return '-'
-    return new Intl.DateTimeFormat('es-AR', {
-        timeZone: APP_TZ,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-    }).format(d)
-}
-
 // --- UTILIDAD PARA EXPORTAR A CSV (AGREGADO) ---
 const exportToCSV = (data: any[], filename: string) => {
     if (!data || data.length === 0) return;
@@ -157,7 +176,7 @@ const exportToCSV = (data: any[], filename: string) => {
     // Mapear filas
     const rows = data.map(row => [
         row.id,
-        formatDateInTZ(row.entryDate),
+        (row.entryDateKey || toDateKeyAR(row.entryDate)) || "-",
         row.status,
         row.seller || "Sin Asignar",
         row.origen,
@@ -166,7 +185,7 @@ const exportToCSV = (data: any[], filename: string) => {
         row.provincia,
         row.localidad,
         row.cp,
-        row.lastUpdate ? formatDateInTZ(row.lastUpdate) : '-'
+        row.lastUpdate ? (toDateKeyAR(row.lastUpdate) || new Date(row.lastUpdate).toLocaleDateString()) : "-"
     ]);
 
     // Construir contenido CSV
@@ -283,36 +302,44 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
             
             if (data) {
                 const mappedData = data.map((l: any) => {
-                    // --- Fecha de Ingreso (REGLA MADRE) ---
-                    // 1) Usar fecha_ingreso (si existe en leads)
-                    // 2) Fallbacks: entry_date / sold_at / created_at (para no romper históricos)
-                    const entryDate = l.fecha_ingreso || l.entry_date || l.sold_at || l.created_at
+                    // REGLA MADRE: filtros/reportes por fecha_ingreso (string YYYY-MM-DD)
+                    // Fallbacks solo por compatibilidad histórica.
+                    const entryDateRaw = l.fecha_ingreso ?? l.sold_at ?? l.created_at
+                    const entryDateKey = toDateKeyAR(entryDateRaw) // YYYY-MM-DD (AR)
 
-                    // --- Geo RAW ---
-                    const provRaw = l.province || l.provincia || l.state || ''
-                    const locRaw = l.city || l.localidad || ''
-                    const cpRaw = l.zip_code || l.cp || l.postal_code || ''
+                    // GEO (campos reales en tu schema)
+                    const provRaw = l.province ?? ''
+                    const locRaw = l.address_city ?? ''
+                    const cpRaw = l.address_zip ?? l.zip ?? ''
 
-                    // --- Geo Canon ---
-                    const provCanon = canonicalProvince(provRaw)
-                    const locCanon = canonicalLocality(locRaw, cpRaw, provCanon)
-                    const cpCanon = normalizeCP(cpRaw)
+                    let provCanon = canonicalProvince(provRaw)
+                    const cpNorm = normalizeCP(cpRaw) || safeString(cpRaw).trim() || 'S/D'
+                    let locCanon = canonicalLocality(locRaw, cpNorm)
 
-                    return {
+                    // Heurística anti-datos cruzados:
+                    // Si 'province' parece una ciudad (no es provincia conocida) y 'address_city' es una provincia conocida,
+                    // intercambiamos para que GEO no quede absurdo (ej visto: province="SAN RAFAEL", address_city="MENDOZA").
+                    const cityAsProv = canonicalProvince(locRaw)
+                    if (provCanon && !isKnownProvince(provCanon) && cityAsProv && isKnownProvince(cityAsProv)) {
+                        locCanon = canonicalLocality(provRaw, cpNorm)
+                        provCanon = cityAsProv
+                    }
+
+                    return ({
                         id: l.id,
-                        entryDate,
+                        entryDate: entryDateKey || safeString(entryDateRaw),
+                        entryDateKey, // para filtros/exports (estable)
                         status: l.status ? l.status.toLowerCase() : 'desconocido',
                         origen: l.source,
                         seller: l.agent_name,
                         lastUpdate: l.last_update,
                         prepaga: l.prepaga || l.quoted_prepaga || 'Sin Dato',
                         plan: l.plan || l.quoted_plan || 'General',
-
-                        // Mapeo geográfico (canonizado para métricas)
-                        provincia: provCanon || 'Provincia Desc.',
-                        localidad: locCanon || 'Localidad Desc.',
-                        cp: cpCanon || 'S/D'
-                    }
+                        // Mapeo geográfico
+                        provincia: provCanon || safeString(provRaw).trim() || 'Provincia Desc.',
+                        localidad: locCanon || safeString(locRaw).trim() || 'Localidad Desc.',
+                        cp: cpNorm
+                    })
                 })
                 setOperations(mappedData)
             }
@@ -355,9 +382,10 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
 
         // 2. FILTRO DE FECHAS Y VENDEDOR (GENERAL)
         const filteredOps = opsScopeOperations.filter(o => {
-            const { month: opMonth, year: opYear } = getMonthYearInTZ(o.entryDate)
+            const dateKey = o.entryDateKey || toDateKeyAR(o.entryDate)
+            const { y: opYear, m: opMonth } = getMonthYearFromDateKey(dateKey)
 
-            const matchDate = opMonth !== null && opYear !== null && opMonth === parseInt(selectedMonth) && opYear === parseInt(selectedYear)
+            const matchDate = opMonth === parseInt(selectedMonth) && opYear === parseInt(selectedYear)
             const matchSeller = selectedSeller === 'all' || 
                 (o.seller && o.seller.trim().toLowerCase() === selectedSeller.trim().toLowerCase())
 
@@ -481,37 +509,81 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
         // 2. Filtrar solo ventas cumplidas
         const salesForGeo = geoUniverseOps.filter(o => o.status === 'cumplidas')
         
-        const locationMap: Record<string, { 
-            provincia: string, 
-            localidad: string, 
-            cp: string, 
-            count: number, 
-            ops: any[] 
-        }> = {}
-
-        salesForGeo.forEach(o => {
-            const provCanon = canonicalProvince(o.provincia)
-            const cpCanon = normalizeCP(o.cp)
-            const locCanon = canonicalLocality(o.localidad, o.cp, provCanon)
-
-            const p = provCanon || (o.provincia || 'Provincia Desc.')
-            const l = locCanon || (o.localidad || 'Localidad Desc.')
-            const c = cpCanon || (o.cp || 'S/D')
-
-            // Key normalizada: provincia + cp + localidad
-            const key = `${p}|${c}|${l}`.toLowerCase()
-
-            if (!locationMap[key]) {
-                locationMap[key] = { provincia: p, localidad: l, cp: c, count: 0, ops: [] }
+        // --- H.2 GEOGRAFIA PRO (OPCIÓN B): AGRUPAR POR CP Y SUGERIR LOCALIDAD/PROVINCIA POR FRECUENCIA ---
+        // Key = CP normalizado. Localidad/Provincia se muestran como "sugeridas" (modo pro) para evitar duplicados.
+        const locationMap: Record<
+            string,
+            {
+                cp: string
+                count: number
+                ops: any[]
+                provCounts: Record<string, number>
+                locCounts: Record<string, number>
             }
-            locationMap[key].count += 1
-            locationMap[key].ops.push(o)
+        > = {}
+
+        const isMeaningful = (s: string) => {
+            const t = safeString(s).trim()
+            if (!t) return false
+            const u = t.toUpperCase()
+            if (u === 'S/D') return false
+            if (u === 'PROVINCIA DESC.' || u === 'LOCALIDAD DESC.') return false
+            return true
+        }
+
+        salesForGeo.forEach((o) => {
+            const cpCanon = normalizeCP(o.cp) || safeString(o.cp).trim() || ""
+            const cpKey = cpCanon ? cpCanon : "SIN_CP"
+
+            if (!locationMap[cpKey]) {
+                locationMap[cpKey] = {
+                    cp: cpCanon || "S/D",
+                    count: 0,
+                    ops: [],
+                    provCounts: {},
+                    locCounts: {},
+                }
+            }
+
+            locationMap[cpKey].count += 1
+            locationMap[cpKey].ops.push(o)
+
+            // Localidad/provincia sugeridas por frecuencia (con normalización + alias)
+            const locCanon = canonicalLocality(o.localidad, cpCanon) || toTitleCase(normalizeText(o.localidad))
+            const provCanon = canonicalProvince(o.provincia) || toTitleCase(normalizeText(o.provincia))
+
+            if (isMeaningful(locCanon)) {
+                locationMap[cpKey].locCounts[locCanon] = (locationMap[cpKey].locCounts[locCanon] || 0) + 1
+            }
+            if (isMeaningful(provCanon)) {
+                locationMap[cpKey].provCounts[provCanon] = (locationMap[cpKey].provCounts[provCanon] || 0) + 1
+            }
         })
 
-        // --- MODIFICACION: QUITAMOS EL SLICE PARA MOSTRAR TODO ---
+        const pickTop = (m: Record<string, number>) => {
+            const entries = Object.entries(m)
+            if (entries.length === 0) return ""
+            entries.sort((a, b) => b[1] - a[1])
+            return entries[0][0]
+        }
+
         const _geoLocations = Object.values(locationMap)
-            .sort((a,b) => b.count - a.count)
-            // .slice(0, 10) <--- ELIMINADO PARA MOSTRAR TODO
+            .map((x) => {
+                const provSug = pickTop(x.provCounts) || "Provincia Desc."
+                const locSug = pickTop(x.locCounts) || "Localidad Desc."
+                const distinctLoc = Object.keys(x.locCounts).length
+                const inconsistent = distinctLoc > 1
+                return {
+                    provincia: provSug,
+                    localidad: locSug,
+                    cp: x.cp,
+                    count: x.count,
+                    ops: x.ops,
+                    inconsistent,
+                    distinctLoc,
+                }
+            })
+            .sort((a, b) => b.count - a.count)
 
         return {
             filteredCount: filteredOps.length,
@@ -572,7 +644,8 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
         } else if (downloadType === 'custom') {
             // Filtrar bajo demanda
             dataToExport = operations.filter(o => {
-                const { month: m, year: y } = getMonthYearInTZ(o.entryDate)
+                const dateKey = o.entryDateKey || toDateKeyAR(o.entryDate)
+                const { y, m } = getMonthYearFromDateKey(dateKey)
                 return m === parseInt(downloadMonth) && y === parseInt(downloadYear)
             })
             filename = `Reporte_${downloadMonth}_${downloadYear}`
@@ -914,7 +987,14 @@ export function OpsMetrics({ onApplyFilter }: OpsMetricsProps) {
                                     <span className="text-xs font-semibold text-slate-700 truncate block" title={loc.provincia}>{loc.provincia}</span>
                                 </div>
                                 <div className="col-span-4">
-                                    <span className="text-xs font-bold text-slate-800 truncate block" title={loc.localidad}>{loc.localidad}</span>
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-xs font-bold text-slate-800 truncate block" title={loc.localidad}>{loc.localidad}</span>
+                                        {loc.inconsistent && (
+                                            <Badge variant="secondary" className="h-5 px-2 text-[10px] font-black bg-amber-100 text-amber-700 border border-amber-200">
+                                                Inconsistente
+                                            </Badge>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="col-span-2">
                                     <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{loc.cp}</span>

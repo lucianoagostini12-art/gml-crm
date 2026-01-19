@@ -74,7 +74,7 @@ type NormalizedSale = {
   agentName: string
   source: string
   saleDate: Date // ya corregida fin de semana
-  weekIdx: 1 | 2 | 3 | 4 | 5
+  weekIdx: 0 | 1 | 2 | 3 | 4 | 5
   kind: SaleKind
   altasPoints: number // solo ALTA (capitas con AMPF=1)
   passCount: number // solo PASS (=1)
@@ -229,7 +229,7 @@ export function AdminPerformance() {
   const [drillTab, setDrillTab] = useState<'altas' | 'pass'>('altas')
   const [drillMode, setDrillMode] = useState<'ventas' | 'cumplidas'>('ventas')
 
-  const openDrill = (sellerName: string, weekIdx: 1 | 2 | 3 | 4 | 5, tab: 'altas' | 'pass' = 'altas') => {
+  const openDrill = (sellerName: string, weekIdx: 0 | 1 | 2 | 3 | 4 | 5, tab: 'altas' | 'pass' = 'altas') => {
     setDrillSellerName(sellerName)
     setDrillWeekIdx(weekIdx)
     setDrillTab(tab)

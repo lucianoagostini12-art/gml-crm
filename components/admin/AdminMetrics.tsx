@@ -315,12 +315,30 @@ export function AdminMetrics() {
     const prevEnd = new Date(currentStart.getTime() - 86400000); 
     const prevStart = new Date(prevEnd.getTime() - diffTime);
 
-    const monthStartStr = `${currentStart.getFullYear()}-${String(currentStart.getMonth() + 1).padStart(2, '0')}-01`
-    const nextMonth = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 1)
-    const monthEndExclusiveStr = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`
-    const targetPeriod = `${currentStart.getFullYear()}-${String(currentStart.getMonth() + 1).padStart(2, '0')}`
-    const prevPeriodDate = new Date(currentStart.getFullYear(), currentStart.getMonth() - 1, 1)
-    const prevPeriod = `${prevPeriodDate.getFullYear()}-${String(prevPeriodDate.getMonth() + 1).padStart(2, '0')}`
+    // ✅ Rango en formato YYYY-MM-DD (para columnas DATE como fecha_ingreso)
+    const endExclusive = new Date(`${dateEnd}T00:00:00-03:00`)
+    endExclusive.setDate(endExclusive.getDate() + 1)
+    const fechaIngresoStartStr = dateStart
+    const fechaIngresoEndExclusiveStr = toISODate(endExclusive)
+
+    const prevStartStr = toISODate(prevStart)
+    const prevEndMid = new Date(`${toISODate(prevEnd)}T00:00:00-03:00`)
+    prevEndMid.setDate(prevEndMid.getDate() + 1)
+    const prevEndExclusiveStr = toISODate(prevEndMid)
+
+    // ✅ Periodos billing (YYYY-MM) cubiertos por el rango (puede cruzar meses)
+    const periodsBetween = (start: Date, end: Date) => {
+      const out: string[] = []
+      const cur = new Date(start.getFullYear(), start.getMonth(), 1)
+      const last = new Date(end.getFullYear(), end.getMonth(), 1)
+      while (cur.getTime() <= last.getTime()) {
+        out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`)
+        cur.setMonth(cur.getMonth() + 1)
+      }
+      return out
+    }
+    const targetPeriods = periodsBetween(currentStart, currentEnd)
+    const prevPeriods = periodsBetween(prevStart, prevEnd)
 
     // B. QUERIES
     let leadsQuery = supabase.from("leads").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
@@ -348,8 +366,8 @@ export function AdminMetrics() {
         .select("id, agent_name, status, fecha_ingreso, prepaga, quoted_prepaga, capitas, type, sub_state, source")
         .in("status", SALE_STATUSES)
         .not("fecha_ingreso", "is", null)
-        .gte("fecha_ingreso", monthStartStr)
-        .lt("fecha_ingreso", monthEndExclusiveStr)
+                .gte("fecha_ingreso", fechaIngresoStartStr)
+        .lt("fecha_ingreso", fechaIngresoEndExclusiveStr)
 
       if (agent !== "global") salesQ = salesQ.eq("agent_name", agent)
 
@@ -366,7 +384,7 @@ export function AdminMetrics() {
         .select("id, agent_name, status, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, capitas, type, sub_state, source")
         .eq("status", "cumplidas")
         .eq("billing_approved", true)
-        .eq("billing_period", targetPeriod)
+                .in("billing_period", targetPeriods)
 
       if (agent !== "global") billQ = billQ.eq("agent_name", agent)
 
@@ -380,7 +398,7 @@ export function AdminMetrics() {
         .select("id, agent_name, status, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, capitas, type, sub_state, source")
         .eq("status", "cumplidas")
         .eq("billing_approved", true)
-        .eq("billing_period", prevPeriod)
+                .in("billing_period", prevPeriods)
 
       if (agent !== "global") prevBillQ = prevBillQ.eq("agent_name", agent)
 
@@ -506,6 +524,32 @@ if (agentsList.length > 0) {
 
     const salesCount = salesCapitasTotal
 
+    // ✅ Ventas por prepaga (mismo criterio: fecha_ingreso + CAPITAS)
+    const prepLabel = (v: any) => {
+      const raw = String(v ?? "").trim()
+      if (!raw) return "Sin prepaga"
+      const low = raw.toLowerCase()
+      if (low.includes("preven")) return "Prevención"
+      if (low.includes("docto")) return "DoctoRed"
+      if (low.includes("ampf")) return "AMPF"
+      // Título simple
+      return raw.charAt(0).toUpperCase() + raw.slice(1)
+    }
+
+    const prepAgg = new Map<string, { ventas: number; altas: number; pass: number }>()
+    for (const l of salesOps as any[]) {
+      const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
+      if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, altas: 0, pass: 0 })
+      const pts = pointsByCapitas([l])
+      prepAgg.get(name)!.ventas += pts
+      if (isPass(l)) prepAgg.get(name)!.pass += pts
+      else prepAgg.get(name)!.altas += pts
+    }
+    const salesByPrepaga = Array.from(prepAgg.entries())
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.ventas - a.ventas)
+
+
     let prevSalesCapitasTotal = 0
     try {
       let prevSalesQ = supabase
@@ -513,8 +557,8 @@ if (agentsList.length > 0) {
         .select("id, prepaga, quoted_prepaga, capitas, type, sub_state, source")
         .in("status", SALE_STATUSES)
         .not("fecha_ingreso", "is", null)
-        .gte("fecha_ingreso", toISODate(prevStart))
-        .lt("fecha_ingreso", toISODate(currentStart))
+                .gte("fecha_ingreso", prevStartStr)
+        .lt("fecha_ingreso", prevEndExclusiveStr)
       if (agent !== "global") prevSalesQ = prevSalesQ.eq("agent_name", agent)
       const { data: prevSalesData } = await prevSalesQ
       if (prevSalesData) prevSalesCapitasTotal = pointsByCapitas(prevSalesData as any[])
@@ -657,7 +701,8 @@ if (agentsList.length > 0) {
     const pacingStatus = goalPct >= timePct ? "ontrack" : "behind"
 
     setMetrics({
-      sales: { count: salesCount, pass: salesCapitasPass, altas: salesCapitasAltas, trend: salesTrend },     
+      sales: { count: salesCount, pass: salesCapitasPass, altas: salesCapitasAltas, trend: salesTrend },
+      salesByPrepaga,
       revenue: { total: totalRevenue, neto: totalNeto, capitas: billingCapitas, trend: revTrend },   
       inventory: { newLeads: counts.nuevo, activeLeads, sales: salesCount, goal },
       killerMetrics: { speed: { value: speedValue, status: speedSt, sample: speedSample }, rpl, strikeRate },
@@ -930,6 +975,33 @@ if (agentsList.length > 0) {
               </CardContent>
             </Card>
           </div>
+
+          {/* 2.B VENTAS POR PREPAGA */}
+          <Card className="shadow-md border-slate-200">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-indigo-600" /> Ventas por Prepaga
+              </CardTitle>
+              <CardDescription>Conteo por cápitas.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(metrics.salesByPrepaga || []).length ? (
+                  metrics.salesByPrepaga.slice(0, 9).map((p: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-3 rounded-xl border bg-white hover:bg-slate-50 transition-colors">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-slate-700">{p.name}</span>
+                        <span className="text-[10px] text-slate-400">Altas: <b className="text-slate-600">{p.altas}</b> • Pass: <b className="text-slate-600">{p.pass}</b></span>
+                      </div>
+                      <Badge variant="outline" className="font-black text-indigo-700 bg-indigo-50 border-indigo-200">{p.ventas}</Badge>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-slate-500">Sin ventas en el rango seleccionado.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* 3. TABLA CONVERSIÓN */}

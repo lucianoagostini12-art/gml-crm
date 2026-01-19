@@ -64,14 +64,22 @@ function CopyDniButton({ cuit, dni }: { cuit?: string, dni: string }) {
         e.stopPropagation() // Evitar abrir el modal al clickear
         let textToCopy = dni
         
-        // Lógica: Si hay CUIT (11 dígitos), sacamos los del medio.
-        // Ej: 20-12345678-9 -> 12345678
+        // Lógica: Si hay CUIT, extraemos DNI.
+        // Caso estándar (11 dígitos): 20-12345678-9 -> 12345678 (quita 2 adelante + 1 verificador)
+        // Caso legacy (10 dígitos, sin verificador): 20-12345678 -> 12345678 (quita 2 adelante)
         if (cuit) {
-            const cleanCuit = cuit.replace(/\D/g, '') // Sacar guiones
-            if (cleanCuit.length === 11) {
-                textToCopy = cleanCuit.substring(2, 10)
+            const digits = String(cuit).replace(/\D/g, "")
+
+            if (digits.length === 11) {
+                textToCopy = digits.substring(2, 10)
+            } else if (digits.length === 10) {
+                textToCopy = digits.substring(2)
+            } else if (digits.length > 11) {
+                // Si viniera con basura alrededor, intentamos tomar los últimos 11 y extraer el DNI
+                const last11 = digits.slice(-11)
+                textToCopy = last11.length === 11 ? last11.substring(2, 10) : digits
             } else {
-                textToCopy = cleanCuit // Fallback
+                textToCopy = digits || dni
             }
         }
 

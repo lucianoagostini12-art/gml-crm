@@ -127,7 +127,17 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm, leadId }: Sale
     }
 
     const closeFinal = () => {
-        onConfirm(formData)
+        
+    // Normalizar datos laborales si eligió VOLUNTARIO (no informar nada)
+    const normalized = { ...formData }
+    if (normalized.laborCondition === "voluntario") {
+      normalized.employerCuit = ""
+      normalized.monotributoCategory = ""
+      normalized.claveFiscal = ""
+      normalized.laborOrigin = "voluntario"
+    }
+
+    onConfirm(normalized)
         setShowSuccess(false)
         onOpenChange(false)
         setStep(1)
@@ -276,7 +286,8 @@ export function SaleWizardDialog({ open, onOpenChange, onConfirm, leadId }: Sale
                                     <Label>Condición Laboral</Label>
                                     <Select value={formData.condicion} onValueChange={val => updateForm('condicion', val)}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent><SelectItem value="empleado">Relación de Dependencia</SelectItem><SelectItem value="monotributo">Monotributista</SelectItem></SelectContent>
+                                        <SelectContent><SelectItem value="empleado">Relación de Dependencia</SelectItem><SelectItem value="monotributo">Monotributista</SelectItem>
+                      <SelectItem value="voluntario">Voluntario (no informar)</SelectItem></SelectContent>
                                     </Select>
                                     {formData.condicion === 'empleado' ? (
                                         <div className="space-y-1"><Label>CUIT Empleador</Label><Input value={formData.cuitEmpleador} onChange={e => updateForm('cuitEmpleador', e.target.value)}/></div>

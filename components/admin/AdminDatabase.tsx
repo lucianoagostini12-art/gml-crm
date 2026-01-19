@@ -161,7 +161,10 @@ export function AdminDatabase() {
   const [leads, setLeads] = useState<LeadRow[]>([])
 
   // --- LISTAS DINÁMICAS (Se llenan desde DB) ---
+  // Agents: se alimenta desde `profiles` para evitar agentes "inventados".
+  // Se permiten agentes especiales que no están en profiles (ej: Zombie 🧟) si aparecen en leads.
   const [agentsList, setAgentsList] = useState<string[]>([])
+  const [agentsRoleByName, setAgentsRoleByName] = useState<Record<string, string>>({})
   const [statusList, setStatusList] = useState<string[]>([])
   const [sourceList, setSourceList] = useState<string[]>([])
   const [lossReasonsList, setLossReasonsList] = useState<string[]>([])
@@ -183,6 +186,8 @@ export function AdminDatabase() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [targetAgent, setTargetAgent] = useState("")
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+
+  // Nota: la devolución a OPS se hace desde el mismo selector de reasignación.
 
   // Extras
   const [lastExport, setLastExport] = useState("Sin datos")
@@ -265,6 +270,41 @@ export function AdminDatabase() {
     }
   }
 
+  const fetchAgentsFromProfiles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, role")
+        .not("full_name", "is", null)
+        .limit(1000)
+
+      if (error || !data) return [] as { id: string; name: string; role: string }[]
+
+      const rows = (data as any[])
+        .map((r) => ({
+          id: String(r.id),
+          name: String(r.full_name || "").trim(),
+          role: String(r.role || "").trim(),
+        }))
+        .filter((r) => !!r.name)
+
+      // Roles válidos para reasignación desde este panel.
+      // Nota: OPS se maneja como "ADMIN" (en tu DB hoy aparece como admin_god/admin_common).
+      const allowedRoles = new Set([
+        "seller",
+        "setter",
+        "admin",
+        "admin_god",
+        "admin_common",
+        "supervisor_god",
+      ])
+
+      return rows.filter((r) => allowedRoles.has(r.role))
+    } catch {
+      return [] as { id: string; name: string; role: string }[]
+    }
+  }
+
   // CARGA DE DATOS
   const fetchData = async () => {
     setLoading(true)
@@ -278,12 +318,28 @@ export function AdminDatabase() {
     if (!error && data) {
       setLeads(data)
 
-      const uniqueAgents = [...new Set(data.map((l: any) => l.agent_name))].filter(Boolean) as string[]
+      // Agentes reales (profiles) + agentes especiales (Zombie/etc) si existen en leads
+      const profAgents = await fetchAgentsFromProfiles()
+
+      // Mapa nombre -> rol, para saber si el destino es OPS (admin*)
+      const roleByName = new Map(profAgents.map((a) => [a.name, a.role]))
+      const roleMap: Record<string, string> = {}
+      for (const [k, v] of roleByName.entries()) roleMap[k] = v
+      setAgentsRoleByName(roleMap)
+
+      const leadAgents = [...new Set(data.map((l: any) => (l?.agent_name ? String(l.agent_name).trim() : "")))]
+        .filter(Boolean) as string[]
+
+      const specialAgents = leadAgents.filter((n) => !roleByName.has(n) && /(zombie|sistema|bot)/i.test(n))
+
+      const mergedAgents = [...new Set([...profAgents.map((a) => a.name), ...specialAgents])].sort((a, b) =>
+        a.localeCompare(b, "es"),
+      )
       const uniqueStatuses = [...new Set(data.map((l: any) => l.status))].filter(Boolean) as string[]
       const uniqueSources = [...new Set(data.map((l: any) => l.source))].filter(Boolean) as string[]
       const uniqueLossReasons = [...new Set(data.map((l: any) => l.loss_reason))].filter(Boolean) as string[]
 
-      setAgentsList(uniqueAgents.sort())
+      setAgentsList(mergedAgents)
       setStatusList(uniqueStatuses.sort())
 
       const lossFromDb = await tryFetchSimpleList("lead_loss_reasons", "name")
@@ -341,19 +397,50 @@ export function AdminDatabase() {
     else setSelectedIds((prev) => prev.filter((x) => x !== id))
   }
 
+  const isOpsRole = (role: string) => {
+    const r = String(role || "").trim().toLowerCase()
+    // En tu ecosistema, OPS se maneja como "ADMIN" (hoy aparece como admin_god/admin_common).
+    return r === "admin" || r.startsWith("admin_") || r === "supervisor_god"
+  }
+
   const executeReassign = async () => {
     if (selectedIds.length === 0 || !targetAgent) return
 
-    const { error } = await supabase
-      .from("leads")
-      .update({
-        agent_name: targetAgent,
-        last_update: new Date().toISOString(),
-      })
-      .in("id", selectedIds)
+    const role = agentsRoleByName[targetAgent] || ""
+    const sendToOps = role ? isOpsRole(role) : false
+
+    const payload: any = {
+      agent_name: targetAgent,
+      last_update: new Date().toISOString(),
+    }
+
+    // Si el destino es OPS (ADMIN), además lo devolvemos a estado OPS.
+    if (sendToOps) {
+      payload.status = "ingresado"
+      payload.warning_sent = false
+      payload.warning_date = null
+    }
+
+    const { error } = await supabase.from("leads").update(payload).in("id", selectedIds)
 
     if (!error) {
-      alert(` ${selectedIds.length} leads reasignados a ${targetAgent}.`)
+      if (sendToOps) {
+        // Auditoría best-effort
+        try {
+          const rows = selectedIds.map((leadId) => ({
+            lead_id: leadId,
+            from_status: null,
+            to_status: "ingresado",
+            actor_name: currentUserName || "ADMIN",
+            to_agent: targetAgent,
+            notes: "DEVUELTO A OPS (INGRESADO) DESDE ADMIN DATABASE",
+            changed_at: new Date().toISOString(),
+          }))
+          await supabase.from("lead_status_history").insert(rows as any)
+        } catch (_) {}
+      }
+
+      alert(` ${selectedIds.length} leads reasignados a ${targetAgent}${sendToOps ? " (OPS: ingresado)" : ""}.`)
       setSelectedIds([])
       setTargetAgent("")
       fetchData()
@@ -805,7 +892,24 @@ export function AdminDatabase() {
               <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
                 <Select value={targetAgent} onValueChange={setTargetAgent}>
                   <SelectTrigger className="w-full md:w-[220px] h-8 bg-white border-blue-200"><SelectValue placeholder="Reasignar a..." /></SelectTrigger>
-                  <SelectContent>{agentsList.map((a) => (<SelectItem key={a} value={a}>{a}</SelectItem>))}</SelectContent>
+                  <SelectContent>
+                    {agentsList.map((a) => {
+                      const role = agentsRoleByName[a]
+                      const isOps = role ? isOpsRole(role) : false
+                      return (
+                        <SelectItem key={a} value={a}>
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <span>{a}</span>
+                            {role ? (
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${isOps ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-slate-50 border-slate-200 text-slate-600"}`}>
+                                {isOps ? "OPS" : role}
+                              </span>
+                            ) : null}
+                          </div>
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
                 </Select>
                 <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700" onClick={executeReassign}><UserCheck className="h-4 w-4 mr-2" /> Aplicar</Button>
                 <Button size="sm" variant="destructive" className="h-8" onClick={() => setBulkDeleteOpen(true)}><Trash2 className="h-4 w-4 mr-2" /> Borrar Selección</Button>

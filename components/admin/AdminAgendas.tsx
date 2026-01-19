@@ -8,14 +8,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { CalendarDays, ArrowRightLeft, Loader2 } from "lucide-react"
+import { CalendarDays, ArrowRightLeft, Loader2, MessageSquareText } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 export function AdminAgendas() {
     const supabase = createClient()
     const [loading, setLoading] = useState(true)
     const [tasks, setTasks] = useState<any[]>([])
+
+    // ✅ NUEVO (sin romper lo existente): visor de notas completas
+    const [notesOpen, setNotesOpen] = useState(false)
+    const [notesTitle, setNotesTitle] = useState<string>("")
+    const [notesRaw, setNotesRaw] = useState<string>("")
     
     // ✅ CAMBIO: Estado para lista dinámica de agentes
     const [agentsList, setAgentsList] = useState<string[]>([])
@@ -24,6 +30,40 @@ export function AdminAgendas() {
     const [targetAgent, setTargetAgent] = useState("")
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
     const [selectedTasks, setSelectedTasks] = useState<string[]>([])
+
+    const openNotes = (leadName: string, raw: string) => {
+        setNotesTitle(leadName)
+        setNotesRaw(raw || "")
+        setNotesOpen(true)
+    }
+
+    const renderNotesBlocks = (raw: string) => {
+        const txt = (raw || "").trim()
+        if (!txt) return <span className="text-slate-500 italic">Sin notas.</span>
+
+        // Notas históricas: a veces vienen concatenadas con este separador
+        const parts = txt
+            .split("|||SEP_NOTE|")
+            .map((p) => p.trim())
+            .filter(Boolean)
+
+        // Si no hay separador, mostramos todo como un bloque
+        if (parts.length <= 1) {
+            return (
+                <pre className="whitespace-pre-wrap text-sm text-slate-800 leading-relaxed">{txt}</pre>
+            )
+        }
+
+        return (
+            <div className="space-y-2">
+                {parts.map((p, idx) => (
+                    <div key={idx} className="rounded-xl border bg-white p-3 shadow-sm">
+                        <pre className="whitespace-pre-wrap text-sm text-slate-800 leading-relaxed">{p}</pre>
+                    </div>
+                ))}
+            </div>
+        )
+    }
 
     // --- CARGA DE DATOS REALES (Leads + Agentes) ---
     const fetchAgendas = async () => {
@@ -46,7 +86,8 @@ export function AdminAgendas() {
                     lead: l.name,
                     agent: l.agent_name || "Sin asignar",
                     status: schedDate < new Date() && l.status !== 'cumplidas' ? 'vencido' : 'pendiente',
-                    note: l.notes?.split('\n').pop() || "Sin notas adicionales"
+                    note: l.notes?.split('\n').pop() || "Sin notas adicionales",
+                    rawNotes: l.notes || ""
                 }
             })
             setTasks(mappedTasks)
@@ -193,7 +234,25 @@ export function AdminAgendas() {
                                         <TableCell><Badge variant="outline" className="bg-white font-bold shadow-sm">{task.agent}</Badge></TableCell>
                                         <TableCell>
                                             <p className="font-bold text-sm text-slate-800">{task.lead}</p>
-                                            <p className="text-[11px] text-slate-500 italic truncate max-w-[300px]">{task.note}</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-[11px] text-slate-500 italic truncate max-w-[300px]">{task.note}</p>
+                                                {!!task.rawNotes && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7"
+                                                        title="Ver notas completas"
+                                                        onClick={() => {
+                                                            setNotesTitle(task.lead || "Notas")
+                                                            setNotesRaw(task.rawNotes || "")
+                                                            setNotesOpen(true)
+                                                        }}
+                                                    >
+                                                        <MessageSquareText className="h-4 w-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </TableCell>
                                         <TableCell className="text-center">
                                             {task.status === 'vencido' ? 
@@ -208,6 +267,22 @@ export function AdminAgendas() {
                     </Table>
                 </CardContent>
             </Card>
+
+            {/* ✅ NUEVO (seguro): visor de notas completas, solo lectura */}
+            <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>{notesTitle || "Notas"}</DialogTitle>
+                    </DialogHeader>
+                    <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-1">
+                        {notesRaw ? (
+                            renderNotesBlocks(notesRaw)
+                        ) : (
+                            <p className="text-sm text-slate-500">Sin notas.</p>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

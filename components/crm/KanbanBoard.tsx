@@ -623,7 +623,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                     }
                     const stripUndef = (obj: any) => Object.fromEntries(Object.entries(obj).filter(([,v]) => v !== undefined))
 
-                    const { files, ...leadData } = (data || {})
+                    const { files, source, origen_dato, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ...leadData } = (data || {})
                     const oldLead = leads.find(l => l.id === leadId)
 
                     // UI local: lo sacamos del tablero (va a Ops)

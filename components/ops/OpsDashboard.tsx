@@ -1,6 +1,6 @@
 "use client"
 import { useState, useEffect } from "react"
-import { Inbox, FileText, ShieldAlert, Lock, AlertTriangle, ChevronRight, CheckCircle2, XCircle, ChevronLeft, Calendar, Filter } from "lucide-react"
+import { Inbox, FileText, ShieldAlert, Lock, AlertTriangle, ChevronRight, CheckCircle2, XCircle, ChevronLeft, Calendar, Filter, ArrowUpDown } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 // ✅ NUEVOS IMPORTS
@@ -45,7 +45,13 @@ const getCurrentMonthISO = () => {
 }
 
 // ✅ SE AGREGA "onMonthChange" A LAS PROPS
-export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMonthChange, filterPrepaga, setFilterPrepaga, prepagas }: any) {
+export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMonthChange, filterPrepaga, setFilterPrepaga, prepagas, sortOrder: sortOrderProp, setSortOrder: setSortOrderProp, onOrderChange }: any) {
+    // ✅ Orden (opcional) para la lista del padre
+    // Si el padre pasa sortOrder/setSortOrder u onOrderChange, lo usamos.
+    // Si no, mantenemos estado local (no rompe nada existente).
+    const [localSortOrder, setLocalSortOrder] = useState<'oldest' | 'newest'>('newest')
+    const sortOrder = sortOrderProp ?? localSortOrder
+    const setSortOrder = setSortOrderProp ?? setLocalSortOrder
     
     // Iniciamos siempre en el mes corriente
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthISO())
@@ -140,6 +146,29 @@ export function OpsDashboard({ operations, activeFilter, setActiveFilter, onMont
                             {prepagas && prepagas.map((p: any) => (
                                 <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
                             ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                {/* Separador */}
+                <div className="h-8 w-px bg-slate-200 mx-1"></div>
+
+                {/* ✅ ORDEN (para el listado del padre) */}
+                <div className="flex items-center gap-2 pr-2">
+                    <ArrowUpDown className="h-4 w-4 text-slate-400" />
+                    <Select
+                        value={sortOrder}
+                        onValueChange={(v: any) => {
+                            setSortOrder(v)
+                            if (onOrderChange) onOrderChange(v)
+                        }}
+                    >
+                        <SelectTrigger className="w-[200px] h-8 text-xs font-bold border-none shadow-none text-slate-600 bg-transparent focus:ring-0">
+                            <SelectValue placeholder="Orden" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="oldest">🕒 De más viejo a más nuevo</SelectItem>
+                            <SelectItem value="newest">⚡ De más nuevo a más viejo</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>

@@ -396,9 +396,11 @@ export function OpsModal({
     // ✅ FUNCIÓN PARA CAMBIAR ENTRE ALTA Y PASS AL CLICKEAR ICONO
     const toggleSaleType = async () => {
         if (!localOp) return
-        const currentType = (localOp.type === 'pass' || localOp.source === 'pass') ? 'alta' : 'pass'
-        await updateField('type', currentType)
-        if(currentType === 'pass') await updateField('source', 'pass') 
+        // ✅ IMPORTANTÍSIMO:
+        // `source` es el ORIGEN real del lead (Meta/Google/etc.). No se debe pisar para marcar PASS.
+        // PASS se marca por `type='pass'` (y/o `sub_state='auditoria_pass'`), y OPS lo interpreta así.
+        const nextType = (localOp.type === 'pass') ? 'alta' : 'pass'
+        await updateField('type', nextType)
     }
 
     // --- NAVEGACIÓN ESTADOS ---
@@ -629,7 +631,7 @@ export function OpsModal({
     }
 
     // Identificar si es PASS o ALTA para colorear
-    const isPass = localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass' || localOp.source === 'pass'
+    const isPass = localOp.type === 'pass' || localOp.sub_state === 'auditoria_pass'
 
     return (
         <>

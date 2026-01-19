@@ -28,9 +28,9 @@ interface QuotationDialogProps {
 
 // BASE DE DATOS DE PLANES
 const planesPorEmpresa: Record<string, string[]> = {
-  "Prevención Salud": ["Plan A1", "Plan A2", "Plan A4", "Plan A5", "Plan Joven"],
+  "Prevención Salud": ["Plan A1","Plan A1 CP", "Plan A2", "Plan A2 CP", "Plan A4", "Plan A4 CP", "Plan A5"],
   "DoctoRed": ["Plan 500", "Plan 1000", "Plan 2000", "Plan 3000"],
-  "Avalian": ["Plan Cerca", "Plan Integral", "Plan Superior", "Plan Selecta", "Plan Hoy (Joven)"],
+  "Avalian": ["Plan Cerca", "Plan Integral", "Plan Superior", "Plan Selecta"],
   "Swiss Medical": ["Plan S1", "Plan S2", "SMG 20", "SMG 30", "SMG 40", "SMG 50"],
   "Galeno": ["Plan Azul 200", "Plan Azul 220", "Plan Plata 300", "Plan Plata 330", "Plan Oro 440"],
   "AMPF": ["Plan Superior"],

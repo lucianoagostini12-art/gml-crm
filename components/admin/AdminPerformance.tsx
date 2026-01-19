@@ -969,18 +969,18 @@ export function AdminPerformance() {
 
                   <TableCell className="text-right font-black text-base">
                     <div className="flex flex-col items-end">
-                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'ventas')} title="Ver detalle de ventas del mes">{seller.stats.totalSales}</button>
+                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas')} title="Ver detalle de ventas del mes">{seller.stats.totalSales}</button>
                       {(seller.stats.salesPass || 0) > 0 && (
-                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'ventas')} title="Ver detalle de PASS del mes">+{seller.stats.salesPass} pass</button>
+                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass')} title="Ver detalle de PASS del mes">+{seller.stats.salesPass} pass</button>
                       )}
                     </div>
                   </TableCell>
 
                   <TableCell className="text-right font-black text-green-600 text-base">
                     <div className="flex flex-col items-end">
-                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'cumplidas')} title="Ver detalle de cumplidas del mes">{seller.stats.totalCompleted}</button>
+                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas')} title="Ver detalle de cumplidas del mes">{seller.stats.totalCompleted}</button>
                       {(seller.stats.completedPass || 0) > 0 && (
-                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'cumplidas')} title="Ver detalle de PASS cumplidas del mes">+{seller.stats.completedPass} pass</button>
+                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass')} title="Ver detalle de PASS cumplidas del mes">+{seller.stats.completedPass} pass</button>
                       )}
                     </div>
                   </TableCell>

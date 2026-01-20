@@ -6,7 +6,8 @@ function onlyDigits(v: any) {
 }
 
 export async function POST(req: Request) {
-  const supabase = createSupabaseServerClient()
+  const supabase = await createServerClient()
+
 
   try {
     // 1) Leer body

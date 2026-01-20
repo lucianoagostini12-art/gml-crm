@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createSupabaseServerClient } from "@/lib/supabase-server"
+import { createServerClient } from "@/lib/supabase-server"
 
 function onlyDigits(v: any) {
   return String(v || "").replace(/\D+/g, "")
@@ -7,7 +7,6 @@ function onlyDigits(v: any) {
 
 export async function POST(req: Request) {
   const supabase = await createServerClient()
-
 
   try {
     // 1) Leer body
@@ -34,10 +33,7 @@ export async function POST(req: Request) {
 
     const idCampaign = Number(campaignIdStr)
     if (!Number.isFinite(idCampaign)) {
-      return NextResponse.json(
-        { ok: false, error: "OMNILEADS_CAMPAIGN_ID invalida" },
-        { status: 500 }
-      )
+      return NextResponse.json({ ok: false, error: "OMNILEADS_CAMPAIGN_ID invalida" }, { status: 500 })
     }
 
     // 3) Saber quién está logueado (CRM)
@@ -45,7 +41,6 @@ export async function POST(req: Request) {
     if (authErr) {
       return NextResponse.json({ ok: false, error: authErr.message }, { status: 401 })
     }
-
     const user = authData?.user
     if (!user) {
       return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 })
@@ -81,14 +76,7 @@ export async function POST(req: Request) {
     const loginJson = await loginRes.json().catch(() => null)
     if (!loginRes.ok) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            loginJson?.detail ||
-            loginJson?.message ||
-            `Login OmniLeads fallo (${loginRes.status})`,
-          raw: loginJson,
-        },
+        { ok: false, error: loginJson?.detail || loginJson?.message || `Login OmniLeads fallo (${loginRes.status})`, raw: loginJson },
         { status: 502 }
       )
     }
@@ -105,34 +93,20 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        idCampaign,
-        idAgent,
-        phone,
-      }),
+      body: JSON.stringify({ idCampaign, idAgent, phone }),
       cache: "no-store",
     })
 
     const callJson = await callRes.json().catch(() => null)
     if (!callRes.ok) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            callJson?.detail ||
-            callJson?.message ||
-            `makeCall fallo (${callRes.status})`,
-          raw: callJson,
-        },
+        { ok: false, error: callJson?.detail || callJson?.message || `makeCall fallo (${callRes.status})`, raw: callJson },
         { status: 502 }
       )
     }
 
     return NextResponse.json({ ok: true, result: callJson })
   } catch (error: any) {
-    return NextResponse.json(
-      { ok: false, error: error?.message || "Unknown error" },
-      { status: 500 }
-    )
+    return NextResponse.json({ ok: false, error: error?.message || "Unknown error" }, { status: 500 })
   }
 }

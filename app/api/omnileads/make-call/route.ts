@@ -33,10 +33,13 @@ export async function POST(req: Request) {
 
     const idCampaign = Number(campaignIdStr)
     if (!Number.isFinite(idCampaign)) {
-      return NextResponse.json({ ok: false, error: "OMNILEADS_CAMPAIGN_ID invalida" }, { status: 500 })
+      return NextResponse.json(
+        { ok: false, error: "OMNILEADS_CAMPAIGN_ID invalida" },
+        { status: 500 }
+      )
     }
 
-    // 3) Saber quién está logueado (CRM)  ✅ ahora funciona porque lee cookies
+    // 3) Saber quién está logueado (CRM)
     const { data: authData, error: authErr } = await supabase.auth.getUser()
     if (authErr) {
       return NextResponse.json({ ok: false, error: authErr.message }, { status: 401 })
@@ -77,7 +80,14 @@ export async function POST(req: Request) {
     const loginJson = await loginRes.json().catch(() => null)
     if (!loginRes.ok) {
       return NextResponse.json(
-        { ok: false, error: loginJson?.detail || loginJson?.message || `Login OmniLeads fallo (${loginRes.status})` },
+        {
+          ok: false,
+          error:
+            loginJson?.detail ||
+            loginJson?.message ||
+            `Login OmniLeads fallo (${loginRes.status})`,
+          raw: loginJson,
+        },
         { status: 502 }
       )
     }
@@ -107,7 +117,10 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: callJson?.detail || callJson?.message || `makeCall fallo (${callRes.status})`,
+          error:
+            callJson?.detail ||
+            callJson?.message ||
+            `makeCall fallo (${callRes.status})`,
           raw: callJson,
         },
         { status: 502 }

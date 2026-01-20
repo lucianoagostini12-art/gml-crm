@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase"
+import { createServerClient } from "@/lib/supabase-server"
 
 function onlyDigits(v: any) {
   return String(v || "").replace(/\D+/g, "")
 }
 
 export async function POST(req: Request) {
-  const supabase = createClient()
+  const supabase = createServerClient()
 
   try {
     // 1) Leer body
@@ -36,11 +36,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "OMNILEADS_CAMPAIGN_ID invalida" }, { status: 500 })
     }
 
-    // 3) Saber quién está logueado (CRM)
+    // 3) Saber quién está logueado (CRM)  ✅ ahora funciona porque lee cookies
     const { data: authData, error: authErr } = await supabase.auth.getUser()
     if (authErr) {
       return NextResponse.json({ ok: false, error: authErr.message }, { status: 401 })
     }
+
     const user = authData?.user
     if (!user) {
       return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 })
@@ -104,7 +105,11 @@ export async function POST(req: Request) {
     const callJson = await callRes.json().catch(() => null)
     if (!callRes.ok) {
       return NextResponse.json(
-        { ok: false, error: callJson?.detail || callJson?.message || `makeCall fallo (${callRes.status})`, raw: callJson },
+        {
+          ok: false,
+          error: callJson?.detail || callJson?.message || `makeCall fallo (${callRes.status})`,
+          raw: callJson,
+        },
         { status: 502 }
       )
     }

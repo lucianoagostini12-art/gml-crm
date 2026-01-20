@@ -89,11 +89,7 @@ async function safeLeadEvent(
 }
 
 export async function POST(req: Request) {
-  import { createServerClient } from "@/lib/supabase-server"
-
-// ...
-const supabase = createServerClient()
-
+  const supabase = createClient()
 
   try {
     const body = await req.json()

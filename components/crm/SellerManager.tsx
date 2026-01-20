@@ -129,6 +129,10 @@ export function SellerManager({
 
   const lastAutoOpenAtRef = useRef<number>(0)
 
+  // ✅ Para abrir Mis Ventas directo desde campana (chat/files)
+  const [openMySalesLeadId, setOpenMySalesLeadId] = useState<string | null>(null)
+  const [openMySalesTab, setOpenMySalesTab] = useState<"chat" | "files">("chat")
+
   // ✅ CONTADOR REAL para "Mis Ventas" (solo notifs relacionadas a ventas = con lead_id)
   const unreadSalesNotifCount = useMemo(() => {
     return unreadNotifications.filter((n) => !!n.lead_id).length
@@ -341,7 +345,16 @@ export function SellerManager({
 
     // 2) Navegar al lugar
     if (n.lead_id) {
-      // Venta relacionada: abrimos LeadDetail directo
+      // Si es chat: ir a Mis Ventas y abrir directamente el chat de esa venta
+      if (n.type === "chat") {
+        setCurrentView("mysales")
+        setOpenMySalesLeadId(n.lead_id)
+        setOpenMySalesTab(n.target_tab === "files" ? "files" : "chat")
+        setIsNotifOpen(false)
+        return
+      }
+
+      // Venta relacionada (status/agenda/etc): abrimos LeadDetail directo
       setSelectedLeadId(n.lead_id)
       setIsNotifOpen(false)
       return
@@ -693,7 +706,15 @@ export function SellerManager({
           {currentView === "contacts" && <ContactsView userName={currentUser} onLeadClick={setSelectedLeadId} />}
           {currentView === "agenda" && <AgendasView userName={currentUser} onLeadClick={setSelectedLeadId} />}
 
-          {currentView === "mysales" && <MySalesView userName={currentUser} />}
+          {currentView === "mysales" && (
+            <MySalesView
+              userName={currentUser}
+              supabase={supabase}
+              openLeadId={openMySalesLeadId}
+              openTab={openMySalesTab}
+              onOpenedLead={() => setOpenMySalesLeadId(null)}
+            />
+          )}
 
           {currentView === "stats" && <DashboardView />}
           {currentView === "announcements" && <AnnouncementsView />}

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { createServerClient } from "@/lib/supabase-server"
+import { createSupabaseServerClient } from "@/lib/supabase-server"
 
 function onlyDigits(v: any) {
   return String(v || "").replace(/\D+/g, "")
 }
 
 export async function POST(req: Request) {
-  const supabase = createServerClient()
+  const supabase = createSupabaseServerClient()
 
   try {
     // 1) Leer body

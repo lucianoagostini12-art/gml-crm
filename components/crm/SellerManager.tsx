@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { createClient } from "@supabase/supabase-js"
 
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,7 @@ import {
   LogOut,
   MessageCircle,
   CalendarClock,
-  Info
+  Info,
 } from "lucide-react"
 
 // --- TUS VISTAS ---
@@ -49,13 +49,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// --- HELPER PARA LEER COMENTARIOS DE LA DB ---
-const parseComments = (comments: any) => {
-    if (!comments) return []
-    if (Array.isArray(comments)) return comments
-    try { return JSON.parse(comments) } catch { return [] }
-}
-
 type AppNotification = {
   id: string
   user_name: string | null
@@ -64,6 +57,11 @@ type AppNotification = {
   body: string | null
   read: boolean | null
   created_at: string | null
+
+  // ✅ NUEVO: para navegación directa a la venta
+  lead_id?: string | null
+  target_tab?: string | null
+  meta?: any
 }
 
 export function SellerManager({
@@ -76,7 +74,7 @@ export function SellerManager({
   const currentUser = userName || "Vendedora"
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-  
+
   // ✅ 1. INICIALIZACIÓN INTELIGENTE (Lee la URL al cargar)
   const [currentView, setCurrentView] = useState<
     | "board"
@@ -90,9 +88,9 @@ export function SellerManager({
     | "focus"
     | "mysales"
   >(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search)
-      const tab = params.get('tab')
+      const tab = params.get("tab")
       if (tab) return tab as any
     }
     return "board"
@@ -100,25 +98,22 @@ export function SellerManager({
 
   // ✅ 2. EFECTO DE PERSISTENCIA (Actualiza la URL al cambiar de vista)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search)
-      if (currentView === 'board') {
-        params.delete('tab')
+      if (currentView === "board") {
+        params.delete("tab")
       } else {
-        params.set('tab', currentView)
+        params.set("tab", currentView)
       }
       const newUrl = `${window.location.pathname}?${params.toString()}`
-      window.history.replaceState(null, '', newUrl)
+      window.history.replaceState(null, "", newUrl)
     }
   }, [currentView])
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  
-  // --- ALERTAS & NOTIFICACIONES (ESTADOS) ---
+
+  // --- ALERTAS & NOTIFICACIONES ---
   const [expiredTasks, setExpiredTasks] = useState<any[]>([])
-  
-  // Contadores visuales
-  const [problematicSalesCount, setProblematicSalesCount] = useState(0) 
 
   const [unreadNotifications, setUnreadNotifications] = useState<AppNotification[]>([])
   const [isNotifOpen, setIsNotifOpen] = useState(false)
@@ -134,58 +129,53 @@ export function SellerManager({
 
   const lastAutoOpenAtRef = useRef<number>(0)
 
-  // 1. VENTAS CON PROBLEMAS
-  const fetchProblematicSales = async () => {
-      const { count } = await supabase
-          .from('leads')
-          .select('*', { count: 'exact', head: true })
-          .eq('agent_name', currentUser)
-          .in('status', ['rechazado', 'demoras']) 
-      
-      setProblematicSalesCount(count || 0)
-  }
+  // ✅ CONTADOR REAL para "Mis Ventas" (solo notifs relacionadas a ventas = con lead_id)
+  const unreadSalesNotifCount = useMemo(() => {
+    return unreadNotifications.filter((n) => !!n.lead_id).length
+  }, [unreadNotifications])
 
-  // 2. ALERTAS DE AGENDA (Vencidas + Próximas)
+  // 1) ALERTAS DE AGENDA (Vencidas + Próximas)
   const fetchAgendaAlerts = async () => {
-      // Traemos leads activos asignados a mi
-      const { data } = await supabase.from('leads')
-        .select('id, name, scheduled_for')
-        .eq('agent_name', currentUser)
-        .not('status', 'in', '("perdido","vendido")') 
-      
-      if (!data) return;
-      
-      const now = new Date();
-      const in30Mins = new Date(now.getTime() + 30 * 60000); // Dentro de 30 mins
-      let alertsList: any[] = [];
+    // Traemos leads activos asignados a mi
+    const { data } = await supabase
+      .from("leads")
+      .select("id, name, scheduled_for")
+      .eq("agent_name", currentUser)
+      .not("status", "in", '("perdido","vendido")')
 
-      data.forEach((lead: any) => {
-          if (lead.scheduled_for) {
-              const schedDate = new Date(lead.scheduled_for);
-              // Caso 1: Vencida
-              if (schedDate < now) {
-                  alertsList.push({ 
-                      type: 'vencida', 
-                      title: `Llamada vencida: ${lead.name}`, 
-                      leadId: lead.id, 
-                      time: schedDate 
-                  })
-              } 
-              // Caso 2: Próxima (en los siguientes 30 min)
-              else if (schedDate <= in30Mins) {
-                  alertsList.push({ 
-                      type: 'proxima', 
-                      title: `Llamar pronto: ${lead.name}`, 
-                      leadId: lead.id, 
-                      time: schedDate 
-                  })
-              }
-          }
-      })
-      
-      // Ordenamos: primero las urgentes (vencidas), luego las próximas
-      alertsList.sort((a, b) => a.time.getTime() - b.time.getTime());
-      setExpiredTasks(alertsList);
+    if (!data) return
+
+    const now = new Date()
+    const in30Mins = new Date(now.getTime() + 30 * 60000) // Dentro de 30 mins
+    let alertsList: any[] = []
+
+    data.forEach((lead: any) => {
+      if (lead.scheduled_for) {
+        const schedDate = new Date(lead.scheduled_for)
+        // Caso 1: Vencida
+        if (schedDate < now) {
+          alertsList.push({
+            type: "vencida",
+            title: `Llamada vencida: ${lead.name}`,
+            leadId: lead.id,
+            time: schedDate,
+          })
+        }
+        // Caso 2: Próxima (en los siguientes 30 min)
+        else if (schedDate <= in30Mins) {
+          alertsList.push({
+            type: "proxima",
+            title: `Llamar pronto: ${lead.name}`,
+            leadId: lead.id,
+            time: schedDate,
+          })
+        }
+      }
+    })
+
+    // Ordenamos: primero las urgentes (vencidas), luego las próximas
+    alertsList.sort((a, b) => a.time.getTime() - b.time.getTime())
+    setExpiredTasks(alertsList)
   }
 
   useEffect(() => {
@@ -197,11 +187,11 @@ export function SellerManager({
     let alive = true
 
     const init = async () => {
-      // A. Notificaciones de DB (Wiki, Anuncios)
+      // A. Notificaciones de DB (TODAS): Para mi O para todos
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
-        .or(`user_name.eq.${currentUser},user_name.is.null`) // Filtro mejorado: Para mi O para todos
+        .or(`user_name.eq.${currentUser},user_name.is.null`)
         .eq("read", false)
         .order("created_at", { ascending: false })
         .limit(50)
@@ -210,16 +200,15 @@ export function SellerManager({
       if (!error && data) setUnreadNotifications(data as AppNotification[])
 
       // B. Chequeos Iniciales
-      await fetchProblematicSales()
-      await fetchAgendaAlerts() // Llamamos a la nueva función de agendas
+      await fetchAgendaAlerts()
 
       // C. Foto Real
       const { data: profileData } = await supabase
-        .from('profiles')
-        .select('avatar_url')
-        .eq('full_name', currentUser)
+        .from("profiles")
+        .select("avatar_url")
+        .eq("full_name", currentUser)
         .maybeSingle()
-      
+
       if (profileData?.avatar_url) {
         setRealAvatarUrl(profileData.avatar_url)
       }
@@ -228,16 +217,16 @@ export function SellerManager({
     // --- FUNCIÓN DE AUTO-APERTURA PROTEGIDA ---
     const openBellSoft = () => {
       // 🛑 PROTECCIÓN: Si hay un modal abierto (LeadDetail), NO abrir el popover encima.
-      if (selectedLeadId) return;
+      if (selectedLeadId) return
 
       const now = Date.now()
-      if (now - lastAutoOpenAtRef.current > 2000) { // Pequeño delay
+      if (now - lastAutoOpenAtRef.current > 2000) {
         lastAutoOpenAtRef.current = now
         setIsNotifOpen(true)
       }
     }
 
-    // --- SUSCRIPCIÓN 1: NOTIFICACIONES (ANUNCIOS / WIKI) ---
+    // --- SUSCRIPCIÓN 1: NOTIFICACIONES (VERDAD ABSOLUTA: DB) ---
     notifChannel = supabase
       .channel(`rt-notifications-${currentUser}`)
       .on(
@@ -247,60 +236,21 @@ export function SellerManager({
           const n = payload.new as AppNotification
           // Si es para mi o para todos
           if (n.user_name === currentUser || n.user_name === null) {
-              setUnreadNotifications((prev) => [n, ...prev])
-              openBellSoft()
+            setUnreadNotifications((prev) => [n, ...prev])
+            openBellSoft()
           }
         }
       )
       .subscribe()
 
-    // --- SUSCRIPCIÓN 2: LEADS (CHATS / AGENDAS / VENTAS) ---
-    // Escuchamos TODO lo que pase en mis leads
+    // --- SUSCRIPCIÓN 2: LEADS (solo para refrescar agenda/alertas visuales) ---
     salesChannel = supabase
-      .channel(`rt-sales-monitor-${currentUser}`)
+      .channel(`rt-sales-agenda-${currentUser}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "leads", filter: `agent_name=eq.${currentUser}` },
-        (payload: any) => {
-            // 1. Recalcular Alertas siempre que algo cambie
-            fetchProblematicSales()
-            fetchAgendaAlerts() 
-
-            // 2. DETECTOR DE CHATS (Admin/OPS -> Vendedor)
-            if (payload.eventType === 'UPDATE') {
-                const newLead = payload.new;
-                const newComments = parseComments(newLead.comments);
-                
-                if (newComments.length > 0) {
-                    const lastMsg = newComments[newComments.length - 1];
-                    
-                    // Si el mensaje es reciente (margen 10s) y NO es mío -> Notificar
-                    const msgTime = new Date(lastMsg.date).getTime();
-                    const now = Date.now();
-                    const isRecent = (now - msgTime) < 10000; 
-
-                    if (lastMsg.author !== currentUser && isRecent) {
-                        // Crear notificación local "Chat"
-                        const chatNotif: AppNotification = {
-                            id: `chat-${newLead.id}-${Date.now()}`,
-                            user_name: currentUser,
-                            type: 'chat', 
-                            title: `Mensaje de ${lastMsg.author}`,
-                            body: `${lastMsg.text} (Cliente: ${newLead.name})`,
-                            read: false,
-                            created_at: new Date().toISOString()
-                        }
-                        
-                        // Evitar duplicados
-                        setUnreadNotifications(prev => {
-                            if (prev.some(n => n.body === chatNotif.body)) return prev;
-                            return [chatNotif, ...prev];
-                        });
-                        
-                        openBellSoft();
-                    }
-                }
-            }
+        () => {
+          fetchAgendaAlerts()
         }
       )
       .subscribe()
@@ -314,13 +264,17 @@ export function SellerManager({
         async (payload: any) => {
           const newQuote = payload.new as { id: string; lead_id: string | null }
           if (!newQuote?.lead_id) return
-          const { data: lead, error } = await supabase.from("leads").select("id, assigned_to, agent_name").eq("id", newQuote.lead_id).maybeSingle()
+          const { data: lead, error } = await supabase
+            .from("leads")
+            .select("id, assigned_to, agent_name")
+            .eq("id", newQuote.lead_id)
+            .maybeSingle()
           if (error || !lead) return
           const belongsToSeller = lead.assigned_to === currentUser || lead.agent_name === currentUser
           if (!belongsToSeller) return
           setQuoteAlertsCount((c) => c + 1)
           // Usamos la misma protección para no abrir si hay modal
-          if (!selectedLeadId) setIsAlertsOpen(true);
+          if (!selectedLeadId) setIsAlertsOpen(true)
         }
       )
       .subscribe()
@@ -333,16 +287,22 @@ export function SellerManager({
       if (quotesChannel) supabase.removeChannel(quotesChannel)
       if (salesChannel) supabase.removeChannel(salesChannel)
     }
-  }, [currentUser, selectedLeadId]) // Agregado selectedLeadId para que el efecto sepa si bloquear
+  }, [currentUser, selectedLeadId])
 
   // Fix Lead Detail
   useEffect(() => {
     let alive = true
     const fetchLead = async () => {
-      if (!selectedLeadId) { setSelectedLead(null); return }
+      if (!selectedLeadId) {
+        setSelectedLead(null)
+        return
+      }
       const { data, error } = await supabase.from("leads").select("*").eq("id", selectedLeadId).maybeSingle()
       if (!alive) return
-      if (error || !data) { setSelectedLead(null); return }
+      if (error || !data) {
+        setSelectedLead(null)
+        return
+      }
       const row: any = data
       const adapted: any = {
         ...row,
@@ -355,18 +315,43 @@ export function SellerManager({
       setSelectedLead(adapted as CRMLead)
     }
     fetchLead()
-    return () => { alive = false }
+    return () => {
+      alive = false
+    }
   }, [selectedLeadId])
 
-  const handleCreateConfirm = async (_data: any) => { setIsCreateOpen(false) }
+  const handleCreateConfirm = async (_data: any) => {
+    setIsCreateOpen(false)
+  }
 
   const markAllNotificationsAsRead = async () => {
     // Limpiamos UI
+    const ids = unreadNotifications.map((n) => n.id)
     setUnreadNotifications([])
-    // Solo actualizamos en DB las que tienen ID real (las de chat son locales)
-    const ids = unreadNotifications.filter(n => !n.id.startsWith('chat-')).map((n) => n.id)
     if (ids.length === 0) return
     await supabase.from("notifications").update({ read: true }).in("id", ids)
+  }
+
+  const handleNotificationClick = async (n: AppNotification) => {
+    // 1) Marcar leída (DB + UI)
+    try {
+      await supabase.from("notifications").update({ read: true }).eq("id", n.id)
+    } catch {}
+    setUnreadNotifications((prev) => prev.filter((x) => x.id !== n.id))
+
+    // 2) Navegar al lugar
+    if (n.lead_id) {
+      // Venta relacionada: abrimos LeadDetail directo
+      setSelectedLeadId(n.lead_id)
+      setIsNotifOpen(false)
+      return
+    }
+
+    // Notifs globales: mover a la vista adecuada
+    if (n.type === "wiki") setCurrentView("wiki")
+    else if (n.type === "announcement") setCurrentView("announcements")
+
+    setIsNotifOpen(false)
   }
 
   return (
@@ -374,9 +359,7 @@ export function SellerManager({
       {/* --- SIDEBAR --- */}
       <aside
         className={`h-full bg-slate-50/50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out z-20 flex flex-col ${
-          isSidebarOpen
-            ? "w-[260px] min-w-[260px]"
-            : "w-0 min-w-0 opacity-0 overflow-hidden"
+          isSidebarOpen ? "w-[260px] min-w-[260px]" : "w-0 min-w-0 opacity-0 overflow-hidden"
         }`}
       >
         <div className="p-6 h-16 flex items-center border-b border-slate-200 dark:border-slate-800 shrink-0">
@@ -422,11 +405,11 @@ export function SellerManager({
             <div className="flex items-center gap-3">
               <DollarSign className="h-4 w-4 shrink-0 text-green-600" /> Mis Ventas
             </div>
-            
-            {/* ✅ CONTADOR DE VENTAS PROBLEMÁTICAS */}
-            {problematicSalesCount > 0 && (
+
+            {/* ✅ AHORA: contador de NOTIFICACIONES de MIS VENTAS (lead_id) */}
+            {unreadSalesNotifCount > 0 && (
               <span className="bg-red-500 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full animate-pulse shadow-sm">
-                {problematicSalesCount}
+                {unreadSalesNotifCount}
               </span>
             )}
           </Button>
@@ -477,26 +460,26 @@ export function SellerManager({
         </nav>
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
-  <Button
-    variant="ghost"
-    className="w-full justify-start gap-3 mb-2 text-slate-500 hover:text-slate-800 dark:hover:text-white"
-    onClick={() => setCurrentView("settings")}
-  >
-    <Settings className="h-4 w-4" /> Config
-  </Button>
-
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 mb-2 text-slate-500 hover:text-slate-800 dark:hover:text-white"
+            onClick={() => setCurrentView("settings")}
+          >
+            <Settings className="h-4 w-4" /> Config
+          </Button>
 
           <div className="flex items-center gap-3 justify-between">
             <div className="flex items-center gap-2">
               <Avatar className="h-8 w-8">
                 {/* ✅ FOTO REAL */}
-                <AvatarImage src={realAvatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser}`} className="object-cover" />
+                <AvatarImage
+                  src={realAvatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser}`}
+                  className="object-cover"
+                />
                 <AvatarFallback>{currentUser[0]}</AvatarFallback>
               </Avatar>
               <div className="flex flex-col overflow-hidden">
-                <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">
-                  {currentUser}
-                </span>
+                <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">{currentUser}</span>
                 <span className="text-[10px] text-slate-500 uppercase">Vendedora</span>
               </div>
             </div>
@@ -543,7 +526,6 @@ export function SellerManager({
           </div>
 
           <div className="flex items-center gap-2">
-            
             {/* ⚠️ ALERTAS (TRIÁNGULO): Agendas Vencidas y Próximas */}
             <Popover open={isAlertsOpen} onOpenChange={setIsAlertsOpen}>
               <PopoverTrigger asChild>
@@ -559,7 +541,7 @@ export function SellerManager({
                     <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-600 rounded-full border border-white animate-pulse"></span>
                   )}
 
-                  {(expiredTasks.length + quoteAlertsCount) > 0 && (
+                  {expiredTasks.length + quoteAlertsCount > 0 && (
                     <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-red-600 text-white text-[10px] flex items-center justify-center">
                       {expiredTasks.length + quoteAlertsCount}
                     </span>
@@ -583,18 +565,28 @@ export function SellerManager({
                   )}
 
                   {expiredTasks.length > 0 ? (
-                      expiredTasks.map((task: any, i) => (
-                        <div key={i} className="p-3 border-b hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedLeadId(task.leadId)}>
-                            <div className={`flex items-center gap-2 font-bold text-xs mb-1 ${task.type === 'vencida' ? 'text-red-600' : 'text-amber-600'}`}>
-                                <CalendarClock size={12}/> {task.type === 'vencida' ? 'VENCIDA' : 'PRÓXIMA (30 min)'}
-                            </div>
-                            <p className="text-sm font-medium text-slate-700">{task.title}</p>
-                            <span className="text-[10px] text-slate-400">{new Date(task.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} hs</span>
+                    expiredTasks.map((task: any, i) => (
+                      <div
+                        key={i}
+                        className="p-3 border-b hover:bg-slate-50 cursor-pointer"
+                        onClick={() => setSelectedLeadId(task.leadId)}
+                      >
+                        <div
+                          className={`flex items-center gap-2 font-bold text-xs mb-1 ${
+                            task.type === "vencida" ? "text-red-600" : "text-amber-600"
+                          }`}
+                        >
+                          <CalendarClock size={12} /> {task.type === "vencida" ? "VENCIDA" : "PRÓXIMA (30 min)"}
                         </div>
-                      ))
-                  ) : (
-                      quoteAlertsCount === 0 && <div className="p-4 text-xs text-slate-500 text-center italic">Agenda al día.</div>
-                  )}
+                        <p className="text-sm font-medium text-slate-700">{task.title}</p>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(task.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} hs
+                        </span>
+                      </div>
+                    ))
+                  ) : quoteAlertsCount === 0 ? (
+                    <div className="p-4 text-xs text-slate-500 text-center italic">Agenda al día.</div>
+                  ) : null}
 
                   {quoteAlertsCount > 0 && (
                     <div className="p-3 border-t bg-slate-50 dark:bg-slate-900 flex justify-end">
@@ -607,7 +599,7 @@ export function SellerManager({
               </PopoverContent>
             </Popover>
 
-            {/* 🔔 NOTIFICACIONES (CAMPANA): Chats, Wiki, Anuncios */}
+            {/* 🔔 NOTIFICACIONES (CAMPANA): VERDAD ABSOLUTA (DB) */}
             <Popover open={isNotifOpen} onOpenChange={setIsNotifOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="icon" className="relative dark:border-slate-700 dark:bg-slate-900">
@@ -631,24 +623,46 @@ export function SellerManager({
                     <div className="p-4 text-sm text-slate-500 text-center">Sin novedades.</div>
                   ) : (
                     unreadNotifications.map((n) => (
-                      <div key={n.id} className={`p-3 border-b last:border-b-0 ${n.type === 'chat' ? 'bg-blue-50/50' : ''}`}>
+                      <div
+                        key={n.id}
+                        className={`p-3 border-b last:border-b-0 cursor-pointer hover:bg-slate-50 ${
+                          n.type === "chat" ? "bg-blue-50/50" : ""
+                        }`}
+                        onClick={() => handleNotificationClick(n)}
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div className="text-sm font-semibold flex items-center gap-2">
                             {/* Icono según tipo */}
-                            {n.type === 'chat' ? <MessageCircle size={14} className="text-blue-600"/> : 
-                             n.type === 'wiki' ? <BookOpen size={14} className="text-purple-500"/> : 
-                             n.type === 'announcement' ? <Megaphone size={14} className="text-orange-500"/> :
-                             <Info size={14} className="text-slate-400"/>}
-                            
+                            {n.type === "chat" ? (
+                              <MessageCircle size={14} className="text-blue-600" />
+                            ) : n.type === "wiki" ? (
+                              <BookOpen size={14} className="text-purple-500" />
+                            ) : n.type === "announcement" ? (
+                              <Megaphone size={14} className="text-orange-500" />
+                            ) : (
+                              <Info size={14} className="text-slate-400" />
+                            )}
+
                             {n.title ?? "Notificación"}
                           </div>
-                          
+
                           <span className="text-[9px] text-slate-400 whitespace-nowrap">
-                            {n.created_at ? new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Ahora'}
+                            {n.created_at
+                              ? new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                              : "Ahora"}
                           </span>
                         </div>
 
-                        {n.body && <div className="text-xs text-slate-600 mt-1 line-clamp-2 leading-relaxed">{n.body}</div>}
+                        {n.body && (
+                          <div className="text-xs text-slate-600 mt-1 line-clamp-2 leading-relaxed">{n.body}</div>
+                        )}
+
+                        {/* Hint visual si apunta a venta */}
+                        {n.lead_id && (
+                          <div className="mt-2 text-[10px] text-slate-400">
+                            Ir a venta • <span className="font-mono">{String(n.lead_id).slice(0, 8)}…</span>
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -675,16 +689,10 @@ export function SellerManager({
 
         <div className="flex-1 overflow-hidden bg-slate-50 dark:bg-slate-950/50 relative transition-colors">
           {/* ✅ AQUÍ ESTÁ EL CAMBIO CLAVE: pasar setSelectedLeadId */}
-          {currentView === "board" && (
-            <KanbanBoard userName={currentUser} onLeadClick={setSelectedLeadId} />
-          )}
-          {currentView === "contacts" && (
-            <ContactsView userName={currentUser} onLeadClick={setSelectedLeadId} />
-          )}
-          {currentView === "agenda" && (
-            <AgendasView userName={currentUser} onLeadClick={setSelectedLeadId} />
-          )}
-          
+          {currentView === "board" && <KanbanBoard userName={currentUser} onLeadClick={setSelectedLeadId} />}
+          {currentView === "contacts" && <ContactsView userName={currentUser} onLeadClick={setSelectedLeadId} />}
+          {currentView === "agenda" && <AgendasView userName={currentUser} onLeadClick={setSelectedLeadId} />}
+
           {currentView === "mysales" && <MySalesView userName={currentUser} />}
 
           {currentView === "stats" && <DashboardView />}
@@ -696,12 +704,7 @@ export function SellerManager({
         </div>
       </main>
 
-      <CreateLeadDialog
-        open={isCreateOpen}
-        onOpenChange={setIsCreateOpen}
-        onConfirm={handleCreateConfirm}
-        userName={currentUser}
-      />
+      <CreateLeadDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} onConfirm={handleCreateConfirm} userName={currentUser} />
 
       {/* ✅ UN SOLO LUGAR PARA EL MODAL (EL PADRE) */}
       {selectedLeadId && (

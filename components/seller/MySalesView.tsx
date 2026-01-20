@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { createClient } from "@/lib/supabase"
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -122,11 +122,16 @@ const getAdminStatus = (status: string) => {
 
 interface MySalesViewProps {
   userName: string
+  supabase: SupabaseClient
   onLogout?: () => void
+
+  // ✅ Abrir directo desde campana / notificación
+  openLeadId?: string | null
+  openTab?: "chat" | "files"
+  onOpenedLead?: () => void
 }
 
-export function MySalesView({ userName, onLogout }: MySalesViewProps) {
-  const supabase = createClient()
+export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab = "chat", onOpenedLead }: MySalesViewProps) {
 
   const [sales, setSales] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -234,6 +239,38 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userName])
 
+
+  // ✅ ABRIR VENTA DESDE NOTIFICACIÓN (lead_id) + TAB
+  useEffect(() => {
+    if (!openLeadId) return
+
+    // 1) si ya está en la lista, abrir directo
+    const found = (sales || []).find((s) => s.id === openLeadId)
+    if (found) {
+      setSelectedSale(found)
+      setActiveTab(openTab)
+      onOpenedLead?.()
+      return
+    }
+
+    // 2) fallback: traerla desde DB (por si todavía no entró en la lista)
+    const fetchOne = async () => {
+      const { data, error } = await supabase.from("leads").select("*").eq("id", openLeadId).maybeSingle()
+      if (error || !data) return
+      // seguridad: solo si le pertenece a la vendedora
+      if (data.agent_name !== userName) return
+
+      setSales((prev) => [data, ...prev])
+      setSelectedSale(data)
+      setActiveTab(openTab)
+      onOpenedLead?.()
+    }
+
+    fetchOne()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openLeadId])
+
+
   // --- 2. CARGA DE DETALLES ---
   const fetchDocs = async (leadId: string) => {
     setDocsLoading(true)
@@ -288,6 +325,22 @@ export function MySalesView({ userName, onLogout }: MySalesViewProps) {
     return () => {
       supabase.removeChannel(chatChannel)
     }
+  }, [selectedSale?.id, supabase, userName])
+
+
+  // ✅ Al abrir una venta, marcar como leídas las notificaciones de ESA venta (lead_id)
+  // Esto hace que baje el contador de campana y el badge del sidebar.
+  useEffect(() => {
+    if (!selectedSale?.id) return
+    supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("user_name", userName)
+      .eq("lead_id", selectedSale.id)
+      .eq("read", false)
+      .then(() => {
+        // no-op: el estado visual lo maneja SellerManager
+      })
   }, [selectedSale?.id, supabase, userName])
 
   // --- ACCIONES ---

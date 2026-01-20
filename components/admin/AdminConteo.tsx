@@ -1,13 +1,15 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calculator, Filter, DollarSign, RefreshCw, CheckCircle2, TrendingUp } from "lucide-react"
+import { Calculator, Filter, DollarSign, RefreshCw, CheckCircle2, TrendingUp, Download, FileSpreadsheet } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 // --- REGLAS DE CÁLCULO ---
 const INITIAL_CALC_RULES = {
@@ -23,6 +25,50 @@ const INITIAL_CALC_RULES = {
 export function AdminConteo() {
   const supabase = createClient()
 
+  // --- UTILIDAD PARA EXPORTAR A CSV (Mismo estilo OpsMetrics) ---
+  const exportToCSV = (rows: any[], filename: string) => {
+    if (!rows || rows.length === 0) return
+
+    const headers = [
+      "Vendedor",
+      "Ventas (Altas)",
+      "Ventas PASS",
+      "Cumplidas (Oficial)",
+      "Cumplidas PASS",
+      "Efectividad %",
+      "Hoy",
+      "Semana",
+      "Estado",
+    ]
+
+    const dataRows = rows.map((r: any) => [
+      r.name,
+      r.monthly ?? 0,
+      r.monthlyPassCount ?? 0,
+      r.fulfilled ?? 0,
+      r.passCount ?? 0,
+      r.ratio ?? 0,
+      r.daily ?? 0,
+      r.weekly ?? 0,
+      r.status ?? "-",
+    ])
+
+    const csvContent = [
+      headers.join(","),
+      ...dataRows.map((e: any) => e.map((item: any) => `"${String(item).replace(/"/g, '""')}"`).join(",")),
+    ].join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `${filename}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
   // Filtros dinámicos
   const [selectedMonth, setSelectedMonth] = useState((new Date().getMonth() + 1).toString())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
@@ -34,6 +80,13 @@ export function AdminConteo() {
   const [agents, setAgents] = useState<any[]>([])
   const [globalTotals, setGlobalTotals] = useState({ monthly: 0, fulfilled: 0, revenue: 0 })
   const [profilesMap, setProfilesMap] = useState<Record<string, string>>({})
+
+  // --- ESTADO MODAL DESCARGA (mismo patrón que OpsMetrics) ---
+  const currentYear = new Date().getFullYear()
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false)
+  const [downloadType, setDownloadType] = useState("current") // 'current' | 'global' | 'custom'
+  const [downloadMonth, setDownloadMonth] = useState((new Date().getMonth() + 1).toString())
+  const [downloadYear, setDownloadYear] = useState(currentYear.toString())
 
   // Helpers
   const norm = (v: any) => String(v ?? "").trim().toLowerCase()
@@ -396,6 +449,22 @@ const startOfWeekMonday = (ref: Date) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth, selectedYear, profilesMap])
 
+  // --- MANEJO DE DESCARGA (mismo estilo OpsMetrics) ---
+  const executeDownload = () => {
+    // Exportamos el RESUMEN visible (tabla por vendedor). Para Conteo, esto ya es lo más útil.
+    let filename = "Reporte_Conteo"
+    if (downloadType === "current") {
+      filename = `Reporte_Conteo_${selectedYear === "all" ? "Historico" : `${selectedMonth}_${selectedYear}`}`
+    } else if (downloadType === "global") {
+      filename = "Reporte_Conteo_Global"
+    } else if (downloadType === "custom") {
+      filename = `Reporte_Conteo_${downloadMonth}_${downloadYear}`
+    }
+
+    exportToCSV(agents, filename)
+    setDownloadModalOpen(false)
+  }
+
   return (
     <div className="p-6 h-full overflow-y-auto max-w-7xl mx-auto space-y-8 pb-20 custom-scrollbar">
       {/* HEADER */}
@@ -407,9 +476,19 @@ const startOfWeekMonday = (ref: Date) => {
           <p className="text-slate-500 font-medium text-sm">Auditoría real de producción y cumplimiento.</p>
         </div>
 
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm">
-          <Filter className="h-4 w-4 text-slate-400 ml-2" />
-          <Select value={selectedYear} onValueChange={setSelectedYear}>
+        <div className="flex gap-2">
+          {/* BOTON DESCARGA (mismo look que OpsMetrics) */}
+          <Button
+            variant="outline"
+            className="h-10 border-indigo-200 text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 font-bold gap-2 shadow-sm"
+            onClick={() => setDownloadModalOpen(true)}
+          >
+            <Download size={16} /> Descargar Reporte
+          </Button>
+
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm">
+            <Filter className="h-4 w-4 text-slate-400 ml-2" />
+            <Select value={selectedYear} onValueChange={setSelectedYear}>
             <SelectTrigger className="w-[140px] border-none shadow-none font-bold">
               <SelectValue />
             </SelectTrigger>
@@ -446,7 +525,8 @@ const startOfWeekMonday = (ref: Date) => {
               </Select>
             </>
           )}
-          {loading && <RefreshCw className="h-4 w-4 animate-spin text-indigo-500 ml-2" />}
+            {loading && <RefreshCw className="h-4 w-4 animate-spin text-indigo-500 ml-2" />}
+          </div>
         </div>
       </div>
 
@@ -625,6 +705,104 @@ const startOfWeekMonday = (ref: Date) => {
           </div>
         </div>
       </div>
+
+      {/* MODAL DESCARGA (mismo patrón que OpsMetrics) */}
+      <Dialog open={downloadModalOpen} onOpenChange={setDownloadModalOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-indigo-600" /> Descargar Reporte
+            </DialogTitle>
+            <DialogDescription>
+              Exporta un CSV del resumen visible del tablero (tabla por vendedora).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div
+              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${downloadType === "current" ? "border-green-500 bg-green-50" : "border-slate-200 hover:bg-slate-50"}`}
+              onClick={() => setDownloadType("current")}
+            >
+              <div className={`mt-0.5 h-4 w-4 rounded-full border flex items-center justify-center ${downloadType === "current" ? "border-green-600" : "border-slate-300"}`}>
+                {downloadType === "current" && <div className="h-2 w-2 rounded-full bg-green-600" />}
+              </div>
+              <div>
+                <p className="font-bold text-sm">Reporte actual</p>
+                <p className="text-xs text-slate-500">Lo que estás viendo con los filtros actuales.</p>
+              </div>
+            </div>
+
+            <div
+              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${downloadType === "global" ? "border-green-500 bg-green-50" : "border-slate-200 hover:bg-slate-50"}`}
+              onClick={() => setDownloadType("global")}
+            >
+              <div className={`mt-0.5 h-4 w-4 rounded-full border flex items-center justify-center ${downloadType === "global" ? "border-green-600" : "border-slate-300"}`}>
+                {downloadType === "global" && <div className="h-2 w-2 rounded-full bg-green-600" />}
+              </div>
+              <div>
+                <p className="font-bold text-sm">Reporte global</p>
+                <p className="text-xs text-slate-500">Mismo resumen, con nombre “Global”.</p>
+              </div>
+            </div>
+
+            <div
+              className={`flex flex-col gap-3 p-3 rounded-lg border cursor-pointer transition-all ${downloadType === "custom" ? "border-green-500 bg-green-50" : "border-slate-200 hover:bg-slate-50"}`}
+              onClick={() => setDownloadType("custom")}
+            >
+              <div className="flex items-start gap-3">
+                <div className={`mt-0.5 h-4 w-4 rounded-full border flex items-center justify-center ${downloadType === "custom" ? "border-green-600" : "border-slate-300"}`}>
+                  {downloadType === "custom" && <div className="h-2 w-2 rounded-full bg-green-600" />}
+                </div>
+                <div>
+                  <p className="font-bold text-sm">Personalizado</p>
+                  <p className="text-xs text-slate-500">Define mes y año (para el nombre del archivo).</p>
+                </div>
+              </div>
+              {downloadType === "custom" && (
+                <div className="flex gap-2 pl-7">
+                  <Select value={downloadMonth} onValueChange={setDownloadMonth}>
+                    <SelectTrigger className="h-9 w-[140px] text-xs font-bold">
+                      <SelectValue placeholder="Mes" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[...Array(12)].map((_, i) => {
+                        const m = new Date(0, i).toLocaleString("es-ES", { month: "long" })
+                        const label = m.charAt(0).toUpperCase() + m.slice(1)
+                        return (
+                          <SelectItem key={i} value={String(i + 1)}>
+                            {label}
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <Select value={downloadYear} onValueChange={setDownloadYear}>
+                    <SelectTrigger className="h-9 w-[120px] text-xs font-bold">
+                      <SelectValue placeholder="Año" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[currentYear, currentYear - 1].map((y) => (
+                        <SelectItem key={y} value={String(y)}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDownloadModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={executeDownload} className="bg-indigo-600 hover:bg-indigo-700">
+              Descargar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -89,6 +89,35 @@ const safeDate = (v: any) => {
   return Number.isFinite(d.getTime()) ? d : null
 }
 
+// ✅ Parse robusto de fecha_ingreso (prioridad absoluta para Ventas)
+// Acepta: 'YYYY-MM-DD' y 'D/M/YYYY' (o 'DD/MM/YYYY'). Devuelve Date a medianoche ARG.
+const parseFechaIngreso = (v: any): Date | null => {
+  if (!v) return null
+  const s = String(v).trim()
+  if (!s) return null
+
+  // ISO date
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return safeDate(`${s}T00:00:00-03:00`)
+  }
+
+  // D/M/YYYY
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (m) {
+    const dd = Number(m[1])
+    const mm = Number(m[2])
+    const yyyy = Number(m[3])
+    if (!Number.isFinite(dd) || !Number.isFinite(mm) || !Number.isFinite(yyyy)) return null
+    if (dd < 1 || dd > 31 || mm < 1 || mm > 12) return null
+    // Date(y, m0, d) usa TZ local del cliente; luego normalizamos hora.
+    const d = new Date(yyyy, mm - 1, dd, 0, 0, 0)
+    return Number.isFinite(d.getTime()) ? d : null
+  }
+
+  // Fallback (solo si viene ya en formato Date/ISO completo)
+  return safeDate(s)
+}
+
 const shiftWeekendToMonday = (d0: Date) => {
   const d = new Date(d0)
   d.setHours(0, 0, 0, 0)
@@ -161,17 +190,13 @@ const buildNormalizedSales = (
   leads: any[],
   rangeStart: Date,
   rangeEndExclusive: Date,
-  ingresadoAtByLead: Map<string, Date>
+  _ingresadoAtByLead: Map<string, Date>
 ): NormalizedSale[] => {
   const weekStarts = buildWeekStarts(rangeStart, rangeEndExclusive)
 
   const getSalesDate = (l: any) => {
-    const hist = ingresadoAtByLead.get(l.id)
-    if (hist) return shiftWeekendToMonday(hist)
-
-    const fi = String(l.fecha_ingreso || "")
-    if (!fi) return null
-    const d = safeDate(`${fi}T00:00:00-03:00`)
+    // 🔒 Regla madre: Ventas SIEMPRE por fecha_ingreso
+    const d = parseFechaIngreso(l?.fecha_ingreso)
     if (!d) return null
     return shiftWeekendToMonday(d)
   }
@@ -276,7 +301,7 @@ export function AdminPerformance() {
     }
 
     // Cumplidas oficiales del mes (liquidación): status=cumplidas + billing_approved + billing_period
-    const monthNum = Number(selectedMonth)
+    const monthNum = Number(selectedMonth) + 1
     const pad2 = (n: number) => String(n).padStart(2, "0")
     const targetPeriod = `${selectedYear}-${pad2(monthNum)}`
 
@@ -310,7 +335,13 @@ export function AdminPerformance() {
 
   const drillAltas = useMemo(() => drillItems.filter((x: any) => x.kind === "ALTA"), [drillItems])
   const drillPass = useMemo(() => drillItems.filter((x: any) => x.kind === "PASS"), [drillItems])
-  const sumCapitas = (arr: any[]) => arr.reduce((acc, it) => acc + (Number(it?.lead?.capitas) || 1), 0)
+  // ✅ Capitas: ALTAS por regla (AMPF=1), PASS siempre 1 (registro)
+  const sumCapitas = (arr: any[]) =>
+    arr.reduce((acc, it) => {
+      const kind = String(it?.kind || "").toUpperCase()
+      if (kind === "PASS") return acc + 1
+      return acc + altasPointsOfLead(it?.lead ?? it)
+    }, 0)
   const drillAltasCapitas = useMemo(() => sumCapitas(drillAltas as any), [drillAltas])
   const drillPassCapitas = useMemo(() => sumCapitas(drillPass as any), [drillPass])
 
@@ -1107,7 +1138,7 @@ export function AdminPerformance() {
                         const plan = l?.quoted_plan || l?.plan || "-"
                         return (
                           <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
-                            <TableCell className="text-center">{Number(l?.capitas) || 1}</TableCell>
+                            <TableCell className="text-center">{altasPointsOfLead(l)}</TableCell>
                             <TableCell className="font-medium">{fechaTxt}</TableCell>
                             <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
                             <TableCell className="font-mono text-xs">{cuit}</TableCell>
@@ -1153,7 +1184,7 @@ export function AdminPerformance() {
                         const plan = l?.quoted_plan || l?.plan || "-"
                         return (
                           <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
-                            <TableCell className="text-center">{Number(l?.capitas) || 1}</TableCell>
+                            <TableCell className="text-center">1</TableCell>
                             <TableCell className="font-medium">{fechaTxt}</TableCell>
                             <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
                             <TableCell className="font-mono text-xs">{cuit}</TableCell>

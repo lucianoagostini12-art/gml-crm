@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase"
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
   AreaChart, Area, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -14,6 +15,7 @@ import {
   ArrowRight, FileText, Activity, CheckCircle2, AlertOctagon, FolderInput,
   HeartPulse, FileBadge, Layers, Lightbulb, ClipboardList, XCircle, Flame,
   User, Timer, DollarSign, Crosshair, HelpCircle, CalendarDays, Download,
+  FileSpreadsheet,
   AlertTriangle, TrendingUp, BrainCircuit, Target, RefreshCw, Zap, Siren,
   ArrowUp, ArrowDown, Users
 } from "lucide-react"
@@ -250,6 +252,16 @@ export function AdminMetrics() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
+  const [exportLeads, setExportLeads] = useState<any[]>([])
+
+
+  // --- DESCARGA DE REPORTES (misma linea OpsMetrics) ---
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false)
+  const [downloadMode, setDownloadMode] = useState<"current" | "global" | "custom">("current")
+  const now = new Date()
+  const [downloadMonth, setDownloadMonth] = useState(String(now.getMonth() + 1))
+  const [downloadYear, setDownloadYear] = useState(String(now.getFullYear()))
+
   // 1. CARGA DE AGENTES (Vendedores y Gestores)
   useEffect(() => {
     const loadAgents = async () => {
@@ -305,6 +317,28 @@ export function AdminMetrics() {
     </Popover>
   )
 
+  // --- EXPORT CSV (misma linea OpsMetrics) ---
+  const exportToCSV = (data: any[], filename: string) => {
+    if (!data || data.length === 0) return
+
+    const headers = Object.keys(data[0] || {})
+    const rows = data.map((row: any) =>
+      headers.map((h) => `"${String(row?.[h] ?? "").replace(/"/g, '""')}"`).join(",")
+    )
+
+    const csv = [headers.join(","), ...rows].join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${filename}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+
   const fetchData = async () => {
     setLoading(true)
 
@@ -354,6 +388,8 @@ export function AdminMetrics() {
     const [resLeads, resPrev, resHistory] = await Promise.all([leadsQuery, prevLeadsQuery, historyQuery])
 
     const leads = (resLeads.data || []) as Lead[]
+
+    setExportLeads(resLeads.data || [])
     const prevLeads = (resPrev.data || []) as any[]
     const events = (resHistory.data || []) as StatusEvent[]
 
@@ -730,7 +766,41 @@ if (agentsList.length > 0) {
     return () => { supabase.removeChannel(channel) }
   }, [agent, dateStart, dateEnd, agentsList])
 
-  const handleExport = () => { alert(`📥 GENERANDO REPORTE EXCEL...\n\n📅 Período: ${dateStart} al ${dateEnd}\n👤 Filtro: ${agent.toUpperCase()}\n\nEl archivo se está descargando.`) }
+  const handleDownloadReport = async () => {
+    let dataToExport: any[] = exportLeads || []
+    let filename = `Reporte_AdminMetrics_${dateStart}_al_${dateEnd}_${agent}`
+
+    if (downloadMode === "global") {
+      // Global: últimos 90 días (para no explotar el navegador)
+      const since = new Date()
+      since.setDate(since.getDate() - 90)
+      let q = supabase.from("leads").select("*").gte("created_at", since.toISOString())
+      if (agent !== "global") q = q.eq("agent_name", agent)
+      const { data } = await q
+      dataToExport = (data || []) as any[]
+      filename = `Reporte_AdminMetrics_Global_${agent}_ultimos_90_dias`
+    }
+
+    if (downloadMode === "custom") {
+      const m = String(downloadMonth).padStart(2, "0")
+      const start = `${downloadYear}-${m}-01`
+      const endD = new Date(Number(downloadYear), Number(downloadMonth), 1) // next month
+      const end = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, "0")}-01`
+
+      let q = supabase.from("leads").select("*")
+        .not("fecha_ingreso", "is", null)
+        .gte("fecha_ingreso", start)
+        .lt("fecha_ingreso", end)
+      if (agent !== "global") q = q.eq("agent_name", agent)
+      const { data } = await q
+      dataToExport = (data || []) as any[]
+      filename = `Reporte_AdminMetrics_${downloadYear}_${m}_${agent}`
+    }
+
+    exportToCSV(dataToExport, filename)
+    setDownloadModalOpen(false)
+  }
+
 
   if (!metrics) {
     return <div className="flex h-full items-center justify-center"><RefreshCw className="animate-spin mr-2" /> Cargando Tablero...</div>
@@ -750,6 +820,14 @@ if (agentsList.length > 0) {
         </div>
 
         <div className="flex flex-wrap gap-2 bg-white p-2 rounded-xl shadow-sm border items-center">
+          <Button
+            variant="outline"
+            className="h-10 border-indigo-200 text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 font-bold gap-2 shadow-sm"
+            onClick={() => setDownloadModalOpen(true)}
+          >
+            <Download size={16} /> Descargar Reporte
+          </Button>
+
           <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
             <PopoverTrigger asChild>
               <Button variant="outline" className="border-0 bg-slate-50 text-slate-700 font-bold hover:bg-slate-100 h-10 w-[240px] justify-start">
@@ -791,12 +869,69 @@ if (agentsList.length > 0) {
               {agentsList.map(a => <SelectItem key={a.name} value={a.name}>{a.name}</SelectItem>)}
             </SelectContent>
           </Select>
-
-          <Button variant="default" className="bg-green-600 hover:bg-green-700 h-10 text-white shadow-sm" onClick={handleExport}>
-            <Download className="w-4 h-4 mr-2" /> Exportar
-          </Button>
-        </div>
+</div>
       </div>
+
+      {/* --- MODAL DESCARGA (misma linea OpsMetrics) --- */}
+      <Dialog open={downloadModalOpen} onOpenChange={setDownloadModalOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5 text-indigo-600" /> Descargar Reporte</DialogTitle>
+            <DialogDescription>Exporta un CSV de leads para auditoría y control.</DialogDescription>
+          </DialogHeader>
+
+          <Tabs value={downloadMode} onValueChange={(v) => setDownloadMode(v as any)} className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="current">Actual</TabsTrigger>
+              <TabsTrigger value="global">Global</TabsTrigger>
+              <TabsTrigger value="custom">Mes/Año</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="current" className="mt-4 text-sm text-slate-600">
+              Exporta lo que está cargado para el rango actual (<b>{dateStart}</b> a <b>{dateEnd}</b>).
+            </TabsContent>
+
+            <TabsContent value="global" className="mt-4 text-sm text-slate-600">
+              Exporta últimos <b>90 días</b> (para evitar archivos gigantes).
+            </TabsContent>
+
+            <TabsContent value="custom" className="mt-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500">Mes</label>
+                  <Select value={downloadMonth} onValueChange={setDownloadMonth}>
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                        <SelectItem key={m} value={String(m)}>{String(m).padStart(2, "0")}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500">Año</label>
+                  <Select value={downloadYear} onValueChange={setDownloadYear}>
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[new Date().getFullYear(), new Date().getFullYear() - 1].map((y) => (
+                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setDownloadModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleDownloadReport} className="bg-indigo-600 hover:bg-indigo-700">
+              <Download className="h-4 w-4 mr-2" /> Descargar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {/* --- 🚦 SEMÁFORO (TEAM PULSE) --- */}
       {teamPulse.length > 0 && (

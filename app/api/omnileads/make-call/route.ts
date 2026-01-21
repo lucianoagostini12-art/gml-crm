@@ -66,7 +66,7 @@ export async function POST(req: Request) {
     }
 
     // 5) Login OmniLeads (token)
-    const loginRes = await fetch(`${baseUrl}/api/v1/login/`, {
+    const loginRes = await fetch(`${baseUrl}/api/v1/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: apiUser, password: apiPass }),

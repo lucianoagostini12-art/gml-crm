@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -80,6 +80,28 @@ export function AdminConteo() {
   const [agents, setAgents] = useState<any[]>([])
   const [globalTotals, setGlobalTotals] = useState({ monthly: 0, fulfilled: 0, revenue: 0 })
   const [profilesMap, setProfilesMap] = useState<Record<string, string>>({})
+  const [allLeads, setAllLeads] = useState<any[]>([])
+
+  // --- DRILLDOWN (ver operaciones al clickear números) ---
+  const [drillOpen, setDrillOpen] = useState(false)
+  const [drillSellerName, setDrillSellerName] = useState<string>("")
+  const [drillMode, setDrillMode] = useState<"ventas" | "cumplidas">("ventas")
+  const [drillScope, setDrillScope] = useState<"daily" | "weekly" | "monthly">("monthly")
+  const [drillTab, setDrillTab] = useState<"altas" | "pass">("altas")
+
+  const openDrill = (
+    sellerName: string,
+    mode: "ventas" | "cumplidas",
+    scope: "daily" | "weekly" | "monthly" = "monthly",
+    tab: "altas" | "pass" = "altas"
+  ) => {
+    setDrillSellerName(sellerName)
+    setDrillMode(mode)
+    setDrillScope(scope)
+    setDrillTab(tab)
+    setDrillOpen(true)
+  }
+
 
   // --- ESTADO MODAL DESCARGA (mismo patrón que OpsMetrics) ---
   const currentYear = new Date().getFullYear()
@@ -91,6 +113,19 @@ export function AdminConteo() {
   // Helpers
   const norm = (v: any) => String(v ?? "").trim().toLowerCase()
 
+  // ✅ PASS unificado (misma regla que AdminPerformance)
+  // type='pass' OR sub_state='auditoria_pass' OR source='pass'
+  const isPass = (l: any) => {
+    const t = norm(l?.type)
+    const ss = norm(l?.sub_state)
+    const src = norm(l?.source)
+
+    // fallback tolerante por si viene algún flag legacy
+    const flag = l?.is_pass === true || l?.pass === true
+
+    return flag || t === "pass" || ss === "auditoria_pass" || src === "pass"
+  }
+
   // ✅ LISTA DE ESTADOS QUE CUENTAN COMO VENTA
   const SALE_STATUSES = [
   "ingresado",
@@ -101,6 +136,61 @@ export function AdminConteo() {
   "cumplidas",
   "rechazado",
 ]
+
+
+  const OPS_STATUSES = SALE_STATUSES
+
+  const safeDate = (v: any) => {
+    if (!v) return null
+    const d = new Date(v)
+    return Number.isFinite(d.getTime()) ? d : null
+  }
+
+  // ✅ Parse robusto de fecha_ingreso (prioridad absoluta para Ventas)
+  const parseFechaIngreso = (v: any) => {
+    if (!v) return null
+    if (v instanceof Date) return Number.isFinite(v.getTime()) ? v : null
+    const s = String(v).trim()
+    if (!s) return null
+
+    // ISO date YYYY-MM-DD (campo DATE)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      return safeDate(`${s}T00:00:00-03:00`)
+    }
+
+    // D/M/YYYY
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (m) {
+      const dd = Number(m[1])
+      const mm = Number(m[2])
+      const yyyy = Number(m[3])
+      if (!Number.isFinite(dd) || !Number.isFinite(mm) || !Number.isFinite(yyyy)) return null
+      if (dd < 1 || dd > 31 || mm < 1 || mm > 12) return null
+      const iso = `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`
+      return safeDate(`${iso}T00:00:00-03:00`)
+    }
+
+    // fallback: intentar Date()
+    return safeDate(s)
+  }
+
+  const shiftWeekendToMonday = (d: Date) => {
+    const x = new Date(d)
+    x.setHours(0, 0, 0, 0)
+    const day = x.getDay() // 0 dom, 6 sáb
+    if (day === 6) x.setDate(x.getDate() + 2)
+    if (day === 0) x.setDate(x.getDate() + 1)
+    return x
+  }
+
+  // ✅ Puntos de ALTA: capitas (fallback 1), AMPF siempre 1
+  const altasPointsOfLead = (l: any) => {
+    const prep = norm(l?.prepaga ?? l?.quoted_prepaga)
+    const plan = norm(l?.plan ?? l?.quoted_plan)
+    if (prep.includes("ampf") || plan.includes("ampf")) return 1
+    const c = Number(l?.capitas)
+    return Number.isFinite(c) && c > 0 ? c : 1
+  }
 
 const startOfWeekMonday = (ref: Date) => {
     const d = new Date(ref)
@@ -171,7 +261,66 @@ const startOfWeekMonday = (ref: Date) => {
     if (!years.includes(selectedYear)) setSelectedYear(String(currentYear))
   }
 
-  const fetchProfiles = async () => {
+  
+  const periodRange = useMemo(() => {
+    if (selectedYear === "all") return null
+    const y = parseInt(selectedYear, 10)
+    const m = parseInt(selectedMonth, 10)
+    if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null
+    const startStr = `${y}-${String(m).padStart(2, "0")}-01`
+    const end = new Date(`${startStr}T00:00:00-03:00`)
+    // endExclusive = primer día del mes siguiente
+    const endExclusive = new Date(end)
+    endExclusive.setMonth(endExclusive.getMonth() + 1)
+    endExclusive.setDate(1)
+    endExclusive.setHours(0, 0, 0, 0)
+    const start = new Date(`${startStr}T00:00:00-03:00`)
+    start.setHours(0, 0, 0, 0)
+    return { start, endExclusive }
+  }, [selectedMonth, selectedYear])
+  const targetPeriod = useMemo(() => {
+    if (selectedYear === "all") return null
+    return `${selectedYear}-${String(parseInt(selectedMonth, 10)).padStart(2, "0")}`
+  }, [selectedMonth, selectedYear])
+
+  const isBillingMonth = (op: any) => {
+    if (selectedYear === "all") return true
+    if (op?.billing_period && targetPeriod) return String(op.billing_period) === targetPeriod
+    const d = safeDate(op?.created_at)
+    if (!d) return false
+    return d.getFullYear() === parseInt(selectedYear, 10) && d.getMonth() + 1 === parseInt(selectedMonth, 10)
+  }
+
+
+  const salesDate = (lead: any) => {
+    const d = parseFechaIngreso(lead?.fecha_ingreso)
+    if (!d) return null
+    return shiftWeekendToMonday(d)
+  }
+
+  const isInSelectedPeriod = (lead: any) => {
+    if (selectedYear === "all") return true
+    const d = salesDate(lead)
+    if (!d || !periodRange) return false
+    return d >= periodRange.start && d < periodRange.endExclusive
+  }
+
+  const isSalesToday = (lead: any, nowRef?: Date) => {
+    const now = nowRef ?? new Date()
+    const d = salesDate(lead)
+    if (!d) return false
+    return d.toDateString() === now.toDateString()
+  }
+
+  const isSalesThisWeek = (lead: any, nowRef?: Date) => {
+    const now = nowRef ?? new Date()
+    const weekStart = startOfWeekMonday(now)
+    const d = salesDate(lead)
+    if (!d) return false
+    return d >= weekStart && d <= now
+  }
+
+const fetchProfiles = async () => {
     const { data } = await supabase.from("profiles").select("full_name, avatar_url, email")
     if (data) {
       const map: Record<string, string> = {}
@@ -259,6 +408,8 @@ const startOfWeekMonday = (ref: Date) => {
     productionLeads.forEach((l) => allLeadsMap.set(l.id, l))
     billingLeads.forEach((l) => allLeadsMap.set(l.id, l))
     const safeLeads = Array.from(allLeadsMap.values())
+    setAllLeads(safeLeads)
+
 
     const now = new Date()
     const weekStart = startOfWeekMonday(now)
@@ -316,52 +467,24 @@ const startOfWeekMonday = (ref: Date) => {
     }
 
 
-    const isSalesMonth = (lead: any) => {
-      if (selectedYear === "all") return true
-      const fi = String(salesDateOf(lead) || "")
-      if (!fi) return false
-      const ym = fi.slice(0, 7)
-      return ym === `${selectedYear}-${selectedMonth.padStart(2, "0")}`
-    }
-
-    const isSalesToday = (lead: any) => {
-      const fi = String(salesDateOf(lead) || "")
-      if (!fi) return false
-      const d = new Date(`${fi}T00:00:00-03:00`)
-      return d.toDateString() === now.toDateString()
-    }
-
-    const isSalesThisWeek = (lead: any) => {
-      const fi = String(salesDateOf(lead) || "")
-      if (!fi) return false
-      const d = new Date(`${fi}T00:00:00-03:00`)
-      return d >= weekStart
-    }
-
-    // Misma lógica de OpsBilling para “entra en el período”
-    const isBillingMonth = (op: any) => {
-      if (selectedYear === "all") return true
-      if (op.billing_period) return op.billing_period === targetPeriod
-      const d = new Date(op.created_at)
-      return d.getMonth() + 1 === parseInt(selectedMonth) && d.getFullYear() === parseInt(selectedYear)
-    }
-
+    
     const processedAgents = agentNames.map((name) => {
       const agentLeads = safeLeads.filter((l: any) => norm(l.agent_name) === norm(name))
 
-      // A. VENTAS (AZUL): por sold_at + estados venta
-      const salesLeads = agentLeads.filter((l: any) => isSalesMonth(l) && SALE_STATUSES.includes(norm(l.status)))
+      // A. VENTAS (AZUL): 1:1 AdminPerformance (fecha_ingreso + OPS statuses; PASS separado)
+      const salesLeads = agentLeads.filter((l: any) => OPS_STATUSES.includes(norm(l.status)) && isInSelectedPeriod(l) && !!salesDate(l))
       const salesLeadsNoPass = salesLeads.filter((l: any) => !isPass(l))
       const salesLeadsPass = salesLeads.filter((l: any) => isPass(l))
 
       const dailyLeads = salesLeadsNoPass.filter((l: any) => isSalesToday(l))
       const weeklyLeads = salesLeadsNoPass.filter((l: any) => isSalesThisWeek(l))
 
-      const daily = pointsByCapitas(dailyLeads)
-      const weekly = pointsByCapitas(weeklyLeads)
+      const daily = dailyLeads.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
+      const weekly = weeklyLeads.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
 
-      // ✅ Ventas del mes (SIN PASS)
-      const monthly = pointsByCapitas(salesLeads)
+      // ✅ Ventas del periodo (SIN PASS)
+      const monthly = salesLeadsNoPass.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
+
 
       // ✅ Pass del mes (conteo separado para mostrar +X pass)
       const monthlyPassCount = salesLeadsPass.length
@@ -374,7 +497,7 @@ const startOfWeekMonday = (ref: Date) => {
       const fulfilledPassLeads = fulfilledAll.filter((l: any) => isPass(l))
       const fulfilledAltasLeads = fulfilledAll.filter((l: any) => !isPass(l))
 
-      const fulfilled = calculatePoints(fulfilledAll) // total liquidable (altas+pass)
+      const fulfilled = calculatePoints(fulfilledAltasLeads) // liquidables ALTAS (PASS separado)
       const passCount = fulfilledPassLeads.length
 
       const ratioVal = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
@@ -448,6 +571,57 @@ const startOfWeekMonday = (ref: Date) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth, selectedYear, profilesMap])
+
+  const drillData = useMemo(() => {
+    if (!drillOpen || !drillSellerName) return { altas: [] as any[], pass: [] as any[] }
+
+    const now = new Date()
+    const weekStart = startOfWeekMonday(now)
+
+    const inScopeSales = (l: any) => {
+      const d = salesDate(l)
+      if (!d) return false
+
+      if (drillScope === "daily") return d.toDateString() === now.toDateString()
+      if (drillScope === "weekly") return d >= weekStart && d <= now
+
+      // monthly / histórico
+      return isInSelectedPeriod(l)
+    }
+
+    const inScopeFulfilled = (l: any) => {
+      if (!(norm(l.status) === "cumplidas" && l.billing_approved === true && isBillingMonth(l))) return false
+      if (drillScope === "daily" || drillScope === "weekly") {
+        // para cumplidas, igual respetamos el periodo seleccionado; diario/semanal no aplica a billing con certeza
+        return true
+      }
+      return true
+    }
+
+    let base: any[] = []
+
+    if (drillMode === "ventas") {
+      base = allLeads.filter((l: any) => norm(l.agent_name) === norm(drillSellerName) && OPS_STATUSES.includes(norm(l.status)) && inScopeSales(l))
+    } else {
+      base = allLeads.filter((l: any) => norm(l.agent_name) === norm(drillSellerName) && inScopeFulfilled(l))
+    }
+
+    const altas = base.filter((l: any) => !isPass(l))
+    const pass = base.filter((l: any) => isPass(l))
+
+    const sortByDateDesc = (a: any, b: any) => {
+      const da = drillMode === "ventas" ? salesDate(a) : safeDate(a?.created_at)
+      const db = drillMode === "ventas" ? salesDate(b) : safeDate(b?.created_at)
+      const ta = da ? da.getTime() : 0
+      const tb = db ? db.getTime() : 0
+      return tb - ta
+    }
+
+    altas.sort(sortByDateDesc)
+    pass.sort(sortByDateDesc)
+
+    return { altas, pass }
+  }, [drillOpen, drillSellerName, drillMode, drillScope, drillTab, allLeads, selectedMonth, selectedYear])
 
   // --- MANEJO DE DESCARGA (mismo estilo OpsMetrics) ---
   const executeDownload = () => {
@@ -587,17 +761,39 @@ const startOfWeekMonday = (ref: Date) => {
                     </div>
                   </TableCell>
 
-                  <TableCell className="text-center text-slate-500 font-medium">{agent.daily || "-"}</TableCell>
-                  <TableCell className="text-center text-slate-500 font-medium">{agent.weekly || "-"}</TableCell>
+                  <TableCell className="text-center text-slate-500 font-medium">
+                    <button
+                      className="w-full hover:underline hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => openDrill(agent.name, "ventas", "daily", "altas")}
+                      disabled={!agent.daily || agent.daily <= 0}
+                      title="Ver operaciones"
+                    >
+                      {agent.daily || "-"}
+                    </button>
+                  </TableCell>
+                  <TableCell className="text-center text-slate-500 font-medium">
+                    <button
+                      className="w-full hover:underline hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => openDrill(agent.name, "ventas", "weekly", "altas")}
+                      disabled={!agent.weekly || agent.weekly <= 0}
+                      title="Ver operaciones"
+                    >
+                      {agent.weekly || "-"}
+                    </button>
+                  </TableCell>
 
                   {/* VENTAS REALES (SIN PASS) + LABEL PASS */}
                   <TableCell className="text-center bg-blue-50/30 dark:bg-blue-900/10 border-x border-slate-100 dark:border-slate-800">
                     <div className="flex flex-col items-center">
-                      <span className="font-black text-2xl text-blue-600 dark:text-blue-400">{agent.monthly}</span>
+                      <button
+                        className="font-black text-2xl text-blue-600 dark:text-blue-400 hover:underline transition-colors"
+                        onClick={() => openDrill(agent.name, "ventas", "monthly", "altas")}
+                        title="Ver operaciones"
+                      >
+                        {agent.monthly}
+                      </button>
                       {agent.monthlyPassCount > 0 && (
-                        <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                          +{agent.monthlyPassCount} pass
-                        </span>
+                        <button className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:opacity-90" onClick={() => openDrill(agent.name, "ventas", "monthly", "pass")} title="Ver PASS">+{agent.monthlyPassCount} pass</button>
                       )}
                     </div>
                   </TableCell>
@@ -608,15 +804,19 @@ const startOfWeekMonday = (ref: Date) => {
                       {agent.fulfilled > 0 ? (
                         <div className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 rounded-md">
                           <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-                          <span className="font-black text-green-700 dark:text-green-400 text-lg">{agent.fulfilled}</span>
+                          <button
+                          className="font-black text-green-700 dark:text-green-400 text-lg hover:underline transition-colors"
+                          onClick={() => openDrill(agent.name, "cumplidas", "monthly", "altas")}
+                          title="Ver operaciones"
+                        >
+                          {agent.fulfilled}
+                        </button>
                         </div>
                       ) : (
                         <span className="text-slate-300 font-bold text-lg">-</span>
                       )}
                       {agent.passCount > 0 && (
-                        <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                          +{agent.passCount} pass
-                        </span>
+                        <button className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:opacity-90" onClick={() => openDrill(agent.name, "cumplidas", "monthly", "pass")} title="Ver PASS">+{agent.passCount} pass</button>
                       )}
                     </div>
                   </TableCell>
@@ -706,7 +906,93 @@ const startOfWeekMonday = (ref: Date) => {
         </div>
       </div>
 
-      {/* MODAL DESCARGA (mismo patrón que OpsMetrics) */}
+      
+      {/* MODAL DRILLDOWN (operaciones) */}
+      <Dialog open={drillOpen} onOpenChange={setDrillOpen}>
+        <DialogContent className="max-w-[1100px] w-[92vw] max-h-[85vh] overflow-visible p-0 rounded-2xl shadow-2xl border">
+          <DialogHeader className="sticky top-0 z-10 border-b bg-white/90 dark:bg-slate-950/90 backdrop-blur supports-[backdrop-filter]:bg-white/80 px-6 pt-5 pb-4">
+            <DialogTitle className="flex flex-col gap-1">
+              <span>
+                {drillSellerName} — {drillMode === "ventas" ? "Ventas" : "Cumplidas"}{" "}
+                {drillScope === "daily" ? "(Hoy)" : drillScope === "weekly" ? "(Semana)" : selectedYear === "all" ? "(Histórico)" : "(Mes)"}
+              </span>
+              <span className="text-xs text-slate-500 font-normal">Detalle para auditar (1:1 AdminPerformance)</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="px-6 pb-6 overflow-y-auto max-h-[68vh]">
+            <div className="flex items-center gap-2 flex-wrap mt-4">
+              <Button
+                size="sm"
+                variant={drillTab === "altas" ? "default" : "outline"}
+                className={drillTab === "altas" ? "bg-indigo-600 hover:bg-indigo-700" : ""}
+                onClick={() => setDrillTab("altas")}
+              >
+                Altas ({drillData.altas.length})
+              </Button>
+
+              <Button size="sm" variant={drillTab === "pass" ? "default" : "outline"} onClick={() => setDrillTab("pass")}>
+                PASS ({drillData.pass.length})
+              </Button>
+
+              {drillMode === "ventas" && drillTab === "altas" && (
+                <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700">
+                  Puntos: {drillData.altas.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-4 w-full overflow-auto rounded-xl border">
+              <Table className="min-w-[980px] w-full">
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="w-[90px]">Capitas</TableHead>
+                    <TableHead className="w-[130px]">Fecha ingreso</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="w-[140px]">CUIT</TableHead>
+                    <TableHead className="w-[160px]">Prepaga</TableHead>
+                    <TableHead className="w-[180px]">Plan</TableHead>
+                    <TableHead className="w-[120px]">Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(drillTab === "altas" ? drillData.altas : drillData.pass).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-slate-500 py-10">
+                        Sin operaciones para mostrar.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    (drillTab === "altas" ? drillData.altas : drillData.pass).map((l: any) => {
+                      const fi = l?.fecha_ingreso ?? ""
+                      const points = drillMode === "ventas" ? (isPass(l) ? 0 : altasPointsOfLead(l)) : 1
+                      return (
+                        <TableRow key={String(l.id)} className="hover:bg-slate-50/60">
+                          <TableCell className="font-bold">{points}</TableCell>
+                          <TableCell className="text-xs text-slate-600">{fi || "-"}</TableCell>
+                          <TableCell className="font-medium">{l?.full_name || l?.nombre || "-"}</TableCell>
+                          <TableCell className="font-mono text-xs">{l?.cuit || l?.dni || "-"}</TableCell>
+                          <TableCell className="text-xs">{l?.prepaga || l?.quoted_prepaga || "-"}</TableCell>
+                          <TableCell className="text-xs">{l?.plan || l?.quoted_plan || "-"}</TableCell>
+                          <TableCell className="text-xs font-bold">{String(l?.status || "-")}</TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <Button variant="outline" onClick={() => setDrillOpen(false)}>
+                Cerrar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+{/* MODAL DESCARGA (mismo patrón que OpsMetrics) */}
       <Dialog open={downloadModalOpen} onOpenChange={setDownloadModalOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>

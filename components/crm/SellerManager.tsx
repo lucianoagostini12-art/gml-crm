@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { createBrowserClient } from "@supabase/ssr"
 
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -69,11 +69,21 @@ export function SellerManager({
   const currentUser = userName || "Vendedora"
 
   /**
-   * ✅ CAMBIO CLAVE (sin tocar UI ni lógica):
-   * Usar el client autenticado del browser que reutiliza la sesión del login mail/contraseña.
-   * Esto evita que supabase quede como anon (auth.uid() null) y RLS bloquee chat / archivos.
+   * ✅ CAMBIO CLAVE:
+   * auth-helpers-nextjs ya no exporta createClientComponentClient en tu versión.
+   * Usamos el cliente oficial SSR: createBrowserClient (reutiliza sesión del navegador).
+   *
+   * Requisitos:
+   *   npm i @supabase/ssr @supabase/supabase-js
    */
-  const supabase = useMemo(() => createClientComponentClient(), [])
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
+  )
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
@@ -293,7 +303,7 @@ export function SellerManager({
       if (quotesChannel) supabase.removeChannel(quotesChannel)
       if (salesChannel) supabase.removeChannel(salesChannel)
     }
-  }, [currentUser, selectedLeadId])
+  }, [currentUser, selectedLeadId, supabase])
 
   // Fix Lead Detail
   useEffect(() => {
@@ -324,7 +334,7 @@ export function SellerManager({
     return () => {
       alive = false
     }
-  }, [selectedLeadId])
+  }, [selectedLeadId, supabase])
 
   const handleCreateConfirm = async (_data: any) => {
     setIsCreateOpen(false)
@@ -711,7 +721,7 @@ export function SellerManager({
           {currentView === "mysales" && (
             <MySalesView
               userName={currentUser}
-              supabase={supabase}
+              supabase={supabase as any}
               openLeadId={openMySalesLeadId}
               openTab={openMySalesTab}
               onOpenedLead={() => setOpenMySalesLeadId(null)}

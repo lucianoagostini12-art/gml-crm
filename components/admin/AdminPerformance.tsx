@@ -237,6 +237,7 @@ export function AdminPerformance() {
   // --- ESTADOS ---
   const [sellers, setSellers] = useState<any[]>([])
   const [allLeads, setAllLeads] = useState<any[]>([])
+  const [billingLeads, setBillingLeads] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   // lead_id -> primer changed_at donde to_status='ingresado'
@@ -393,6 +394,55 @@ export function AdminPerformance() {
     return Number(val.toFixed(2))
   }
 
+  // ✅ Ticket Promedio (idéntico a AdminRanking): neto SIN redondeos
+  const calculateNetValueRanking = (op: any) => {
+    // Si tiene override manual de OPS, ese es el valor final
+    if (op.billing_price_override !== null && op.billing_price_override !== undefined) {
+      return parseFloat(op.billing_price_override.toString())
+    }
+
+    const full = parseFloat(op.full_price || op.price || "0")
+    const aportes = parseFloat(op.aportes || "0")
+    const desc = parseFloat(op.descuento || "0")
+    const p = String(op.prepaga || op.quoted_prepaga || "").toLowerCase()
+    const plan = op.plan || op.quoted_plan || ""
+    const condicionLaboral = op.labor_condition || op.condicionLaboral || ""
+
+    // Reglas espejo (como OpsBilling / AdminRanking)
+    const taxRate = 0.105
+    const generalMult = 1.8
+    const ampfMult = 2.0
+
+    const prevencionRates: any = {
+      A1: 0.9,
+      "A1 CP": 0.9,
+      A2: 1.3,
+      "A2 CP": 1.3,
+      A4: 1.5,
+      A5: 1.5,
+      default: 1.3,
+    }
+
+    let val = 0
+
+    if (p.includes("preven")) {
+      const base = full - desc
+      const rate = prevencionRates[plan] ?? prevencionRates.default
+      val = base * rate
+    } else if (p.includes("ampf")) {
+      val = full * ampfMult
+    } else {
+      let base = full * (1 - taxRate)
+      if (p.includes("doctored") && String(plan).includes("500") && String(condicionLaboral) === "empleado") {
+        base = aportes * (1 - taxRate)
+      }
+      val = base * generalMult
+    }
+
+    return val
+  }
+
+
   // --- CARGA DE DATOS ---
   useEffect(() => {
     const fetchData = async () => {
@@ -409,6 +459,17 @@ export function AdminPerformance() {
           "id, agent_name, seller_name, status, sub_state, type, source, created_at, last_update, sold_at, fecha_ingreso, capitas, cuit, dni, name, prepaga, plan, quoted_prepaga, quoted_plan, quoted_price, billing_approved, billing_period, billing_price_override"
         ))
       if (leads) setAllLeads(leads)
+      // 2b) Cumplidas oficiales del mes (para Ticket Promedio igual a AdminRanking) — traemos '*' para tener campos financieros
+      const { targetPeriod } = getPeriodRange()
+      const { data: billingRows } = await supabase
+        .from("leads")
+        .select("*")
+        .eq("status", "cumplidas")
+        .eq("billing_approved", true)
+        .eq("billing_period", targetPeriod)
+
+      setBillingLeads(billingRows || [])
+
 
       // 3) Historial: primer ingresado (buffer por weekend->lunes)
       const { rangeStart, rangeEndExclusive } = getPeriodRange()
@@ -491,10 +552,14 @@ export function AdminPerformance() {
     const complianceRate = visibleSales > 0 ? Math.round((totalCompleted / visibleSales) * 100) : 0
     const leadsPerSale = visibleSales > 0 ? Math.round((totalLeads / visibleSales) * 10) / 10 : 0
 
-    // 5) Ticket promedio por CÁPITA (desde liquidación oficial)
-    const netoTotal = completedOfficial.reduce((acc: number, op: any) => acc + calculateBillingNeto(op), 0)
-    const capitasLiquidated = completedOfficial.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
-    const averageTicket = capitasLiquidated > 0 ? Math.round(netoTotal / capitasLiquidated) : 0
+    // 5) Ticket promedio por CÁPITA (igual a AdminRanking: facturación neta / cápitas, basado en liquidación oficial)
+    const billingById = new Map<string, any>()
+    ;(billingLeads || []).forEach((b: any) => billingById.set(String(b.id), b))
+    const completedForTicket = completedOfficial.map((op: any) => billingById.get(String(op.id)) || op)
+    const netoTotal = completedForTicket.reduce((acc: number, op: any) => acc + calculateNetValueRanking(op), 0)
+    const capitasLiquidated = completedForTicket.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
+    const averageTicket = capitasLiquidated > 0 ? netoTotal / capitasLiquidated : 0
+
 
     const salesVolume = totalSales
 
@@ -799,7 +864,7 @@ export function AdminPerformance() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-black text-green-800">$ {currentStats.averageTicket.toLocaleString()}</div>
+                <div className="text-2xl font-black text-green-800">$ {Math.round(currentStats.averageTicket).toLocaleString("es-AR")}</div>
               </CardContent>
             </Card>
 

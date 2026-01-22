@@ -132,7 +132,6 @@ interface MySalesViewProps {
 }
 
 export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab = "chat", onOpenedLead }: MySalesViewProps) {
-
   const [sales, setSales] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedSale, setSelectedSale] = useState<any>(null)
@@ -239,7 +238,6 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userName])
 
-
   // ✅ ABRIR VENTA DESDE NOTIFICACIÓN (lead_id) + TAB
   useEffect(() => {
     if (!openLeadId) return
@@ -269,7 +267,6 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
     fetchOne()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openLeadId])
-
 
   // --- 2. CARGA DE DETALLES ---
   const fetchDocs = async (leadId: string) => {
@@ -327,7 +324,6 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
     }
   }, [selectedSale?.id, supabase, userName])
 
-
   // ✅ Al abrir una venta, marcar como leídas las notificaciones de ESA venta (lead_id)
   // Esto hace que baje el contador de campana y el badge del sidebar.
   useEffect(() => {
@@ -344,15 +340,30 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
   }, [selectedSale?.id, supabase, userName])
 
   // --- ACCIONES ---
+
+  // ✅ CHAT: target_role consistente con tu data real + manejo de error visible
   const sendMessage = async () => {
     if (!chatMsg.trim() || !selectedSale) return
-    const { error } = await supabase.from("lead_messages").insert({
+
+    const payload = {
       lead_id: selectedSale.id,
       sender: userName,
-      text: chatMsg,
-      target_role: "admin",
-    })
-    if (!error) setChatMsg("")
+      text: chatMsg.trim(),
+      target_role: "seller", // ✅ CLAVE: así lo tenés en la tabla (ejemplo que pegaste)
+    }
+
+    try {
+      const { error } = await supabase.from("lead_messages").insert(payload)
+      if (error) {
+        console.error("CHAT INSERT ERROR:", error, payload)
+        alert("No se pudo enviar el mensaje: " + error.message)
+        return
+      }
+      setChatMsg("")
+    } catch (e: any) {
+      console.error("CHAT UNEXPECTED ERROR:", e, payload)
+      alert("Error inesperado enviando mensaje: " + (e?.message || String(e)))
+    }
   }
 
   // ✅ HANDLER UNIFICADO DE SUBIDA (Trigger)
@@ -383,7 +394,8 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
           continue
         }
 
-        await supabase.from("lead_documents").insert({
+        // ✅ IMPORTANTE: chequear el INSERT a lead_documents y si falla limpiar el storage
+        const { error: dbErr } = await supabase.from("lead_documents").insert({
           lead_id: leadId,
           type: file.type.includes("image") ? "IMG" : "PDF",
           file_path: path,
@@ -392,6 +404,16 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
           uploaded_at: new Date().toISOString(),
           status: "uploaded",
         })
+
+        if (dbErr) {
+          console.error("LEAD_DOCUMENTS INSERT ERROR:", dbErr, { leadId, path })
+          alert(`Se subió el archivo pero NO se pudo registrar en la base: ${dbErr.message}`)
+
+          // limpiar para no dejar "basura" en el bucket
+          await supabase.storage.from(STORAGE_BUCKET).remove([path])
+
+          continue
+        }
       }
 
       await fetchDocs(leadId)
@@ -610,8 +632,8 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
 
                       {/* ✅ AGREGADO: CÁPITAS */}
                       <span className="text-xs text-slate-500 font-medium border-l border-slate-200 pl-3 flex items-center gap-1">
-                         <Users size={12} className="text-slate-400"/>
-                         <span className="font-bold text-slate-700">{sale.capitas || 1}</span>
+                        <Users size={12} className="text-slate-400" />
+                        <span className="font-bold text-slate-700">{sale.capitas || 1}</span>
                       </span>
 
                       {sale.sub_state && (
@@ -778,7 +800,12 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
                                   <FileText className="text-blue-500 shrink-0" size={18} />
                                   <span className="text-sm font-bold text-slate-800 truncate">{filename}</span>
                                 </a>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-500" onClick={() => handleDeleteFile(d)}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-slate-400 hover:text-red-500"
+                                  onClick={() => handleDeleteFile(d)}
+                                >
                                   <Trash2 size={16} />
                                 </Button>
                               </div>

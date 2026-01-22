@@ -560,30 +560,58 @@ if (agentsList.length > 0) {
 
     const salesCount = salesCapitasTotal
 
-    // ✅ Ventas por prepaga (mismo criterio: fecha_ingreso + CAPITAS)
-    const prepLabel = (v: any) => {
-      const raw = String(v ?? "").trim()
-      if (!raw) return "Sin prepaga"
-      const low = raw.toLowerCase()
-      if (low.includes("preven")) return "Prevención"
-      if (low.includes("docto")) return "DoctoRed"
-      if (low.includes("ampf")) return "AMPF"
-      // Título simple
-      return raw.charAt(0).toUpperCase() + raw.slice(1)
-    }
+    // ✅ Ventas por prepaga (ALTAS ONLY) + Cumplidas oficiales (ALTAS ONLY) + % Cumplimiento
+// - Ventas: por fecha_ingreso + CAPITAS (excluye PASS)
+// - Cumplidas: liquidación oficial (billing_approved + billing_period del rango) + CAPITAS (excluye PASS)
+const prepLabel = (v: any) => {
+  const raw = String(v ?? "").trim()
+  if (!raw) return "Sin prepaga"
+  const low = raw.toLowerCase()
+  if (low.includes("preven")) return "Prevención"
+  if (low.includes("docto")) return "DoctoRed"
+  if (low.includes("avalian")) return "Avalian"
+  if (low.includes("swiss")) return "Swiss"
+  if (low.includes("galeno")) return "Galeno"
+  if (low.includes("ampf")) return "AMPF"
+  // Título simple
+  return raw.charAt(0).toUpperCase() + raw.slice(1)
+}
 
-    const prepAgg = new Map<string, { ventas: number; altas: number; pass: number }>()
-    for (const l of salesOps as any[]) {
-      const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
-      if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, altas: 0, pass: 0 })
-      const pts = pointsByCapitas([l])
-      prepAgg.get(name)!.ventas += pts
-      if (isPass(l)) prepAgg.get(name)!.pass += pts
-      else prepAgg.get(name)!.altas += pts
-    }
-    const salesByPrepaga = Array.from(prepAgg.entries())
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.ventas - a.ventas)
+const prepBadgeClass = (p: any) => {
+  const name = String(p ?? "")
+  if (name.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+  if (name.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+  if (name.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+  if (name.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+  if (name.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+  if (name.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+  return "bg-slate-50 dark:bg-[#3A3B3C] border-slate-200 text-slate-700"
+}
+
+const prepAgg = new Map<string, { ventas: number; cumplidas: number }>()
+// Ventas (ALTAS)
+for (const l of salesOps as any[]) {
+  if (isPass(l)) continue // ✅ SOLO ALTAS
+  const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
+  if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, cumplidas: 0 })
+  const pts = pointsByCapitas([l])
+  prepAgg.get(name)!.ventas += pts
+}
+// Cumplidas oficiales (ALTAS)
+for (const l of billingOps as any[]) {
+  if (isPass(l)) continue // ✅ SOLO ALTAS
+  const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
+  if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, cumplidas: 0 })
+  const pts = pointsByCapitas([l])
+  prepAgg.get(name)!.cumplidas += pts
+}
+
+const salesByPrepaga = Array.from(prepAgg.entries())
+  .map(([name, v]) => {
+    const pct = v.ventas > 0 ? Math.round((v.cumplidas / v.ventas) * 100) : 0
+    return { name, ventas: v.ventas, cumplidas: v.cumplidas, pct, className: prepBadgeClass(name) }
+  })
+  .sort((a, b) => b.ventas - a.ventas)
 
 
     let prevSalesCapitasTotal = 0
@@ -697,14 +725,33 @@ if (agentsList.length > 0) {
       { name: "Cierres", value: salesCount, fill: "#10b981" },
     ]
 
+// ✅ Auditoría (Mesa de Entradas) debe reaccionar al calendario:
+// usamos el mismo criterio del tablero (OPS por fecha_ingreso) y NO created_at.
+const auditCounts: Record<string, number> = {
+  ingresado: 0,
+  precarga: 0,
+  medicas: 0,
+  legajo: 0,
+  demoras: 0,
+  cumplidas: 0,
+  rechazado: 0,
+}
+;(salesOps || []).forEach((l: any) => {
+  let s = norm(l?.status)
+  if (!s) return
+  if (s.includes("rechaz")) s = "rechazado"
+  if (s.includes("cumpl")) s = "cumplidas"
+  if ((auditCounts as any)[s] !== undefined) (auditCounts as any)[s] += 1
+})
+
     const auditSteps = [
-      { label: "INGRESADO", count: counts.ingresado, icon: FolderInput, color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-200" },
-      { label: "PRECARGA", count: counts.precarga, icon: FileText, color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
-      { label: "MÉDICAS", count: counts.medicas, icon: HeartPulse, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200" },
-      { label: "LEGAJO", count: counts.legajo, icon: FileBadge, color: "text-yellow-600", bg: "bg-yellow-50", border: "border-yellow-200" },
-      { label: "DEMORAS", count: counts.demoras, icon: AlertTriangle, color: "text-indigo-600", bg: "bg-indigo-50", border: "border-indigo-200" },
-      { label: "CUMPLIDAS", count: counts.cumplidas + counts.vendido, icon: CheckCircle2, color: "text-white", bg: "bg-green-500 shadow-md transform scale-105", border: "border-green-600" },
-      { label: "RECHAZADOS", count: counts.rechazado, icon: AlertOctagon, color: "text-white", bg: "bg-red-500 shadow-md", border: "border-red-600" },
+      { label: "INGRESADO", count: auditCounts.ingresado, icon: FolderInput, color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-200" },
+      { label: "PRECARGA", count: auditCounts.precarga, icon: FileText, color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
+      { label: "MÉDICAS", count: auditCounts.medicas, icon: HeartPulse, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200" },
+      { label: "LEGAJO", count: auditCounts.legajo, icon: FileBadge, color: "text-yellow-600", bg: "bg-yellow-50", border: "border-yellow-200" },
+      { label: "DEMORAS", count: auditCounts.demoras, icon: AlertTriangle, color: "text-indigo-600", bg: "bg-indigo-50", border: "border-indigo-200" },
+      { label: "CUMPLIDAS", count: auditCounts.cumplidas, icon: CheckCircle2, color: "text-white", bg: "bg-green-500 shadow-md transform scale-105", border: "border-green-600" },
+      { label: "RECHAZADOS", count: auditCounts.rechazado, icon: AlertOctagon, color: "text-white", bg: "bg-red-500 shadow-md", border: "border-red-600" },
     ]
 
     const sourceAgg = new Map<string, { datos: number; ventas: number }>()
@@ -1126,9 +1173,11 @@ if (agentsList.length > 0) {
                     <div key={i} className="flex items-center justify-between p-3 rounded-xl border bg-white hover:bg-slate-50 transition-colors">
                       <div className="flex flex-col">
                         <span className="text-xs font-black text-slate-700">{p.name}</span>
-                        <span className="text-[10px] text-slate-400">Altas: <b className="text-slate-600">{p.altas}</b> • Pass: <b className="text-slate-600">{p.pass}</b></span>
+                        <span className="text-[10px] text-slate-400">
+                          Ventas: <b className="text-slate-600">{p.ventas}</b> • Cumplidas: <b className="text-slate-600">{p.cumplidas}</b> • <b className="text-slate-600">{p.pct}%</b>
+                        </span>
                       </div>
-                      <Badge variant="outline" className="font-black text-indigo-700 bg-indigo-50 border-indigo-200">{p.ventas}</Badge>
+                      <Badge variant="outline" className={`font-black ${p.className}`}>{p.ventas}</Badge>
                     </div>
                   ))
                 ) : (

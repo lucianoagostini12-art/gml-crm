@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { createClient } from "@supabase/supabase-js"
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -44,11 +44,6 @@ import { WikiView } from "@/components/shared/WikiView"
 import { FocusModeView } from "@/components/shared/FocusModeView"
 import { MySalesView } from "@/components/seller/MySalesView"
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
 type AppNotification = {
   id: string
   user_name: string | null
@@ -72,6 +67,13 @@ export function SellerManager({
   onLogout: () => void
 }) {
   const currentUser = userName || "Vendedora"
+
+  /**
+   * ✅ CAMBIO CLAVE (sin tocar UI ni lógica):
+   * Usar el client autenticado del browser que reutiliza la sesión del login mail/contraseña.
+   * Esto evita que supabase quede como anon (auth.uid() null) y RLS bloquee chat / archivos.
+   */
+  const supabase = useMemo(() => createClientComponentClient(), [])
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 

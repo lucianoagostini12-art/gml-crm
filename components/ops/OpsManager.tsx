@@ -464,14 +464,15 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData?.status !== newData.status)
                 ) {
                     setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
-                    // ✅ Notificaciones de venta ahora se generan desde SQL (triggers).}
+                    // ✅ Notificaciones de venta ahora se generan desde SQL (triggers).
+                }
 
                 // 2. DETECTOR DE CAMBIO DE ESTADO (Para flujo)
                 if (payload.eventType === 'UPDATE' && oldData && newData.status !== oldData.status && newData.status !== 'ingresado' && newData.status !== 'vendido') {
                     // Ignoramos movimientos previos a la venta (nuevo->contactado)
                     if (['precarga', 'medicas', 'legajo', 'cumplidas', 'rechazado', 'demoras'].includes(newData.status)) {
                         // ✅ Notificaciones de cambio de estado ahora se generan desde SQL (triggers).
-                        }
+                    }
                 }
 
                 // Refrescar lista visual

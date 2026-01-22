@@ -180,6 +180,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }
 
     // --- 💾 HELPER DE NOTIFICACIONES (BACKEND) ---
+// ⚠️ Importante: OpsManager ya NO debe generar notificaciones de negocio (notas/chat/estados/ventas).
+// Eso se resuelve por SQL (triggers) y OpsManager solo escucha la tabla `notifications` para sonar/mostrar.
 // Esta función GUARDA en DB. Al guardar, el listener lo detecta y llama a notifyOPS.
 // ¡Ciclo cerrado!
 // Nota: en DB usamos:
@@ -462,44 +464,16 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                     (payload.eventType === 'UPDATE' && (newData.status === 'vendido' || newData.status === 'ingresado') && oldData?.status !== newData.status)
                 ) {
                     setNewSaleNotif({ client: newData.name, plan: newData.plan, seller: newData.agent_name })
-                    // ✅ AHORA GUARDAMOS EN DB (El listener de notifications se encargará de sonar)
-                    dispatchNotification("¡Venta Nueva! 🚀", `${newData.agent_name} ingresó a ${newData.name}`, 'OPS', 'success', newData.id);
-                }
+                    // ✅ Notificaciones de venta ahora se generan desde SQL (triggers).}
 
                 // 2. DETECTOR DE CAMBIO DE ESTADO (Para flujo)
                 if (payload.eventType === 'UPDATE' && oldData && newData.status !== oldData.status && newData.status !== 'ingresado' && newData.status !== 'vendido') {
                     // Ignoramos movimientos previos a la venta (nuevo->contactado)
                     if (['precarga', 'medicas', 'legajo', 'cumplidas', 'rechazado', 'demoras'].includes(newData.status)) {
-                        dispatchNotification("Movimiento de Estado", `${newData.name} pasó a ${newData.status.toUpperCase()}`, 'OPS', 'info', newData.id);
-                    }
-                }
-
-                // 3. DETECTOR DE NOTAS NUEVAS (Evitar notificarse a uno mismo)
-                if (payload.eventType === 'UPDATE' && oldData && newData.notes !== oldData.notes) {
-                     // Solo avisar si la nota no contiene el timestamp actual (algo rudimentario pero funcional)
-                     // O simplemente avisar genérico
-                     dispatchNotification("Nueva Nota 📝", `Se agregó información en ${newData.name}`, 'OPS', 'info', newData.id);
-                }
-
-                // 4. DETECTOR DE POSVENTA
-                if (payload.eventType === 'UPDATE' && oldData && (newData.post_sale_action !== oldData.post_sale_action || newData.post_sale_status !== oldData.post_sale_status)) {
-                    dispatchNotification("Novedad Posventa 🛠️", `${newData.name}: ${newData.post_sale_action} (${newData.post_sale_status})`, 'OPS', 'warning', newData.id);
-                }
-
-                // 5. DETECTOR DE CHATS (Analizando el JSON de comments)
-                if (payload.eventType === 'UPDATE' && oldData) {
-                    const oldComments = typeof oldData.comments === 'string' ? JSON.parse(oldData.comments || '[]') : (oldData.comments || []);
-                    const newComments = typeof newData.comments === 'string' ? JSON.parse(newData.comments || '[]') : (newData.comments || []);
-                    
-                    if (newComments.length > oldComments.length) {
-                        const lastMsg = newComments[newComments.length - 1];
-                        // Si el mensaje NO es mío, avisar
-                        if (lastMsg.author !== userName) {
-                            dispatchNotification("Nuevo Mensaje 💬", `${lastMsg.author}: ${lastMsg.text}`, 'OPS', 'info', newData.id);
+                        // ✅ Notificaciones de cambio de estado ahora se generan desde SQL (triggers).
                         }
-                    }
                 }
-                
+
                 // Refrescar lista visual
                 fetchOperations() 
             })

@@ -32,7 +32,7 @@ const FREEZE_CONFIG: Record<string, number> = {
     precio: 60,     // "Caro"
     interes: 45,    // "Lo pienso"
     quemados: 45,   // "+7 llamados"
-    zombies: 0,     // ✅ AGREGADO: Los Zombies ya vienen "muertos" por tiempo, se pueden reciclar al instante
+    zombies: 90,     // ✅ AGREGADO: Los Zombies ya vienen "muertos" por tiempo, se pueden reciclar al instante
     recontactar: 90, // ✅ NUEVO: Competencia / Otros (3 meses)
     basural: 365    // ✅ NUEVO: Error / Salud (1 año)
 }
@@ -434,7 +434,7 @@ export function AdminLeadFactory() {
             stats.zombies++
         } 
         else if (reason.includes("quemado") || reason.includes("7 llamados")) stats.quemados++
-        else if (reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
+        else if (reason.includes("no_contesta") || reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
         else if (reason.includes("precio") || reason.includes("caro")) stats.precio++
         else if (reason.includes("interes") || reason.includes("no quiere")) stats.interes++
         // ✅ CLASIFICACIÓN NUEVA
@@ -466,8 +466,8 @@ export function AdminLeadFactory() {
     if (category === "quemados") {
         query = query.ilike('loss_reason', '%quemado%')
     } else if (category === "fantasmas") {
-        reasonFilter = "no contesta"
-        query = query.ilike('loss_reason', `%${reasonFilter}%`)
+        // ✅ Fantasmas: soporta motivo normalizado y legacy
+        query = query.or("loss_reason.ilike.%no_contesta%,loss_reason.ilike.%no contesta%")
     } else if (category === "precio") {
         reasonFilter = "precio"
         query = query.ilike('loss_reason', `%${reasonFilter}%`)

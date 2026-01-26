@@ -47,12 +47,42 @@ const sortLeadsLogic = (a: Lead, b: Lead) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 }
 
-const isLeadOverdue = (lastUpdateStr: string, status: string) => {
-    if (!['cotizacion', 'contactado'].includes(status)) return false;
-    const lastUpdate = new Date(lastUpdateStr);
-    const now = new Date();
-    const diffHours = Math.ceil(Math.abs(now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60));
-    return diffHours > 72;
+const OVERDUE_HOURS = 72
+
+// --- OVERDUE PRO: usa actividad real (v_lead_activity_rollup) + protege si hay agenda futura (scheduled_for / v_lead_next_touchpoint) ---
+const getLeadActivityKey = (lead: any) => {
+    // Preferimos actividad real, y caemos a lastUpdate/createdAt para no romper nada.
+    return String(lead?.lastActivityAt || lead?.lastUpdate || lead?.createdAt || '')
+}
+
+const hasFutureAgenda = (lead: any) => {
+    // 1) scheduled_for directo
+    if (lead?.scheduled_for) {
+        const t = new Date(lead.scheduled_for).getTime()
+        if (Number.isFinite(t) && t >= Date.now()) return true
+    }
+    // 2) view v_lead_next_touchpoint
+    if (lead?.has_future_touch && lead?.next_touch_at) {
+        const t = new Date(lead.next_touch_at).getTime()
+        if (Number.isFinite(t) && t >= Date.now()) return true
+    }
+    return false
+}
+
+const isLeadOverdue = (lead: any) => {
+    const status = String(lead?.status || '').toLowerCase()
+    if (!['cotizacion', 'contactado'].includes(status)) return false
+
+    // Si hay agenda futura, no tiene sentido alertar cotización vencida
+    if (hasFutureAgenda(lead)) return false
+
+    const lastUpdateStr = getLeadActivityKey(lead)
+    if (!lastUpdateStr) return false
+
+    const lastUpdate = new Date(lastUpdateStr)
+    const now = new Date()
+    const diffHours = Math.ceil(Math.abs(now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60))
+    return diffHours > OVERDUE_HOURS
 }
 
 function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
@@ -70,7 +100,7 @@ function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAg
     }
 
     const isUrgent = lead.scheduled_for && new Date(lead.scheduled_for) <= new Date()
-    const isOverdue = isLeadOverdue(lead.lastUpdate, lead.status)
+    const isOverdue = isLeadOverdue(lead)
     const isZombie = (lead as any).warning_sent === true
 
     return (
@@ -147,6 +177,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const [leadProcessingId, setLeadProcessingId] = useState<string | null>(null)
     const [ignoredAlarmIds, setIgnoredAlarmIds] = useState<string[]>([])
     const [ackZombieIds, setAckZombieIds] = useState<string[]>([])
+    const [ackOverdue, setAckOverdue] = useState<Record<string, string>>({})
 
     // Dialogs
     const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null) 
@@ -167,6 +198,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
 
     // --- ACK LOCAL DE ALERTA ZOMBIE (para que no vuelva a molestar con el pop-up) ---
     const ZOMBIE_ACK_STORAGE_KEY = `kanban_zombie_ack:${CURRENT_USER}`
+    const OVERDUE_ACK_STORAGE_KEY = `kanban_overdue_ack:${CURRENT_USER}`
 
     // --- USER ID (para announcement_reads, que usa auth.users) ---
     useEffect(() => {
@@ -196,6 +228,27 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         }
     }, [ZOMBIE_ACK_STORAGE_KEY])
 
+    // --- ACK LOCAL DE ALERTA VENCIDO (para que no vuelva a molestar con el pop-up) ---
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            const raw = localStorage.getItem(OVERDUE_ACK_STORAGE_KEY)
+            if (!raw) { setAckOverdue({}); return }
+            const parsed = JSON.parse(raw)
+            setAckOverdue(parsed && typeof parsed === 'object' ? parsed : {})
+        } catch {
+            setAckOverdue({})
+        }
+    }, [OVERDUE_ACK_STORAGE_KEY])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            localStorage.setItem(OVERDUE_ACK_STORAGE_KEY, JSON.stringify(ackOverdue))
+        } catch {}
+    }, [ackOverdue, OVERDUE_ACK_STORAGE_KEY])
+
+
     useEffect(() => {
         if (typeof window === 'undefined') return
         try {
@@ -206,7 +259,21 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const acknowledgeZombie = (leadId?: string | null) => {
         if (!leadId) return
         setAckZombieIds(prev => (prev.includes(leadId) ? prev : [...prev, leadId]))
+    
+    const isOverdueAcked = (lead: any) => {
+        const id = lead?.id
+        if (!id) return false
+        const key = getLeadActivityKey(lead)
+        return ackOverdue[id] === key
     }
+
+    const acknowledgeOverdue = (lead?: any | null) => {
+        const id = lead?.id
+        if (!id) return
+        const key = getLeadActivityKey(lead)
+        setAckOverdue(prev => ({ ...prev, [id]: key }))
+    }
+}
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
 
@@ -215,13 +282,47 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         lastUpdate: item.last_update || item.created_at, createdAt: item.created_at, agent: item.agent_name,
         calls: item.calls || 0, quoted_prepaga: item.quoted_prepaga, quoted_plan: item.quoted_plan, quoted_price: item.quoted_price, notes: item.notes || '',
         scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas,
-        warning_sent: item.warning_sent 
+        warning_sent: item.warning_sent,
+        // Campos extra (no rompen LeadCard):
+        lastActivityAt: item.last_activity_at || item.lastActivityAt,
+        has_future_touch: item.has_future_touch,
+        next_touch_at: item.next_touch_at
     }))
+
+    // --- ENRIQUECER LEADS (actividad real + touchpoint futuro) ---
+    const enrichLeads = async (base: any[]) => {
+        const ids = (base || []).map(l => l?.id).filter(Boolean)
+        if (ids.length === 0) return base
+
+        const [rollRes, touchRes] = await Promise.all([
+            supabase.from('v_lead_activity_rollup').select('lead_id,last_activity_at').in('lead_id', ids),
+            supabase.from('v_lead_next_touchpoint').select('lead_id,has_future_touch,next_touch_at').in('lead_id', ids),
+        ])
+
+        const rollMap = new Map((rollRes.data ?? []).map((r: any) => [r.lead_id, r.last_activity_at]))
+        const touchMap = new Map((touchRes.data ?? []).map((t: any) => [t.lead_id, t]))
+
+        return (base || []).map((l: any) => {
+            const lastActivityAt = rollMap.get(l.id) || l.lastActivityAt
+            const touch = touchMap.get(l.id)
+            return {
+                ...l,
+                lastActivityAt: lastActivityAt || l.lastActivityAt,
+                has_future_touch: touch?.has_future_touch ?? l.has_future_touch,
+                next_touch_at: touch?.next_touch_at ?? l.next_touch_at,
+            }
+        })
+    }
+
 
     const fetchLeads = async () => {
         const visibleStatuses = ['nuevo', 'contactado', 'cotizacion', 'documentacion'];
-        const { data } = await supabase.from('leads').select('*').eq('agent_name', CURRENT_USER).in('status', visibleStatuses) 
-        if (data) setLeads(mapLeads(data))
+        const { data } = await supabase.from('leads').select('*').eq('agent_name', CURRENT_USER).in('status', visibleStatuses)
+        if (data) {
+            const mapped = mapLeads(data)
+            const enriched = await enrichLeads(mapped)
+            setLeads(enriched)
+        }
     }
 
     const checkUrgentMessage = async () => {
@@ -311,7 +412,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 
                 // A) NUEVO DATO EN 'SIN TRABAJAR' (Req #1)
                 if (payload.eventType === 'INSERT' && newData.status === 'nuevo') {
-                    const newLead = mapLeads([newData])[0]
+                    let newLead = mapLeads([newData])[0]
+                    try { newLead = (await enrichLeads([newLead]))[0] } catch {}
                     setLeads(prev => [newLead, ...prev])
                     
                     const title = "¡Nuevo Lead! 📥";
@@ -334,7 +436,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 
                 // B) CAMBIO DE ESTADO EN MYSALESVIEW (Req #4)
                 if (payload.eventType === 'UPDATE' && newData) {
-                    const updated = mapLeads([newData])[0]
+                    let updated = mapLeads([newData])[0]
+                    try { updated = (await enrichLeads([updated]))[0] } catch {}
                     
                     // Si sigue en el tablero, actualizarlo
                     if (['nuevo', 'contactado', 'cotizacion', 'documentacion'].includes(updated.status)) {
@@ -478,7 +581,14 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (found) setZombieLead(found);
         else setZombieLead(null);
     }, [leads, ackZombieIds]);
-    useEffect(() => { const found = leads.find(l => isLeadOverdue(l.lastUpdate, l.status)); if (found && !found.warning_sent) setOverdueLead(found); }, [leads]);
+    useEffect(() => {
+        // ALERTA VENCIDO PRO:
+        // - Se basa en actividad real (lastActivityAt) y NO molesta si hay agenda futura.
+        // - Además, si el usuario la cerró para ese mismo "ciclo" de actividad, no vuelve a aparecer.
+        const found = leads.find((l: any) => isLeadOverdue(l) && !l.warning_sent && !isOverdueAcked(l));
+        if (found) setOverdueLead(found);
+        else setOverdueLead(null);
+    }, [leads, ackOverdue]);
 
     const logHistory = async (leadId: string, fromStatus: string, toStatus: string) => {
         await supabase.from('lead_status_history').insert({
@@ -761,10 +871,10 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
             </Dialog>
             
             {/* ALERTA VENCIDO */}
-            <Dialog open={!!overdueLead && !zombieLead} onOpenChange={() => { setOverdueLead(null); stopAudio(); }}>
+            <Dialog open={!!overdueLead && !zombieLead} onOpenChange={() => { acknowledgeOverdue(overdueLead); setOverdueLead(null); stopAudio(); }}>
                 <DialogContent className="border-4 border-yellow-400 max-w-md shadow-2xl animate-in zoom-in duration-300" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} aria-describedby="overdue-desc">
                     <DialogHeader className="text-center"><div className="mx-auto bg-yellow-100 p-4 rounded-full mb-4 w-fit border-2 border-yellow-400"><AlertOctagon className="h-10 w-10 text-yellow-600 animate-pulse" /></div><DialogTitle className="text-2xl font-black text-slate-800 uppercase tracking-tight">¡COTIZACIÓN VENCIDA!</DialogTitle><DialogDescription id="overdue-desc" className="text-base text-slate-600 mt-2 font-medium">Pasaron más de 72 horas sin novedades con <br /><span className="text-xl font-bold text-slate-900 bg-yellow-200 px-2 rounded">{overdueLead?.name}</span></DialogDescription></DialogHeader>
-                    <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-12 bg-green-500 hover:bg-green-600 text-white font-bold text-lg gap-2" onClick={() => window.open(`https://wa.me/${overdueLead?.phone}?text=Hola`, '_blank')}><MessageCircle size={24} fill="currentColor" /> Enviar WhatsApp Ya</Button><Button variant="outline" className="w-full h-12 border-2 border-slate-200" onClick={() => { setOverdueLead(null); stopAudio(); }}>Ignorar por ahora</Button></div>
+                    <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-12 bg-green-500 hover:bg-green-600 text-white font-bold text-lg gap-2" onClick={() => { acknowledgeOverdue(overdueLead); window.open(`https://wa.me/${overdueLead?.phone}?text=Hola`, '_blank') }><MessageCircle size={24} fill="currentColor" /> Enviar WhatsApp Ya</Button><Button variant="outline" className="w-full h-12 border-2 border-slate-200" onClick={() => { acknowledgeOverdue(overdueLead); setOverdueLead(null); stopAudio(); }}>Ignorar por ahora</Button></div>
                 </DialogContent>
             </Dialog>
 

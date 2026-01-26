@@ -259,7 +259,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const acknowledgeZombie = (leadId?: string | null) => {
         if (!leadId) return
         setAckZombieIds(prev => (prev.includes(leadId) ? prev : [...prev, leadId]))
-    
+    }
+
     const isOverdueAcked = (lead: any) => {
         const id = lead?.id
         if (!id) return false
@@ -273,9 +274,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         const key = getLeadActivityKey(lead)
         setAckOverdue(prev => ({ ...prev, [id]: key }))
     }
-}
-
-    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
+const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
 
     const mapLeads = (data: any[]) => data.map((item: any) => ({
         id: item.id, name: item.name, phone: item.phone, source: item.source, status: item.status.toLowerCase(),

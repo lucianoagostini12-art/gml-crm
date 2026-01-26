@@ -129,7 +129,7 @@ function applyGuardrails(raw: string) {
 
   // máx 2 renglones
   const lines = t.split("\n").map((x) => x.trim()).filter(Boolean)
-  if (lines.length > 2) t = t.slice(0, 2).join("\n")
+  if (lines.length > 2) t = lines.slice(0, 2).join("\n")
 
   return t
 }
@@ -170,41 +170,23 @@ async function humanDelay(text: string) {
   await new Promise((r) => setTimeout(r, delay))
 }
 
-/**
- * Detecta rate limit / quota de Gemini de manera más robusta.
- */
 function isRateLimitError(e: any) {
   const msg = String(e?.message || "").toLowerCase()
-  const status = e?.status
-  const statusText = String(e?.statusText || "").toLowerCase()
-  const details = JSON.stringify(e?.errorDetails || e?.details || e?.cause || {}).toLowerCase()
-
-  return (
-    status === 429 ||
-    msg.includes("429") ||
-    msg.includes("too many") ||
-    msg.includes("rate limit") ||
-    msg.includes("quota") ||
-    msg.includes("resource exhausted") ||
-    statusText.includes("too many") ||
-    details.includes("quota") ||
-    details.includes("resource_exhausted") ||
-    details.includes("too many")
-  )
+  return e?.status === 429 || msg.includes("429") || msg.includes("too many")
 }
 
 async function sendWithRetry(chat: any, text: string) {
-  const maxRetries = 5
+  const maxRetries = 3
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await chat.sendMessage(text)
     } catch (e: any) {
       if (!isRateLimitError(e) || attempt === maxRetries) throw e
-      const wait = Math.min(900 * Math.pow(2, attempt) + Math.random() * 400, 6500)
+      const wait = Math.min(650 * Math.pow(2, attempt) + Math.random() * 250, 2600)
       await new Promise((r) => setTimeout(r, wait))
     }
   }
-  // fallback (no debería llegar)
+  // fallback
   return await chat.sendMessage(text)
 }
 
@@ -300,7 +282,7 @@ Estilo sugerido: ${styleHint}
     await humanDelay(response)
     return { success: true, text: response }
   } catch (error: any) {
-    // Si es 429 / quota, mejor SILENT: el front ya muestra typing y evitamos ensuciar el chat
+    // Si es 429, mejor SILENT: el front ya muestra typing
     if (isRateLimitError(error)) {
       return { success: false, text: "", silent: true }
     }

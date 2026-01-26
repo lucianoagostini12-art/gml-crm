@@ -676,7 +676,80 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 }} 
             />
 
-            <QuotationDialog open={isQuoteDialogOpen} onOpenChange={setIsQuoteDialogOpen} onConfirm={async (data: any) => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price } : l)); setIsQuoteDialogOpen(false); await supabase.from('leads').update({ status: 'cotizacion', quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: data.price, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'cotizacion') }} onCancel={() => setIsQuoteDialogOpen(false)} />
+            
+            <QuotationDialog
+                open={isQuoteDialogOpen}
+                onOpenChange={setIsQuoteDialogOpen}
+                onConfirm={async (data: any) => {
+                    const leadId = leadProcessingId
+                    if (!leadId) return
+
+                    const oldLead = leads.find(l => l.id === leadId)
+
+                    // ✅ Normalizar precio (soporta "136.900" / "136,900" / "136900")
+                    const cleaned = String(data?.price ?? "")
+                        .replace(/\s/g, "")
+                        .replace(/\./g, "")
+                        .replace(/,/g, ".")
+                    const price = Number(cleaned)
+                    if (!Number.isFinite(price) || price <= 0) {
+                        toast.error("Precio inválido. Revisá la cotización.")
+                        return
+                    }
+
+                    // 1) Resolver si esta cotización debe ser la principal
+                    //    Si el lead no tiene quoted_* aún, la hacemos principal para mantener consistencia (LeadCard + LeadDetail)
+                    const shouldBeMain =
+                        !(oldLead?.quoted_price && oldLead.quoted_price > 0) && !oldLead?.quoted_plan
+
+                    if (shouldBeMain) {
+                        // Si había cotizaciones previas, bajamos cualquier main para no duplicar principales
+                        await supabase.from("quotes").update({ is_main: false }).eq("lead_id", leadId)
+                    }
+
+                    // 2) Insertar en historial de cotizaciones (LeadDetail lee desde 'quotes')
+                    const { error: qErr } = await supabase.from("quotes").insert({
+                        lead_id: leadId,
+                        prepaga: data.prepaga,
+                        plan: data.plan,
+                        price,
+                        is_main: shouldBeMain,
+                    })
+                    if (qErr) {
+                        console.warn("[KanbanBoard] insert quote error", qErr)
+                        // No frenamos el flujo, pero avisamos
+                        toast.error("No pude guardar la cotización en el historial.")
+                    }
+
+                    // 3) Actualizar lead (para LeadCard y para que deje de bloquear el paso a Cotización)
+                    setLeads(prev =>
+                        prev.map(l =>
+                            l.id === leadId
+                                ? {
+                                      ...l,
+                                      status: "cotizacion",
+                                      ...(shouldBeMain
+                                          ? { quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: price }
+                                          : {}),
+                                  }
+                                : l
+                        )
+                    )
+                    setIsQuoteDialogOpen(false)
+
+                    const updatePayload: any = { status: "cotizacion", last_update: new Date().toISOString() }
+                    if (shouldBeMain) {
+                        updatePayload.quoted_prepaga = data.prepaga
+                        updatePayload.quoted_plan = data.plan
+                        updatePayload.quoted_price = price
+                    }
+
+                    await supabase.from("leads").update(updatePayload).eq("id", leadId)
+
+                    if (oldLead) logHistory(leadId, oldLead.status, "cotizacion")
+                }}
+                onCancel={() => setIsQuoteDialogOpen(false)}
+            />
             <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
 
             {/* ALERTA ZOMBIE */}

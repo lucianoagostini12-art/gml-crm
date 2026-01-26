@@ -50,7 +50,7 @@ export function AdminPipelineHealth() {
         // Nota: 'documentacion' existe en ambos mundos, por eso hay que desambiguar con lead_status_history.
         const SELLER_STATUSES = ['nuevo', 'contactado', 'cotizacion', 'documentacion']
         const OPS_STATUSES = ['ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'postventa', 'liquidacion final']
-        
+
         // 1) CARTERA SELLER (solo kanban seller)
         // Importante: acá NO se deben traer estados OPS.
         const { data: rawSellerLeads } = await supabase
@@ -60,7 +60,7 @@ export function AdminPipelineHealth() {
             .neq('agent_name', 'Zombie 🧟')
 
         // 1.1) Desambiguación de DOCUMENTACION (si ya tocó OPS, NO aparece en Salud del Tubo)
-        let activeLeads = rawSellerLeads ?? []
+        let activeLeads: any[] = rawSellerLeads ?? []
         try {
             const docIds = activeLeads
                 .filter((l: any) => l?.status === 'documentacion' && l?.id)
@@ -78,13 +78,78 @@ export function AdminPipelineHealth() {
             }
         } catch {
             // Si algo falla acá, preferimos NO romper el panel.
-            // (Quedará como estaba, pero sin afectar OPS porque AVISAR/CEMENTERIO se hará por IDs calculados.)
         }
 
-        // 2. VENTAS DEL MES
+        const now = new Date()
+        const nowMs = now.getTime()
+
+        // ---- ACTIVIDAD REAL + PROTECCIÓN POR AGENDA ----
+        const leadIds = activeLeads.map((l: any) => l?.id).filter(Boolean) as string[]
+
+        const rollupMap = new Map<string, string>()
+        const touchMap = new Map<string, any>()
+
+        if (leadIds.length > 0) {
+            const [rollupRes, touchRes] = await Promise.all([
+                supabase.from('v_lead_activity_rollup').select('lead_id,last_activity_at').in('lead_id', leadIds),
+                supabase.from('v_lead_next_touchpoint').select('lead_id,has_future_touch,next_touch_at').in('lead_id', leadIds),
+            ])
+
+            ;(rollupRes.data ?? []).forEach((r: any) => {
+                if (r?.lead_id && r?.last_activity_at) rollupMap.set(r.lead_id, r.last_activity_at)
+            })
+            ;(touchRes.data ?? []).forEach((t: any) => {
+                if (t?.lead_id) touchMap.set(t.lead_id, t)
+            })
+        }
+
+        const isProtectedByAgenda = (leadId: string) => {
+            const t = touchMap.get(leadId)
+            if (!t?.has_future_touch || !t?.next_touch_at) return false
+            const next = new Date(t.next_touch_at).getTime()
+            return Number.isFinite(next) && next >= nowMs
+        }
+
+        const getLastActivityMs = (lead: any) => {
+            const iso = (lead?.id && rollupMap.get(lead.id)) || lead?.last_update || lead?.created_at
+            const ms = new Date(iso).getTime()
+            return Number.isFinite(ms) ? ms : 0
+        }
+
+        // --- AUTO-LIMPIEZA PREMIUM ---
+        // Si AVISÉ y después hubo actividad real o se agendó algo a futuro, se va el cartel rojo (warning).
+        try {
+            const revivedIds = activeLeads
+                .filter((l: any) => l?.id && l?.warning_sent)
+                .filter((l: any) => {
+                    if (isProtectedByAgenda(l.id)) return true
+                    if (!l?.warning_date) return false
+                    const warnMs = new Date(l.warning_date).getTime()
+                    const lastActMs = getLastActivityMs(l)
+                    return Number.isFinite(warnMs) && lastActMs > warnMs
+                })
+                .map((l: any) => l.id as string)
+
+            if (revivedIds.length > 0) {
+                await supabase
+                    .from('leads')
+                    .update({ warning_sent: false, warning_date: null })
+                    .in('id', revivedIds)
+                    .eq('warning_sent', true)
+
+                // Actualizamos en memoria para que el panel no quede "pegado" hasta el próximo fetch
+                activeLeads = activeLeads.map((l: any) =>
+                    revivedIds.includes(l?.id) ? { ...l, warning_sent: false, warning_date: null } : l
+                )
+            }
+        } catch {
+            // Si falla, no rompemos el panel. Solo no se auto-limpia hasta el próximo ciclo.
+        }
+
+        // 2) VENTAS DEL MES
         const startDate = new Date(parseInt(selectedYear), parseInt(selectedMonth) - 1, 1).toISOString()
         const endDate = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0, 23, 59, 59).toISOString()
-        
+
         // Lógica ajustada: Cuenta como venta si está 'vendido' (en GV), 'cumplidas' o 'finalizada'
         const { data: salesInMonth } = await supabase
             .from('leads')
@@ -93,85 +158,110 @@ export function AdminPipelineHealth() {
             .gte('last_update', startDate)
             .lte('last_update', endDate)
 
-        if (activeLeads && salesInMonth) {
-            const now = new Date()
-            
-            // --- LÓGICA ZOMBIE REFINADA ---
-            const allZombies = activeLeads.filter(l => {
-                const lastUp = new Date(l.last_update || l.created_at)
-                const diffHours = (now.getTime() - lastUp.getTime()) / (1000 * 60 * 60)
-                return diffHours > 72 // +3 días sin tocar
-            })
+        // 3) PERFIL DE VENDEDORAS (para que aparezcan todas aunque tengan 0 stock/0 ventas)
+        const { data: profilesRows } = await supabase
+            .from('profiles')
+            .select('full_name, role')
+            .not('full_name', 'is', null)
 
-            // 1. Frescos: No tienen aviso
-            const freshList = allZombies.filter(z => !z.warning_sent)
-            const fresh = freshList.length
+        // --- LÓGICA ZOMBIE PREMIUM ---
+        const allZombies = activeLeads.filter((l: any) => {
+            if (!l?.id) return false
+            if (isProtectedByAgenda(l.id)) return false
 
-            // 2. Avisados: Tienen aviso
-            const warned = allZombies.filter(z => z.warning_sent)
+            const lastActMs = getLastActivityMs(l)
+            const diffHours = (nowMs - lastActMs) / (1000 * 60 * 60)
+            return diffHours > 72 // +3 días sin señales de vida
+        })
 
-            // Desglose de avisados por tiempo (Regla de 24hs)
-            let pending = 0
-            let killable = 0
+        // 1. Frescos: No tienen aviso
+        const freshList = allZombies.filter((z: any) => !z.warning_sent)
+        const fresh = freshList.length
 
-            const killableIds: string[] = []
-            warned.forEach(z => {
-                if (z.warning_date) {
-                    const warnDate = new Date(z.warning_date)
-                    const hoursSinceWarn = (now.getTime() - warnDate.getTime()) / (1000 * 60 * 60)
-                    
-                    if (hoursSinceWarn < 24) {
-                        pending++ // En periodo de gracia
-                    } else {
-                        killable++ // Pasaron 24hs, listos para cementerio
-                        if (z.id) killableIds.push(z.id)
-                    }
+        // 2. Avisados: Tienen aviso
+        const warned = allZombies.filter((z: any) => z.warning_sent)
+
+        // Desglose de avisados por tiempo (Regla de 24hs)
+        let pending = 0
+        let killable = 0
+        const killableIds: string[] = []
+
+        warned.forEach((z: any) => {
+            // Por las dudas: si aparece agenda futura entre medio, queda protegido y NO va a cementerio.
+            if (z?.id && isProtectedByAgenda(z.id)) return
+
+            if (z.warning_date) {
+                const warnMs = new Date(z.warning_date).getTime()
+                const hoursSinceWarn = (nowMs - warnMs) / (1000 * 60 * 60)
+
+                if (hoursSinceWarn < 24) {
+                    pending++
                 } else {
                     killable++
                     if (z.id) killableIds.push(z.id)
                 }
-            })
+            } else {
+                // caso raro: warning_sent true pero sin fecha -> lo tratamos como killable
+                killable++
+                if (z.id) killableIds.push(z.id)
+            }
+        })
 
-            // Guardamos IDs para acciones seguras (solo Seller)
-            setFreshZombieIds(freshList.map((z: any) => z.id).filter(Boolean))
-            setKillableZombieIds(killableIds)
+        // Guardamos IDs para acciones seguras (solo Seller)
+        setFreshZombieIds(freshList.map((z: any) => z.id).filter(Boolean))
+        setKillableZombieIds(killableIds)
 
-            // --- RATIOS Y COBERTURA ---
-            const agentsWithStock = activeLeads.map(l => l.agent_name).filter(Boolean)
-            const agentsWithSales = salesInMonth.map(l => l.agent_name).filter(Boolean)
-            
-            const allAgents = [...new Set([...agentsWithStock, ...agentsWithSales])]
-                .filter(name => name !== 'Recupero' && name !== 'Sistema' && name !== 'Zombie 🧟')
+        // --- RATIOS Y COBERTURA ---
+        const agentsWithStock = activeLeads.map((l: any) => l.agent_name).filter(Boolean)
+        const agentsWithSales = (salesInMonth ?? []).map((l: any) => l.agent_name).filter(Boolean)
 
-            const ratios = allAgents.map(agent => {
-                const currentStock = activeLeads.filter(l => l.agent_name === agent).length
-                const monthSales = salesInMonth.filter(l => l.agent_name === agent).length
-                const totalManaged = currentStock + monthSales
-                const ratioVal = monthSales > 0 ? Math.round(totalManaged / monthSales) : totalManaged
-                
-                let color = "bg-blue-500"
+        const sellerNamesFromProfiles =
+            (profilesRows ?? [])
+                .filter((p: any) => {
+                    const role = String(p?.role || '').toLowerCase()
+                    // Queremos que estén TODAS las vendedoras desde profiles.
+                    // Filtramos solo roles administrativos para no meter ruido.
+                    if (role.includes('admin') || role.includes('supervisor')) return false
+                    return true
+                })
+                .map((p: any) => p.full_name)
+                .filter(Boolean)
+
+        const allAgents = [...new Set([...sellerNamesFromProfiles, ...agentsWithStock, ...agentsWithSales])]
+            .filter((name) => name !== 'Recupero' && name !== 'Sistema' && name !== 'Zombie 🧟')
+
+        const ratios = allAgents
+            .map((agent) => {
+                const currentStock = activeLeads.filter((l: any) => l.agent_name === agent).length
+                const monthSales = (salesInMonth ?? []).filter((l: any) => l.agent_name === agent).length
+
+                // "Datos necesarios para vender" REAL: stock / ventas (no sumamos ventas al stock)
+                const ratioVal = monthSales > 0 ? Math.round(currentStock / monthSales) : currentStock
+
+                let color = 'bg-blue-500'
                 if (monthSales === 0) {
-                    color = currentStock > 0 ? "bg-red-500" : "bg-slate-300"
-                } else if (ratioVal <= 15) { 
-                    color = "bg-green-500" 
-                } else if (ratioVal > 30) { 
-                    color = "bg-orange-500" 
+                    color = currentStock > 0 ? 'bg-red-500' : 'bg-slate-300'
+                } else if (ratioVal <= 15) {
+                    color = 'bg-green-500'
+                } else if (ratioVal > 30) {
+                    color = 'bg-orange-500'
                 }
 
                 return { name: agent, ratio: ratioVal, color, stock: currentStock, sales: monthSales }
-            }).sort((a, b) => b.stock - a.stock)
-
-            const coverage = Math.min(100, Math.round((activeLeads.length / 200) * 100))
-
-            setStats({
-                freshZombies: fresh,
-                pendingZombies: pending,
-                killableZombies: killable,
-                totalZombies: allZombies.length,
-                coverage,
-                agentsRatio: ratios
             })
-        }
+            .sort((a, b) => b.stock - a.stock)
+
+        const coverage = Math.min(100, Math.round((activeLeads.length / 200) * 100))
+
+        setStats({
+            freshZombies: fresh,
+            pendingZombies: pending,
+            killableZombies: killable,
+            totalZombies: allZombies.length,
+            coverage,
+            agentsRatio: ratios,
+        })
+
         setLoading(false)
     }
 
@@ -188,19 +278,68 @@ export function AdminPipelineHealth() {
         }
         if (!confirm(`¿Enviar alerta a los dueños de ${freshZombieIds.length} leads estancados?`)) return
 
-        const nowIso = new Date().toISOString()
+        const now = new Date()
+        const nowIso = now.toISOString()
+        const nowMs = now.getTime()
 
-        // IMPORTANTE: update SOLO por IDs calculados en fetchData (universo Seller)
+        // Recheck premium: si entre que cargó el panel y apretaste el botón hubo actividad o agenda futura, NO avisamos.
+        const stillWarnableIds = async (ids: string[]) => {
+            if (ids.length === 0) return []
+
+            const [touchRes, rollRes, leadsRes] = await Promise.all([
+                supabase.from("v_lead_next_touchpoint").select("lead_id,has_future_touch,next_touch_at").in("lead_id", ids),
+                supabase.from("v_lead_activity_rollup").select("lead_id,last_activity_at").in("lead_id", ids),
+                supabase.from("leads").select("id,created_at,last_update,warning_sent").in("id", ids),
+            ])
+
+            const touchMap = new Map((touchRes.data ?? []).map((t: any) => [t.lead_id, t]))
+            const rollMap = new Map((rollRes.data ?? []).map((r: any) => [r.lead_id, r.last_activity_at]))
+            const leadMap = new Map((leadsRes.data ?? []).map((l: any) => [l.id, l]))
+
+            const isProtected = (leadId: string) => {
+                const t = touchMap.get(leadId)
+                if (!t?.has_future_touch || !t?.next_touch_at) return false
+                const next = new Date(t.next_touch_at).getTime()
+                return Number.isFinite(next) && next >= nowMs
+            }
+
+            const getLastActMs = (leadId: string) => {
+                const l = leadMap.get(leadId)
+                const iso = rollMap.get(leadId) || l?.last_update || l?.created_at
+                const ms = new Date(iso).getTime()
+                return Number.isFinite(ms) ? ms : 0
+            }
+
+            return ids.filter((id) => {
+                const l = leadMap.get(id)
+                if (!l) return false
+                if (l.warning_sent) return false
+                if (isProtected(id)) return false
+
+                const diffHours = (nowMs - getLastActMs(id)) / (1000 * 60 * 60)
+                return diffHours > 72
+            })
+        }
+
+        const safeIds = await stillWarnableIds(freshZombieIds)
+
+        if (safeIds.length === 0) {
+            alert("No hay leads para avisar (se movieron o tienen agenda futura).")
+            fetchData()
+            return
+        }
+
+        // IMPORTANTE: update SOLO por IDs calculados (universo Seller)
         const { error } = await supabase
-            .from('leads')
+            .from("leads")
             .update({
                 warning_sent: true,
                 warning_date: nowIso,
                 last_update: nowIso,
             })
-            .in('id', freshZombieIds)
-            .is('warning_sent', false)
-        
+            .in("id", safeIds)
+            .is("warning_sent", false)
+
         if (error) alert("Error al enviar avisos: " + error.message)
         else fetchData()
     }
@@ -211,22 +350,83 @@ export function AdminPipelineHealth() {
             alert("No hay leads listos para cementerio.")
             return
         }
-        if (!confirm(`¿Mover ${killableZombieIds.length} leads al Cementerio Zombie 🧟?\nSolo se moverán los que recibieron aviso hace más de 24hs.`)) return
+        if (!confirm(`¿Mover ${killableZombieIds.length} leads al Cementerio Zombie 🧟?
+Solo se moverán los que recibieron aviso hace más de 24hs y no tuvieron actividad/agenda luego del aviso.`)) return
+
+        const now = new Date()
+        const nowIso = now.toISOString()
+        const nowMs = now.getTime()
+
+        // Recheck premium: si hubo actividad post-aviso o agenda futura, NO se mueve al cementerio.
+        const stillKillableIds = async (ids: string[]) => {
+            if (ids.length === 0) return []
+
+            const [touchRes, rollRes, leadsRes] = await Promise.all([
+                supabase.from("v_lead_next_touchpoint").select("lead_id,has_future_touch,next_touch_at").in("lead_id", ids),
+                supabase.from("v_lead_activity_rollup").select("lead_id,last_activity_at").in("lead_id", ids),
+                supabase.from("leads").select("id,created_at,last_update,warning_sent,warning_date").in("id", ids),
+            ])
+
+            const touchMap = new Map((touchRes.data ?? []).map((t: any) => [t.lead_id, t]))
+            const rollMap = new Map((rollRes.data ?? []).map((r: any) => [r.lead_id, r.last_activity_at]))
+            const leadMap = new Map((leadsRes.data ?? []).map((l: any) => [l.id, l]))
+
+            const isProtected = (leadId: string) => {
+                const t = touchMap.get(leadId)
+                if (!t?.has_future_touch || !t?.next_touch_at) return false
+                const next = new Date(t.next_touch_at).getTime()
+                return Number.isFinite(next) && next >= nowMs
+            }
+
+            const getLastActMs = (leadId: string) => {
+                const l = leadMap.get(leadId)
+                const iso = rollMap.get(leadId) || l?.last_update || l?.created_at
+                const ms = new Date(iso).getTime()
+                return Number.isFinite(ms) ? ms : 0
+            }
+
+            return ids.filter((id) => {
+                const l = leadMap.get(id)
+                if (!l) return false
+                if (!l.warning_sent) return false
+                if (isProtected(id)) return false
+
+                // Si hubo actividad real después del aviso, ya NO es killable.
+                if (l.warning_date) {
+                    const warnMs = new Date(l.warning_date).getTime()
+                    const lastActMs = getLastActMs(id)
+                    if (Number.isFinite(warnMs) && lastActMs > warnMs) return false
+
+                    const hoursSinceWarn = (nowMs - warnMs) / (1000 * 60 * 60)
+                    if (hoursSinceWarn < 24) return false
+                }
+
+                return true
+            })
+        }
+
+        const safeIds = await stillKillableIds(killableZombieIds)
+
+        if (safeIds.length === 0) {
+            alert("No hay leads para cementerio (se movieron o tienen agenda futura / actividad post-aviso).")
+            fetchData()
+            return
+        }
 
         // IMPORTANTE: update SOLO por IDs calculados en fetchData (universo Seller)
         const { error } = await supabase
-            .from('leads')
+            .from("leads")
             .update({
-                agent_name: 'Zombie 🧟',
-                status: 'nuevo',
+                agent_name: "Zombie 🧟",
+                status: "nuevo",
                 warning_sent: false,
                 warning_date: null,
                 notes: `[ZOMBIE]: Recuperado por inactividad post-aviso.`,
-                last_update: new Date().toISOString(),
+                last_update: nowIso,
             })
-            .in('id', killableZombieIds)
-            .eq('warning_sent', true)
-        
+            .in("id", safeIds)
+            .eq("warning_sent", true)
+
         if (error) alert("Error al mover al cementerio: " + error.message)
         else fetchData()
     }

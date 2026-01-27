@@ -255,10 +255,16 @@ export function AdminPerformance() {
   const [drillTab, setDrillTab] = useState<'altas' | 'pass'>('altas')
   const [drillMode, setDrillMode] = useState<'ventas' | 'cumplidas'>('ventas')
 
-  const openDrill = (sellerName: string, weekIdx: 0 | 1 | 2 | 3 | 4 | 5, tab: 'altas' | 'pass' = 'altas') => {
+  const openDrill = (
+    sellerName: string,
+    weekIdx: 0 | 1 | 2 | 3 | 4 | 5,
+    tab: 'altas' | 'pass' = 'altas',
+    mode: 'ventas' | 'cumplidas' = 'ventas'
+  ) => {
     setDrillSellerName(sellerName)
     setDrillWeekIdx(weekIdx)
     setDrillTab(tab)
+    setDrillMode(mode)
     setDrillOpen(true)
   }
 
@@ -534,8 +540,14 @@ export function AdminPerformance() {
     const completedOfficial = (leads || []).filter(
       (l) => norm(l.status) === "cumplidas" && l.billing_approved === true && String(l.billing_period || "") === targetPeriod
     )
-    const totalCompleted = completedOfficial.length
+
+    // ✅ Regla: Cumplidas se cuentan por CÁPITAS (AMPF=1) y PASS separado (registros)
     const completedPass = completedOfficial.filter((l) => isPass(l)).length
+    const completedAltasCapitas = completedOfficial
+      .filter((l) => !isPass(l))
+      .reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
+
+    const totalCompleted = completedAltasCapitas
 
     // 4) Cotizaciones (referencia): del mes por created_at
     const totalQuotes = leadsInMonth.filter(
@@ -549,7 +561,7 @@ export function AdminPerformance() {
     // ✅ Tasas con el total visible del header (ALTAS capitas + PASS registros)
     const visibleSales = totalSales + salesPass
     const conversionRate = totalLeads > 0 ? Math.round((visibleSales / totalLeads) * 100) : 0
-    const complianceRate = visibleSales > 0 ? Math.round((totalCompleted / visibleSales) * 100) : 0
+    const complianceRate = totalSales > 0 ? Math.round((totalCompleted / totalSales) * 100) : 0
     const leadsPerSale = visibleSales > 0 ? Math.round((totalLeads / visibleSales) * 10) / 10 : 0
 
     // 5) Ticket promedio por CÁPITA (igual a AdminRanking: facturación neta / cápitas, basado en liquidación oficial)
@@ -985,7 +997,7 @@ export function AdminPerformance() {
                 </div>
                 <div>
                   <span className="block text-5xl font-black text-green-300">
-                    {currentStats.totalCompleted - currentStats.completedPass}
+                    {currentStats.totalCompleted}
                   </span>
                   <span className="text-sm font-bold text-green-200 uppercase tracking-widest">Cumplidas</span>
                   {currentStats.completedPass > 0 && (
@@ -1051,7 +1063,7 @@ export function AdminPerformance() {
                   {(["w1", "w2", "w3", "w4", "w5"] as const).map((wk) => (
                     <TableCell key={wk} className="text-center text-slate-500">
                       <div className="flex flex-col items-center">
-                        <button type="button" className="font-black text-slate-700 hover:underline" onClick={() => { setDrillSellerName(seller.full_name); setDrillWeekIdx((wk === "w1" ? 1 : wk === "w2" ? 2 : wk === "w3" ? 3 : wk === "w4" ? 4 : 5) as any); setDrillOpen(true); }}>
+                        <button type="button" className="font-black text-slate-700 hover:underline" onClick={() => openDrill(seller.full_name, (wk === "w1" ? 1 : wk === "w2" ? 2 : wk === "w3" ? 3 : wk === "w4" ? 4 : 5) as any, 'altas', 'ventas')}>
                           {seller.weekly[wk] || "-"}
                         </button>
                         {(seller.weeklyPass?.[wk] || 0) > 0 && (
@@ -1074,9 +1086,9 @@ export function AdminPerformance() {
 
                   <TableCell className="text-right font-black text-green-600 text-base">
                     <div className="flex flex-col items-end">
-                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas')} title="Ver detalle de cumplidas del mes">{seller.stats.totalCompleted}</button>
+                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'cumplidas')} title="Ver detalle de cumplidas (liquidación oficial) del mes">{seller.stats.totalCompleted}</button>
                       {(seller.stats.completedPass || 0) > 0 && (
-                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass')} title="Ver detalle de PASS cumplidas del mes">+{seller.stats.completedPass} pass</button>
+                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'cumplidas')} title="Ver detalle de PASS cumplidas (liquidación oficial) del mes">+{seller.stats.completedPass} pass</button>
                       )}
                     </div>
                   </TableCell>
@@ -1144,9 +1156,11 @@ export function AdminPerformance() {
         <DialogContent className="max-w-[1100px] w-[92vw] max-h-[85vh] overflow-visible p-0 rounded-2xl shadow-2xl border">
           <DialogHeader className="sticky top-0 z-10 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 px-6 pt-5 pb-4">
             <DialogTitle className="flex flex-col gap-1">
-              <span>{drillSellerName} — Semana {drillWeekIdx}</span>
+              <span>{drillSellerName} — {drillWeekIdx === 0 ? 'Mes' : `Semana ${drillWeekIdx}`}</span>
               <span className="text-xs text-slate-500 font-normal">
-                Detalle por fecha_ingreso (verificación de semana)
+                {drillMode === "ventas"
+                  ? "Detalle por fecha_ingreso (verificación de semana)"
+                  : "Detalle por liquidación oficial (OpsBilling: cumplidas + billing_approved + billing_period)"}
               </span>
             </DialogTitle>
           </DialogHeader>

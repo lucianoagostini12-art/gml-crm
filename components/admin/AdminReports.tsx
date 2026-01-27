@@ -686,7 +686,35 @@ function ReportRow({ lead, onToggleReview, onOpenReassign }: { lead: ReportLead,
         
         <TableCell>
           <div className="flex flex-col">
-            <span className="font-bold text-slate-800 text-sm truncate max-w-[150px]">{lead.name}</span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="font-bold text-slate-800 text-sm truncate max-w-[150px] text-left hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Ver nombre completo y teléfono de ${lead.name}`}
+                >
+                  {lead.name}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="top"
+                className="w-80 p-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Cliente</div>
+                    <div className="text-sm font-black text-slate-900 break-words">{lead.name || "-"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Teléfono</div>
+                    <div className="text-sm font-bold text-slate-800 break-words">{lead.phone || "-"}</div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             {lead.source && (
                <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded w-fit mt-1 border border-slate-200">
                  {lead.source}

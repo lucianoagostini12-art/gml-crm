@@ -497,10 +497,14 @@ const fetchProfiles = async () => {
       const fulfilledPassLeads = fulfilledAll.filter((l: any) => isPass(l))
       const fulfilledAltasLeads = fulfilledAll.filter((l: any) => !isPass(l))
 
-      const fulfilled = calculatePoints(fulfilledAltasLeads) // liquidables ALTAS (PASS separado)
+      const fulfilledAltasCapitas = fulfilledAltasLeads.reduce(
+        (acc: number, l: any) => acc + altasPointsOfLead(l),
+        0
+      )
+      const fulfilled = fulfilledAltasCapitas // ✅ Cumplidas ALTAS por capitas (AMPF=1). PASS separado.
       const passCount = fulfilledPassLeads.length
 
-      const ratioVal = monthly > 0 ? Math.round((fulfilled / monthly) * 100) : 0
+      const ratioVal = monthly > 0 ? Math.round((fulfilledAltasCapitas / monthly) * 100) : 0
 
       const recentMs = now.getTime() - 600000
       const status = agentLeads.some((l: any) => {

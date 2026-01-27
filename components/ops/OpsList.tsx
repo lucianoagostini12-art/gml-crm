@@ -2,9 +2,9 @@
 
 import { useState, useEffect, type MouseEvent } from "react"
 import { createClient } from "@/lib/supabase"
-import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { UserPlus, ArrowRightLeft, Clock, ShieldCheck, User, Copy } from "lucide-react"
+// AGREGADO: Importamos MessageCircle y Paperclip para reemplazar los emojis
+import { UserPlus, ArrowRightLeft, Clock, ShieldCheck, Copy, MessageCircle, Paperclip } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 // AGREGADO: Importamos getStatusColor para mantener consistencia con el Modal
 import { getPrepagaStyles, getSubStateStyle, getStatusColor } from "./data"
@@ -24,7 +24,7 @@ const getPrepagaBadgeColor = (prepagaRaw: string) => {
   return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
-export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any) {
+export function OpsList({ operations, onSelectOp, updateOp, globalConfig, unreadByLead }: any) {
   const supabase = createClient()
 
   // ✅ Copiar CUIT/DNI sin abrir el modal (no rompe el onClick de la tarjeta)
@@ -71,6 +71,8 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
       ) : (
         operations.map((op: any) => {
           const styles = getPrepagaStyles(op.prepaga || "Generica")
+          const unreadChat = unreadByLead?.[op.id]?.chat || 0
+          const unreadDocs = unreadByLead?.[op.id]?.docs || 0
           // Extraemos solo el borde izquierdo para la tarjeta
           const borderColorClass =
             styles.split(" ").find((c: string) => c.startsWith("border-l-")) || "border-l-slate-400"
@@ -88,6 +90,9 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
               onClick={() => onSelectOp(op)}
               className={`bg-white rounded-xl border border-slate-200 border-l-[6px] ${borderColorClass} p-4 hover:shadow-lg transition-all flex items-center justify-between group cursor-pointer relative overflow-hidden`}
             >
+              
+              {/* ❌ ELIMINADO: El bloque absoluto antiguo que tapaba los botones */}
+
               {/* 1. DATOS PRINCIPALES */}
               <div className="flex items-center gap-4 w-[40%]">
                 {/* ✅ ICONO DINÁMICO: PASS vs ALTA (Estilo unificado con Modal) */}
@@ -125,7 +130,8 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
                         {/* ✅ AQUI ESTA EL CAMBIO: Usamos avatarsMap */}
                         <AvatarImage
                           src={
-                            avatarsMap[op.seller] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${op.seller || "X"}`
+                            avatarsMap[op.seller] ||
+                            `https://api.dicebear.com/7.x/avataaars/svg?seed=${op.seller || "X"}`
                           }
                         />
                         <AvatarFallback className="text-[6px]">{op.seller?.substring(0, 2)}</AvatarFallback>
@@ -153,8 +159,33 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
 
               {/* 3. ESTADOS Y ACCIONES (Premium Layout) */}
               <div className="w-[40%] flex flex-col items-end gap-2 pl-4 border-l border-slate-100">
-                {/* Fila Superior: Badge Estado (AHORA CON COLOR) + Operador */}
-                <div className="flex items-center justify-end gap-2 w-full">
+                {/* Fila Superior: Badge Estado + Operador + NOTIFICACIONES */}
+                <div className="flex items-center justify-end gap-2 w-full h-7">
+                  
+                  {/* ✨ NUEVO: Badges de Notificación integrados y sutiles (No tapan nada) */}
+                  {(unreadChat > 0 || unreadDocs > 0) && (
+                    <div className="flex items-center gap-1.5 mr-auto animate-in fade-in zoom-in duration-300">
+                      {unreadChat > 0 && (
+                        <div 
+                          className="flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-md text-[10px] font-bold shadow-sm"
+                          title={`${unreadChat} mensajes nuevos`}
+                        >
+                          <MessageCircle size={11} className="stroke-[2.5]" />
+                          <span>{unreadChat}</span>
+                        </div>
+                      )}
+                      {unreadDocs > 0 && (
+                        <div 
+                          className="flex items-center gap-1 px-1.5 py-0.5 bg-orange-50 text-orange-600 border border-orange-100 rounded-md text-[10px] font-bold shadow-sm"
+                          title={`${unreadDocs} documentos nuevos`}
+                        >
+                          <Paperclip size={11} className="stroke-[2.5]" />
+                          <span>{unreadDocs}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {op.operator && (
                     <div
                       className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200"
@@ -165,7 +196,7 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
                     </div>
                   )}
 
-                  {/* AQUI ESTA EL CAMBIO: Usamos statusStyle en lugar del Badge gris estático */}
+                  {/* Estado Principal */}
                   <div
                     className={`px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest border shadow-sm text-center min-w-[90px] ${statusStyle}`}
                   >
@@ -175,14 +206,16 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig }: any)
 
                 {/* Fila Inferior: Subestado + Antigüedad */}
                 <div className="flex items-center justify-end gap-2 w-full">
-                  <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400" title="Días en esta etapa">
+                  <div
+                    className="flex items-center gap-1 text-[9px] font-bold text-slate-400"
+                    title="Días en esta etapa"
+                  >
                     <Clock size={10} />
                     <span>{op.daysInStatus || 0}d</span>
                   </div>
 
                   <div onClick={(e) => e.stopPropagation()} className="min-w-[140px]">
                     <Select value={op.subState || ""} onValueChange={(val) => updateOp({ ...op, subState: val })}>
-                      {/* AQUI TAMBIEN: Mantenemos getSubStateStyle pero ajustamos borde para que haga match con Modal */}
                       <SelectTrigger
                         className={`h-7 text-[10px] font-bold focus:ring-0 transition-all shadow-sm ${getSubStateStyle(
                           op.subState

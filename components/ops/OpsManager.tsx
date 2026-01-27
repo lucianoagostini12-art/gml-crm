@@ -116,6 +116,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     })
 
     const [selectedOp, setSelectedOp] = useState<Operation | null>(null)
+
+    // Unread badges (chat/docs) por operación (lead_id = op.id)
+    const [unreadByLead, setUnreadByLead] = useState<Record<string, { chat: number; docs: number }>>({})
+    const seenRef = useRef<Record<string, { chat?: string | null; docs?: string | null }>>({})
+    const visibleLeadIdsRef = useRef<Set<string>>(new Set())
     const [searchTerm, setSearchTerm] = useState("")
     
     // --- FILTROS ---
@@ -442,6 +447,80 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         setIsLoading(false)
     }
 
+    // === UNREAD COUNTS (chat/docs) ===
+    const recomputeUnreadForLeads = async (leadIds: string[]) => {
+        try {
+            if (!leadIds.length) {
+                setUnreadByLead({})
+                seenRef.current = {}
+                visibleLeadIdsRef.current = new Set()
+                return
+            }
+
+            // Si es el mismo set de leads visible, no recalculamos (evita loops por renders)
+            const prevSet = visibleLeadIdsRef.current
+            const same =
+                prevSet.size === leadIds.length && leadIds.every(id => prevSet.has(id))
+            if (same) return
+
+            visibleLeadIdsRef.current = new Set(leadIds)
+
+            // 1) Seen map (por usuario)
+            const { data: seenRows } = await supabase
+                .from('ops_lead_seen')
+                .select('lead_id,last_seen_chat_at,last_seen_docs_at')
+                .eq('user_name', userName)
+                .in('lead_id', leadIds)
+
+            const seenMap: Record<string, { chat?: string | null; docs?: string | null }> = {}
+            ;(seenRows || []).forEach((r: any) => {
+                seenMap[r.lead_id] = { chat: r.last_seen_chat_at, docs: r.last_seen_docs_at }
+            })
+            seenRef.current = seenMap
+
+            // 2) Traer mensajes y docs (totales son chicos en tu DB, sirve para conteo exacto)
+            const [{ data: msgs }, { data: docs }] = await Promise.all([
+                supabase.from('lead_messages').select('lead_id,created_at').in('lead_id', leadIds),
+                supabase.from('lead_documents').select('lead_id,uploaded_at').in('lead_id', leadIds),
+            ])
+
+            const counts: Record<string, { chat: number; docs: number }> = {}
+            for (const id of leadIds) counts[id] = { chat: 0, docs: 0 }
+
+            ;(msgs || []).forEach((m: any) => {
+                const lid = m.lead_id
+                if (!lid || !counts[lid]) return
+                const seenAt = seenMap[lid]?.chat ? new Date(seenMap[lid]!.chat as string).getTime() : 0
+                const msgAt = m.created_at ? new Date(m.created_at).getTime() : 0
+                if (msgAt > seenAt) counts[lid].chat += 1
+            })
+
+            ;(docs || []).forEach((d: any) => {
+                const lid = d.lead_id
+                if (!lid || !counts[lid]) return
+                const seenAt = seenMap[lid]?.docs ? new Date(seenMap[lid]!.docs as string).getTime() : 0
+                const docAt = d.uploaded_at ? new Date(d.uploaded_at).getTime() : 0
+                if (docAt > seenAt) counts[lid].docs += 1
+            })
+
+            setUnreadByLead(counts)
+        } catch (e) {
+            console.error('recomputeUnreadForLeads error', e)
+        }
+    }
+
+    const markSeenLocal = (leadId: string, kind: 'chat' | 'docs') => {
+        setUnreadByLead(prev => {
+            const next = { ...prev }
+            const cur = next[leadId] || { chat: 0, docs: 0 }
+            next[leadId] = { ...cur, [kind]: 0 } as any
+            return next
+        })
+        const nowIso = new Date().toISOString()
+        const curSeen = seenRef.current[leadId] || {}
+        seenRef.current = { ...seenRef.current, [leadId]: { ...curSeen, [kind]: nowIso } }
+    }
+
     useEffect(() => {
         // 1. Pedir permiso al cargar
         requestNotificationPermission();
@@ -502,6 +581,34 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                     notifyOPS(payload.new.title, payload.new.body, payload.new.type || 'info');
                 }
             })
+            // Unread badges: nuevos mensajes de chat
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages' }, (payload) => {
+                const lid = payload.new?.lead_id
+                if (!lid || !visibleLeadIdsRef.current.has(lid)) return
+
+                const seenAt = seenRef.current?.[lid]?.chat ? new Date(seenRef.current[lid]!.chat as string).getTime() : 0
+                const msgAt = payload.new?.created_at ? new Date(payload.new.created_at).getTime() : Date.now()
+                if (msgAt <= seenAt) return
+
+                setUnreadByLead(prev => {
+                    const cur = prev[lid] || { chat: 0, docs: 0 }
+                    return { ...prev, [lid]: { ...cur, chat: cur.chat + 1 } }
+                })
+            })
+            // Unread badges: nuevos archivos/documentos
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_documents' }, (payload) => {
+                const lid = payload.new?.lead_id
+                if (!lid || !visibleLeadIdsRef.current.has(lid)) return
+
+                const seenAt = seenRef.current?.[lid]?.docs ? new Date(seenRef.current[lid]!.docs as string).getTime() : 0
+                const docAt = payload.new?.uploaded_at ? new Date(payload.new.uploaded_at).getTime() : Date.now()
+                if (docAt <= seenAt) return
+
+                setUnreadByLead(prev => {
+                    const cur = prev[lid] || { chat: 0, docs: 0 }
+                    return { ...prev, [lid]: { ...cur, docs: cur.docs + 1 } }
+                })
+            })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {
                 fetchPermissions()
                 fetchSystemConfig() 
@@ -544,6 +651,13 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         if (dateFilter.end && op.entryDate > dateFilter.end) return false
         return true
     })
+
+
+    // Recalcular badges cuando cambie el set visible de operaciones (por filtros)
+    useEffect(() => {
+        const ids = filteredOps.map((o: any) => o?.id).filter(Boolean) as string[]
+        recomputeUnreadForLeads(ids)
+    }, [viewMode, currentStageFilter, searchTerm, operations, userName])
 
     const updateOpInDb = async (id: string, updates: any) => {
         const currentOp = operations.find(o => o.id === id)
@@ -875,12 +989,12 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                                             prepagas={globalConfig.prepagas}
                                         />
                                         <div className="mt-8 border-t border-slate-200 pt-6">
-                                            <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} />
+                                            <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />
                                         </div>
                                     </>
                                 )}
                                 
-                                {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} />}
+                                {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />}
                                 
                                 {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
                                 {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
@@ -910,7 +1024,8 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                 currentUser={userName} 
                 role={role} 
                 onStatusChange={handleStatusChange} 
-                onRelease={handleRelease} 
+                                onMarkSeen={markSeenLocal}
+onRelease={handleRelease} 
                 requestAdvance={requestAdvance} 
                 requestBack={requestBack} 
                 onPick={() => { if(selectedOp) confirmAssignment(userName) }}

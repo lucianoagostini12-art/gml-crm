@@ -132,6 +132,7 @@ function ChatBubble({ user, text, time, isMe }: any) {
 export function OpsModal({ 
     op, isOpen, onClose, onRelease, onStatusChange, requestAdvance, requestBack, onPick, 
     onAddNote, onAddReminder, currentUser, role, onUpdateOp, 
+    onMarkSeen,
     onSubStateChange, getSubStateStyle, getStatusColor,
     globalConfig 
 }: any) {
@@ -250,7 +251,32 @@ export function OpsModal({
                 channel.unsubscribe()
             }
         }
-    }, [isOpen, op?.id]) 
+    }, [isOpen, op?.id])
+
+    // ✅ Limpieza de badge de CHAT: al abrir el modal (ya estás "viendo" el chat)
+    useEffect(() => {
+        if (isOpen && localOp?.id) {
+            markSeen('chat')
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, localOp?.id])
+
+    // ✅ Limpieza de badge de DOCS: cuando entrás al tab "archivos" (no hace falta abrir uno por uno)
+    useEffect(() => {
+        if (isOpen && localOp?.id && activeTab === 'files') {
+            markSeen('docs')
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, isOpen, localOp?.id])
+
+    // ✅ Limpieza de badge de DOCS: cuando abrís/previeweás un archivo
+    useEffect(() => {
+        if (isOpen && localOp?.id && previewFile) {
+            markSeen('docs')
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [previewFile])
+ 
 
     const fetchFullData = async (leadId: string) => {
         const { data: leadData } = await supabase.from('leads').select('*').eq('id', leadId).single()
@@ -352,18 +378,58 @@ export function OpsModal({
     }
 
 
-    // ✅ NUEVO: Función auxiliar para enviar notificaciones
-    const sendNotification = async (targetUser: string, title: string, body: string, type: 'info'|'alert'|'success') => {
+    // ✅ NUEVO: Función auxiliar para enviar notificaciones (campanita/toast)
+    const inferEventType = (title: string, body: string) => {
+        const t = (title || "").toLowerCase()
+        const b = (body || "").toLowerCase()
+        if (t.includes("mensaje") || t.includes("chat") || b.includes("mensaje")) return "chat_venta"
+        if (t.includes("document") || t.includes("archivo") || b.includes("archivo")) return "archivo_subido"
+        if (t.includes("venta") && (t.includes("cumplida") || t.includes("ingres"))) return "venta_ingresada"
+        if (t.includes("estado") || b.includes("estado")) return "cambio_estado"
+        if (t.includes("nota") || b.includes("nota")) return "opschat"
+        return "generic"
+    }
+
+    const sendNotification = async (
+        targetUser: string,
+        title: string,
+        body: string,
+        type: 'info' | 'alert' | 'success',
+        eventType?: string
+    ) => {
         if (!targetUser || targetUser === "Sin Asignar" || targetUser === currentUser) return
-        
+
+        const event_type = (eventType || inferEventType(title, body)) as string
+
         await supabase.from('notifications').insert({
             user_name: targetUser,
             title,
             body,
             type,
+            event_type,
             read: false,
-            lead_id: localOp.id 
+            lead_id: localOp.id,
+            created_at: new Date().toISOString()
         })
+    }
+
+    // ✅ Seen markers: limpia badges (chat/docs) al abrir la pestaña
+    const markSeen = async (kind: 'chat' | 'docs') => {
+        if (!localOp?.id || !currentUser) return
+        const nowIso = new Date().toISOString()
+
+        const payload: any = { lead_id: localOp.id, user_name: currentUser }
+        if (kind === 'chat') payload.last_seen_chat_at = nowIso
+        if (kind === 'docs') payload.last_seen_docs_at = nowIso
+
+        const { error } = await supabase
+            .from('ops_lead_seen')
+            .upsert(payload, { onConflict: 'lead_id,user_name' })
+
+        if (error) console.error('markSeen error', error)
+
+        // Limpieza instantánea en la lista (sin esperar roundtrip)
+        if (typeof onMarkSeen === 'function') onMarkSeen(localOp.id, kind)
     }
 
     // --- MOTOR DE GUARDADO INTELIGENTE ---
@@ -641,7 +707,8 @@ export function OpsModal({
                     className="flex flex-col p-0 gap-0 bg-white border-0 shadow-2xl overflow-hidden rounded-2xl text-slate-900"
                     // ⛔ Eliminé onPointerDownOutside y onEscapeKeyDown para que puedas cerrar con click afuera/ESC
                 >
-                    {/* ✅ BARRA DE PRESENCIA AGREGADA COMO PRIMER HIJO DEL FLEX (NO FLOTANTE, NO ABSOLUTE) */}
+                                        <DialogTitle className="sr-only">Detalle de operación</DialogTitle>
+{/* ✅ BARRA DE PRESENCIA AGREGADA COMO PRIMER HIJO DEL FLEX (NO FLOTANTE, NO ABSOLUTE) */}
                     {otherEditors.length > 0 ? (
                         <div className="bg-red-500 border-b border-red-600 py-1 px-4 text-center text-xs font-black text-white flex items-center justify-center gap-2 animate-pulse">
                             <ShieldAlert size={14} className="animate-bounce"/> 
@@ -1247,7 +1314,8 @@ export function OpsModal({
             {previewFile && (
                 <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
                     <DialogContent className="max-w-4xl bg-black border-slate-800 p-0 overflow-hidden flex flex-col justify-center items-center shadow-2xl">
-                        <div className="absolute top-4 right-4 z-50">
+                                                <DialogTitle className="sr-only">Vista previa de archivo</DialogTitle>
+<div className="absolute top-4 right-4 z-50">
                             <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 rounded-full" onClick={() => setPreviewFile(null)}>
                                 <X size={24}/>
                             </Button>

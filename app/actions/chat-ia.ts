@@ -1,6 +1,7 @@
 "use server"
 
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import { createServerClient } from "@/lib/supabase-server" // ✅ NUEVO
 
 type AIResult =
   | { success: true; text: string }
@@ -151,13 +152,12 @@ function limitToMaxChars(text: string, maxChars: number) {
   if (t.length <= maxChars) return t
   // intentar cortar en punto o salto
   const cut = t.lastIndexOf(". ", maxChars)
-  if (cut > 50) return (t.slice(0, cut + 1)).trim()
+  if (cut > 50) return t.slice(0, cut + 1).trim()
   return t.slice(0, maxChars).trim()
 }
 
 function limitToOneEmoji(text: string) {
-  const emojiRegex =
-    /([\u{1F300}-\u{1F6FF}]|[\u{1F900}-\u{1FAFF}]|[\u2600-\u27BF])/gu
+  const emojiRegex = /([\u{1F300}-\u{1F6FF}]|[\u{1F900}-\u{1FAFF}]|[\u2600-\u27BF])/gu
 
   const matches = text.match(emojiRegex) || []
   if (matches.length <= 1) return text
@@ -283,6 +283,24 @@ function buildClosureContext(name: string | null) {
   }
 }
 
+/* ✅ NUEVO: leer prompt base desde Supabase, con fallback al hardcodeado */
+async function getSofiaPromptBase(): Promise<string> {
+  try {
+    const supabase = await createServerClient()
+    const { data } = await supabase
+      .from("ai_settings")
+      .select("value")
+      .eq("key", "sofia_system_prompt")
+      .single()
+
+    const v = String((data as any)?.value || "").trim()
+    if (v) return v
+  } catch {
+    // silent fallback
+  }
+  return "" // si vuelve vacío, usamos el hardcodeado más abajo
+}
+
 export async function generateAIResponse(chatHistory: any[]): Promise<AIResult> {
   try {
     const { day, hour, minutes, isWorkHours, isWeekend } = getTimeContext()
@@ -302,7 +320,9 @@ export async function generateAIResponse(chatHistory: any[]): Promise<AIResult> 
     const availability =
       isWorkHours ? "ONLINE" : isWeekend ? "FINDE/GUARDIA" : "FUERA DE HORARIO"
 
-    const systemInstruction = `
+    // ✅ NUEVO: base desde supabase (si existe) y fallback a hardcodeado original
+    const sofiaBaseFromDb = await getSofiaPromptBase()
+    const base = sofiaBaseFromDb ? sofiaBaseFromDb : `
 [[SOFÍA — GML SALUD (PREMIUM)]]
 Sos Sofía, asesora digital de GML Salud.
 Voz: femenina sutil, cálida, segura, con VOSEO (vos/tenés/decime).
@@ -334,6 +354,11 @@ Si el cliente es evasivo o no quiere pasar datos: DERIVÁ IGUAL por llamada (sin
 3) Audios: "Perdón 🫶 ahora estoy sin audio. ¿Me lo escribís cortito?"
 4) Turnos/médicos: "Te entiendo 🙂 no somos médicos ni damos turnos. En GML ayudamos a ingresar a una cobertura de salud. ¿Te interesa eso?"
 5) Síntomas urgentes (pecho/falta de aire/desmayo): "Si es urgente, consultá guardia/emergencias." Luego reencuadrá a cobertura.
+`
+
+    // ✅ Este systemInstruction mantiene TODO tu "cerebro" dinámico tal cual (cierres/señales/horario)
+    const systemInstruction = `
+${base}
 
 [[NOMBRE]]
 Si detectás el nombre del cliente, usalo para humanizar (sin repetirlo en cada mensaje). Preferir en validaciones/cierres.

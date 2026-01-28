@@ -7,7 +7,7 @@ import {
   Users,
   Layers,
   BarChart4,
-  FileBarChart, // ✅ CAMBIADO: Usamos este para "Reportes" (Documento con gráfico)
+  FileBarChart,
   LogOut,
   Database,
   Sliders,
@@ -32,7 +32,8 @@ import {
   Trophy,
   MessageCircle,
   FileText,
-  TrendingUp
+  TrendingUp,
+  Bot // ✅ NUEVO: Importamos el icono del robot
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -60,7 +61,8 @@ import { AdminResources } from "@/components/admin/AdminResources"
 import { AdminSetterManager } from "@/components/admin/AdminSetterManager"
 import { AdminRanking } from "@/components/admin/AdminRanking"
 import { AdminPerformance } from "@/components/admin/AdminPerformance"
-import AdminReports from "@/components/admin/AdminReports" // ✅ IMPORTADO NUEVO COMPONENTE
+import AdminReports from "@/components/admin/AdminReports"
+import AdminIABrain from "@/components/admin/ai/AdminIABrain" // ✅ IMPORTADO: El cerebro de la IA
 
 // --- FORMATO DE HORA CORREGIDO (ARGENTINA) ---
 const formatTime = (dateString: string) => {
@@ -307,6 +309,10 @@ function AdminSidebar({ open, setOpen, view, setView, userData, onLogout, notifi
                         <SidebarBtn active={view === 'overview'} onClick={() => setView('overview')} icon={<LayoutDashboard size={20}/>} label="Visión Global" />
                         <SidebarBtn active={view === 'conteo'} onClick={() => setView('conteo')} icon={<Calculator size={20} className="text-indigo-400"/>} label="Conteo Vivo" />
                         <SidebarBtn active={view === 'leads'} onClick={() => setView('leads')} icon={<Layers size={20} className="text-orange-400"/>} label="Leads" />
+                        
+                        {/* ✅ NUEVO: BOTÓN IA SOFÍA */}
+                        <SidebarBtn active={view === 'ia_brain'} onClick={() => setView('ia_brain')} icon={<Bot size={20} className="text-violet-500"/>} label="IA Sofía" />
+                        
                         <SidebarBtn active={view === 'setter'} onClick={() => setView('setter')} icon={<UserPlus size={20} className="text-pink-400"/>} label="Setter" />
                         <SidebarBtn active={view === 'agendas'} onClick={() => setView('agendas')} icon={<CalendarDays size={20} className="text-blue-500"/>} label="Agendas" />
                     </div>
@@ -678,6 +684,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           {view === "health" && <AdminPipelineHealth />}
           {view === "announcements" && <AdminAnnouncements />}
           {view === "reports" && <AdminReports />}
+          {view === "ia_brain" && <AdminIABrain />} {/* ✅ AQUÍ SE RENDERIZA EL CEREBRO DE SOFÍA */}
         </ScrollArea>
       </main>
     </div>

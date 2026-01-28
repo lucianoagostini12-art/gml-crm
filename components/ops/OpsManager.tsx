@@ -153,7 +153,27 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         type: "alta" 
     })
 
-    // --- NOTIFICACIONES ---
+    
+    // --- 🕒 FORMATEO FECHA/HORA (Siempre Argentina) ---
+    const formatARDateTime = (iso: string) => {
+        try {
+            return new Intl.DateTimeFormat("es-AR", {
+                timeZone: "America/Argentina/Buenos_Aires",
+                day: "2-digit",
+                month: "2-digit",
+                year: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            }).format(new Date(iso))
+        } catch {
+            // Fallback seguro
+            const d = new Date(iso)
+            return isNaN(d.getTime()) ? "" : d.toLocaleString()
+        }
+    }
+
+// --- NOTIFICACIONES ---
     const [notifications, setNotifications] = useState<any[]>([])
     const [newSaleNotif, setNewSaleNotif] = useState<any>(null)
     const [isBellOpen, setIsBellOpen] = useState(false) 
@@ -948,7 +968,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                                                     <div>
                                                         <h5 className="text-xs font-bold text-slate-800">{n.title}</h5>
                                                         <p className="text-[10px] text-slate-500 mt-0.5">{n.body}</p>
-                                                        <span className="text-[9px] text-slate-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                                        <span className="text-[9px] text-slate-400 mt-1 block">{formatARDateTime(n.created_at)}</span>
                                                     </div>
                                                 </div>
                                             </div>

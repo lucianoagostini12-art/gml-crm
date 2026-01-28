@@ -31,6 +31,7 @@ type Lead = {
   id: string
   name: string
   phone: string
+  dob?: string | null
   province?: string | null
   prepaga?: string | null
   status: string
@@ -190,6 +191,356 @@ const downloadTextFile = (content: string, filename: string, mime = "text/plain;
   }
 }
 
+
+/* --- USECONFIG (AdminIABrain local) --- */
+/**
+ * Centraliza toda la config de Sofía en un hook (ai_settings):
+ * - Prompt (sofia_system_prompt / system_prompt fallback)
+ * - Quick replies folders
+ * - Office hours + Guardia + mensaje fuera de horario
+ */
+function useConfig() {
+  const supabase = createClient()
+
+  // Prompt del sistema
+  const [systemPrompt, setSystemPrompt] = useState("")
+  const [savedSystemPrompt, setSavedSystemPrompt] = useState("")
+  const [initialSystemPrompt, setInitialSystemPrompt] = useState("")
+  const [promptSourceKey, setPromptSourceKey] = useState<'sofia_system_prompt' | 'system_prompt'>('sofia_system_prompt')
+  const [promptAppend, setPromptAppend] = useState("")
+
+  // Quick replies
+  const [quickReplyFolders, setQuickReplyFolders] = useState<QuickReplyFolder[]>([
+    { name: "General", replies: [] },
+    { name: "Prepagas", replies: [] },
+    { name: "Objeciones", replies: [] },
+  ])
+
+  // Office + Guardia
+  const [officeEnabled, setOfficeEnabled] = useState(true)
+  const [officeTz, setOfficeTz] = useState("America/Argentina/Buenos_Aires")
+  const [officeDays, setOfficeDays] = useState<number[]>([1, 2, 3, 4, 5])
+  const [officeStart, setOfficeStart] = useState("09:00")
+  const [officeEnd, setOfficeEnd] = useState("18:00")
+  const [offHoursMessage, setOffHoursMessage] = useState(
+    "¡Hola! 🙌 Por acá te respondemos en nuestro horario de atención. Dejame tu edad y zona y te contacto apenas estemos online."
+  )
+  const [guardEnabled, setGuardEnabled] = useState(false)
+  const [guardDays, setGuardDays] = useState<number[]>([6, 0])
+  const [guardStart, setGuardStart] = useState("10:00")
+  const [guardEnd, setGuardEnd] = useState("13:00")
+
+  const reloadConfig = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("ai_settings")
+        .select("key, value")
+        .in("key", [
+          "sofia_system_prompt",
+          "system_prompt",
+          "quick_replies_folders",
+          "office_enabled",
+          "office_tz",
+          "office_days",
+          "office_start",
+          "office_end",
+          "off_hours_message",
+          "guard_enabled",
+          "guard_days",
+          "guard_start",
+          "guard_end",
+        ])
+
+      if (error) throw error
+
+      const map: Record<string, any> = {}
+      ;(data || []).forEach((row: any) => {
+        map[row.key] = row.value
+      })
+
+      const sp =
+        typeof map.sofia_system_prompt === "string" && map.sofia_system_prompt.trim()
+          ? map.sofia_system_prompt
+          : typeof map.system_prompt === "string"
+            ? map.system_prompt
+            : ""
+
+      setSystemPrompt(sp || "")
+      setInitialSystemPrompt(sp || "")
+      setSavedSystemPrompt(sp || "")
+      setPromptSourceKey(
+        typeof map.sofia_system_prompt === "string" && map.sofia_system_prompt.trim()
+          ? "sofia_system_prompt"
+          : "system_prompt"
+      )
+
+      try {
+        const folders = JSON.parse(map.quick_replies_folders || "{}")
+        if (folders?.folders && Array.isArray(folders.folders)) {
+          setQuickReplyFolders(folders.folders)
+        }
+      } catch {}
+
+      if (typeof map.office_enabled === "boolean") setOfficeEnabled(map.office_enabled)
+      if (typeof map.office_tz === "string" && map.office_tz) setOfficeTz(map.office_tz)
+      try {
+        const days = JSON.parse(map.office_days || "[]")
+        if (Array.isArray(days) && days.length) setOfficeDays(days)
+      } catch {}
+      if (typeof map.office_start === "string" && map.office_start) setOfficeStart(map.office_start)
+      if (typeof map.office_end === "string" && map.office_end) setOfficeEnd(map.office_end)
+      if (typeof map.off_hours_message === "string") setOffHoursMessage(map.off_hours_message)
+
+      if (typeof map.guard_enabled === "boolean") setGuardEnabled(map.guard_enabled)
+      try {
+        const gdays = JSON.parse(map.guard_days || "[]")
+        if (Array.isArray(gdays) && gdays.length) setGuardDays(gdays)
+      } catch {}
+      if (typeof map.guard_start === "string" && map.guard_start) setGuardStart(map.guard_start)
+      if (typeof map.guard_end === "string" && map.guard_end) setGuardEnd(map.guard_end)
+    } catch (e: any) {
+      console.error("reloadConfig error", e)
+      toast.error("No se pudo cargar la configuración de Sofía")
+    }
+  }
+
+  const saveConfig = async () => {
+    try {
+      const updates = [
+        { key: "sofia_system_prompt", value: systemPrompt },
+        { key: "system_prompt", value: systemPrompt }, // fallback
+        { key: "quick_replies_folders", value: JSON.stringify({ folders: quickReplyFolders }) },
+        { key: "office_enabled", value: officeEnabled },
+        { key: "office_tz", value: officeTz },
+        { key: "office_days", value: JSON.stringify(officeDays) },
+        { key: "office_start", value: officeStart },
+        { key: "office_end", value: officeEnd },
+        { key: "off_hours_message", value: offHoursMessage },
+        { key: "guard_enabled", value: guardEnabled },
+        { key: "guard_days", value: JSON.stringify(guardDays) },
+        { key: "guard_start", value: guardStart },
+        { key: "guard_end", value: guardEnd },
+      ]
+
+      for (const u of updates) {
+        const { error } = await supabase.from("ai_settings").upsert(u, { onConflict: "key" })
+        if (error) throw error
+      }
+
+      setSavedSystemPrompt(systemPrompt)
+      setInitialSystemPrompt(systemPrompt)
+      toast.success("✅ Configuración guardada!")
+    } catch (e: any) {
+      console.error("saveConfig error", e)
+      toast.error("Error al guardar: " + (e?.message || ""))
+    }
+  }
+
+  useEffect(() => {
+    reloadConfig()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return {
+    // prompt
+    systemPrompt,
+    setSystemPrompt,
+    savedSystemPrompt,
+    setSavedSystemPrompt,
+    initialSystemPrompt,
+    setInitialSystemPrompt,
+    promptSourceKey,
+    setPromptSourceKey,
+    promptAppend,
+    setPromptAppend,
+
+    // replies
+    quickReplyFolders,
+    setQuickReplyFolders,
+
+    // horarios
+    officeEnabled,
+    setOfficeEnabled,
+    officeTz,
+    setOfficeTz,
+    officeDays,
+    setOfficeDays,
+    officeStart,
+    setOfficeStart,
+    officeEnd,
+    setOfficeEnd,
+    offHoursMessage,
+    setOffHoursMessage,
+    guardEnabled,
+    setGuardEnabled,
+    guardDays,
+    setGuardDays,
+    guardStart,
+    setGuardStart,
+    guardEnd,
+    setGuardEnd,
+
+    // actions
+    reloadConfig,
+    saveConfig,
+  }
+}
+
+/* --- Datos extraídos + Etiquetas IA --- */
+type ExtractedData = {
+  name: string
+  age: number | null
+  province: string
+  locality: string
+  group: string
+  work: string
+  labels: string[]
+}
+
+function extractDataFromChat(lead: Lead | null): ExtractedData {
+  const l: any = lead as any
+  if (!l) {
+    return { name: "", age: null, province: "", locality: "", group: "", work: "", labels: [] }
+  }
+
+  const msgs = Array.isArray(l.chat) ? l.chat : []
+  const clientText = msgs
+    .filter((m: any) => {
+      if (typeof m?.isMe === "boolean") return !m.isMe
+      if (typeof m?.role === "string") return m.role === "user" || m.role === "client"
+      if (typeof m?.from === "string") return m.from === "client"
+      // fallback: si no hay metadata, asumimos cliente
+      return true
+    })
+    .map((m: any) => String(m?.content || m?.text || ""))
+    .join("\n")
+    .toLowerCase()
+
+  // Edad
+  let age: number | null = null
+  const am =
+    clientText.match(/\btengo\s+(\d{1,3})\b/) ||
+    clientText.match(/\b(\d{1,3})\s*años\b/) ||
+    clientText.match(/\bedad\s*[:=]?\s*(\d{1,3})\b/)
+  if (am?.[1]) {
+    const n = parseInt(am[1], 10)
+    if (!Number.isNaN(n) && n >= 0 && n <= 120) age = n
+  }
+
+  // Localidad / Provincia (heurístico)
+  const locMatch =
+    clientText.match(/\bsoy de\s+([a-záéíóúñ\s]{3,40})\b/) ||
+    clientText.match(/\bvivo en\s+([a-záéíóúñ\s]{3,40})\b/) ||
+    clientText.match(/\bestoy en\s+([a-záéíóúñ\s]{3,40})\b/)
+  const locality = (l.locality || (locMatch?.[1] ? String(locMatch[1]).trim() : "")) as string
+  const province = (l.province || "") as string
+
+  // Grupo familiar
+  let group = String(l.group || l.family_group || "").trim()
+  if (!group) {
+    if (/\bfamilia\b|\bhijos\b|\besposa\b|\bmarido\b|\bpareja\b/.test(clientText)) group = "Familia"
+    else if (/\bsolo\b|\bpara mi\b|\bpara mí\b/.test(clientText)) group = "Solo"
+  }
+
+  // Trabajo / situación
+  let work = String(l.work || l.work_status || l.laboral || "").trim()
+  if (!work) {
+    if (/\bjubilad/.test(clientText)) work = "Jubilado/a"
+    else if (/\bmonotribut/.test(clientText)) work = "Monotributo"
+    else if (/\bdependencia\b|\ben blanco\b|\bempleado\b|\bsueldo\b/.test(clientText)) work = "Relación de dependencia"
+    else if (/\bautonom/.test(clientText)) work = "Autónomo"
+  }
+
+  const extracted: ExtractedData = {
+    name: String(l.name || ""),
+    age,
+    province,
+    locality,
+    group,
+    work,
+    labels: [],
+  }
+
+  extracted.labels = generateAILabels(extracted, lead)
+
+  return extracted
+}
+
+function generateAILabels(ex: Omit<ExtractedData, "labels">, lead: Lead | null): string[] {
+  const labels: string[] = []
+  if (!ex.age) labels.push("Falta: Edad")
+  if (!ex.locality && !ex.province) labels.push("Falta: Zona")
+  if (!ex.work) labels.push("Falta: Situación laboral")
+  if (!ex.group) labels.push("Falta: Grupo familiar")
+
+  // señales de intención (usa chat)
+  const l: any = lead as any
+  const msgs = Array.isArray(l?.chat) ? l.chat : []
+  const t = msgs.map((m: any) => String(m?.content || m?.text || "")).join("\n").toLowerCase()
+
+  if (/\bprecio\b|\bcu[aá]nto sale\b|\bvalor\b|\bcotiz/.test(t) || /\$\s*\d/.test(t)) labels.push("Pidió precio")
+  if (/\burgente\b|\bhoy\b|\bya\b|\bllamame\b|\bllámame\b/.test(t)) labels.push("Intención alta")
+
+  // estado/resultado
+  const st = String(l?.status || "").toLowerCase()
+  const lr = String(l?.loss_reason || "").toLowerCase()
+  if (st.includes("perdid") || st.includes("lost") || lr) labels.push("Perdido")
+
+  return Array.from(new Set(labels))
+}
+
+/* --- Badge de estado (incluye loss_reason) --- */
+function getLeadStatusBadge(statusRaw: string, lossReason?: string | null) {
+  const s = String(statusRaw || "").toLowerCase()
+  const lr = String(lossReason || "").trim()
+  let label = statusRaw || "—"
+  let cls = "bg-slate-50 text-slate-700 border-slate-200"
+
+  const isLost = s.includes("perdid") || s.includes("caid") || s.includes("lost") || !!lr
+  if (!s) {
+    label = "—"
+  } else if (isLost) {
+    label = "Perdido"
+    cls = "bg-rose-50 text-rose-700 border-rose-200"
+  } else if (s.includes("sin trabajar") || s === "nuevo") {
+    label = "Sin trabajar"
+    cls = "bg-slate-50 text-slate-700 border-slate-200"
+  } else if (s.includes("contact")) {
+    label = "Contacto"
+    cls = "bg-blue-50 text-blue-700 border-blue-200"
+  } else if (s.includes("cotiz")) {
+    label = "Cotizando"
+    cls = "bg-violet-50 text-violet-700 border-violet-200"
+  } else if (s.includes("document")) {
+    label = "Documentación"
+    cls = "bg-amber-50 text-amber-700 border-amber-200"
+  } else if (
+    s.includes("ingres") ||
+    s.includes("precarga") ||
+    s.includes("medicas") ||
+    s.includes("legajo") ||
+    s.includes("demoras") ||
+    s.includes("cumplid") ||
+    s.includes("rechaz")
+  ) {
+    label = "OPS"
+    cls = "bg-emerald-50 text-emerald-700 border-emerald-200"
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <Badge variant="outline" className={`text-[10px] px-2 py-0.5 ${cls}`}>
+        {label}
+      </Badge>
+      {isLost && lr ? (
+        <Badge variant="outline" className="text-[10px] px-2 py-0.5 bg-rose-50 border-rose-200 text-rose-700">
+          {lr.toLowerCase().includes("precio") ? "Precio" : lr.slice(0, 18)}
+        </Badge>
+      ) : null}
+    </div>
+  )
+}
+
 export default function AdminIABrain() {
   const supabase = createClient()
   
@@ -209,35 +560,50 @@ export default function AdminIABrain() {
   const [filterLossReason, setFilterLossReason] = useState<string>("all")
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [showFilters, setShowFilters] = useState(false)
-  
-  // --- CONFIG GLOBAL ---
-  const [systemPrompt, setSystemPrompt] = useState("")
-  const [savedSystemPrompt, setSavedSystemPrompt] = useState("")
-  const [promptSourceKey, setPromptSourceKey] = useState<'sofia_system_prompt' | 'system_prompt'>('sofia_system_prompt')
-  const [leadDetailOpen, setLeadDetailOpen] = useState(false)
-  const [initialSystemPrompt, setInitialSystemPrompt] = useState("")
-  const [promptAppend, setPromptAppend] = useState("")
-  const [quickReplyFolders, setQuickReplyFolders] = useState<QuickReplyFolder[]>([
-    { name: "General", replies: [] },
-    { name: "Prepagas", replies: [] },
-    { name: "Objeciones", replies: [] }
-  ])
-  
-  // --- HORARIOS ---
-  const [officeEnabled, setOfficeEnabled] = useState(true)
-  const [officeTz, setOfficeTz] = useState("America/Argentina/Buenos_Aires")
-  const [officeDays, setOfficeDays] = useState<number[]>([1,2,3,4,5])
-  const [officeStart, setOfficeStart] = useState("09:00")
-  const [officeEnd, setOfficeEnd] = useState("18:00")
-  const [offHoursMessage, setOffHoursMessage] = useState(
-    "¡Hola! 🙌 Por acá te respondemos en nuestro horario de atención. Dejame tu edad y zona y te contacto apenas estemos online."
-  )
-  const [guardEnabled, setGuardEnabled] = useState(false)
-  const [guardDays, setGuardDays] = useState<number[]>([6, 0]) // sábado/domingo por defecto
-  const [guardStart, setGuardStart] = useState("10:00")
-  const [guardEnd, setGuardEnd] = useState("13:00")
-  
+
+  // --- CONFIG (via useConfig) ---
+  const {
+    systemPrompt,
+    setSystemPrompt,
+    savedSystemPrompt,
+    setSavedSystemPrompt,
+    initialSystemPrompt,
+    setInitialSystemPrompt,
+    promptSourceKey,
+    setPromptSourceKey,
+    promptAppend,
+    setPromptAppend,
+
+    quickReplyFolders,
+    setQuickReplyFolders,
+
+    officeEnabled,
+    setOfficeEnabled,
+    officeTz,
+    setOfficeTz,
+    officeDays,
+    setOfficeDays,
+    officeStart,
+    setOfficeStart,
+    officeEnd,
+    setOfficeEnd,
+    offHoursMessage,
+    setOffHoursMessage,
+    guardEnabled,
+    setGuardEnabled,
+    guardDays,
+    setGuardDays,
+    guardStart,
+    setGuardStart,
+    guardEnd,
+    setGuardEnd,
+
+    reloadConfig,
+    saveConfig,
+  } = useConfig()
+
   // --- UI STATES ---
+  const [leadDetailOpen, setLeadDetailOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("chat")
   const [draft, setDraft] = useState("")
   const [showQuickRepliesModal, setShowQuickRepliesModal] = useState(false)
@@ -347,97 +713,6 @@ export default function AdminIABrain() {
       console.error('Error fetching leads:', err)
     }
     setLoading(false)
-  }
-
-  // --- FETCH CONFIG ---
-  const fetchConfig = async () => {
-    const { data } = await supabase
-      .from('ai_settings')
-      .select('key, value')
-      .in('key', [
-        'sofia_system_prompt',
-        'system_prompt',
-        'quick_replies_folders',
-        'office_enabled',
-        'office_tz',
-        'office_days',
-        'office_start',
-        'office_end',
-        'off_hours_message',
-        'guard_enabled',
-        'guard_days',
-        'guard_start',
-        'guard_end',
-      ])
-
-    const map: Record<string, any> = {}
-    ;(data || []).forEach((row: any) => {
-      map[row.key] = row.value
-    })
-
-    const sp = (typeof map.sofia_system_prompt === 'string' && map.sofia_system_prompt.trim())
-      ? map.sofia_system_prompt
-      : (typeof map.system_prompt === 'string' ? map.system_prompt : "")
-    if (sp) {
-      setSystemPrompt(sp)
-      setInitialSystemPrompt(sp)
-      setSavedSystemPrompt(sp)
-      setPromptSourceKey((typeof map.sofia_system_prompt === 'string' && map.sofia_system_prompt.trim()) ? 'sofia_system_prompt' : 'system_prompt')
-    }
-    
-    try {
-      const folders = JSON.parse(map.quick_replies_folders || '{}')
-      if (folders.folders && Array.isArray(folders.folders)) {
-        setQuickReplyFolders(folders.folders)
-      }
-    } catch {}
-
-    if (typeof map.office_enabled === 'boolean') setOfficeEnabled(map.office_enabled)
-    if (typeof map.office_tz === 'string') setOfficeTz(map.office_tz)
-    try {
-      const days = JSON.parse(map.office_days || '[]')
-      if (Array.isArray(days)) setOfficeDays(days)
-    } catch {}
-    if (typeof map.office_start === 'string') setOfficeStart(map.office_start)
-    if (typeof map.office_end === 'string') setOfficeEnd(map.office_end)
-    if (typeof map.off_hours_message === 'string') setOffHoursMessage(map.off_hours_message)
-    if (typeof map.guard_enabled === 'boolean') setGuardEnabled(map.guard_enabled)
-    try {
-      const gdays = JSON.parse(map.guard_days || '[]')
-      if (Array.isArray(gdays)) setGuardDays(gdays)
-    } catch {}
-    if (typeof map.guard_start === 'string') setGuardStart(map.guard_start)
-    if (typeof map.guard_end === 'string') setGuardEnd(map.guard_end)
-  }
-
-  // --- SAVE CONFIG ---
-  const saveConfig = async () => {
-    try {
-      const updates = [
-        { key: 'sofia_system_prompt', value: systemPrompt },
-        { key: 'system_prompt', value: systemPrompt },
-        { key: 'quick_replies_folders', value: JSON.stringify({ folders: quickReplyFolders }) },
-        { key: 'office_enabled', value: officeEnabled },
-        { key: 'office_tz', value: officeTz },
-        { key: 'office_days', value: JSON.stringify(officeDays) },
-        { key: 'office_start', value: officeStart },
-        { key: 'office_end', value: officeEnd },
-        { key: 'off_hours_message', value: offHoursMessage },
-        { key: 'guard_enabled', value: guardEnabled },
-        { key: 'guard_days', value: JSON.stringify(guardDays) },
-        { key: 'guard_start', value: guardStart },
-        { key: 'guard_end', value: guardEnd },
-      ]
-      
-      for (const u of updates) {
-        await supabase.from('ai_settings').upsert(u, { onConflict: 'key' })
-      }
-      
-      setSavedSystemPrompt(systemPrompt)
-      toast.success('✅ Configuración guardada!')
-    } catch (err: any) {
-      toast.error('Error al guardar: ' + err.message)
-    }
   }
 
   // --- LOG EVENT ---
@@ -751,7 +1026,7 @@ export default function AdminIABrain() {
   useEffect(() => {
     if (currentUser) {
       fetchLeads()
-      fetchConfig()
+      reloadConfig()
     }
   }, [currentUser])
 
@@ -763,7 +1038,7 @@ export default function AdminIABrain() {
 
   // --- RENDER HELPERS ---
   const getInboxStatusBadge = (status: InboxStatus) => {
-    const styles = {
+    const styles: Record<InboxStatus, string> = {
       unread: 'bg-blue-100 text-blue-700 border-blue-200',
       pending: 'bg-amber-100 text-amber-700 border-amber-200',
       intervention: 'bg-red-100 text-red-700 border-red-200',
@@ -772,8 +1047,8 @@ export default function AdminIABrain() {
       blocked: 'bg-slate-100 text-slate-700 border-slate-200',
       hot: 'bg-orange-100 text-orange-700 border-orange-200'
     }
-    
-    const labels = {
+
+    const labels: Record<InboxStatus, string> = {
       unread: 'Sin leer',
       pending: 'Pendiente',
       intervention: 'Requiere intervención',
@@ -782,49 +1057,13 @@ export default function AdminIABrain() {
       blocked: 'Bloqueado',
       hot: 'Prioritario'
     }
-    
+
     return (
       <Badge variant="outline" className={`text-[10px] px-2 py-0.5 ${styles[status]}`}>
         {labels[status]}
       </Badge>
     )
-  
-  const getLeadStageBadge = (statusRaw: string) => {
-    const s = String(statusRaw || "").toLowerCase()
-    let label = statusRaw || "—"
-    let cls = "bg-slate-50 text-slate-700 border-slate-200"
-    if (!s) {
-      label = "—"
-    } else if (s.includes("perdid") || s.includes("caid") || s.includes("lost")) {
-      label = "Perdido"
-      cls = "bg-rose-50 text-rose-700 border-rose-200"
-    } else if (s.includes("sin trabajar") || s === "nuevo") {
-      label = "Sin trabajar"
-      cls = "bg-slate-50 text-slate-700 border-slate-200"
-    } else if (s.includes("contact")) {
-      label = "Contacto"
-      cls = "bg-blue-50 text-blue-700 border-blue-200"
-    } else if (s.includes("cotiz")) {
-      label = "Cotizando"
-      cls = "bg-violet-50 text-violet-700 border-violet-200"
-    } else if (s.includes("document")) {
-      label = "Documentación"
-      cls = "bg-amber-50 text-amber-700 border-amber-200"
-    } else if (s.includes("ingres") || s.includes("precarga") || s.includes("medicas") || s.includes("legajo") || s.includes("demoras") || s.includes("cumplid") || s.includes("rechaz")) {
-      label = "OPS"
-      cls = "bg-emerald-50 text-emerald-700 border-emerald-200"
-    } else {
-      label = statusRaw
-    }
-
-    return (
-      <Badge variant="outline" className={`text-[10px] px-2 py-0.5 ${cls}`}>
-        {label}
-      </Badge>
-    )
   }
-
-}
 
   const statusColor = (s: string) => {
     if (s === 'active') return 'bg-emerald-500'
@@ -1175,13 +1414,7 @@ return (
                         
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {lead.inbox_status && getInboxStatusBadge(lead.inbox_status)}
-                          {lead.status && getLeadStageBadge(lead.status)}
-                          {lead.loss_reason && (
-                            <Badge variant="outline" className="text-[10px] px-2 py-0.5 bg-rose-50 border-rose-200 text-rose-700">
-                              {String(lead.loss_reason).toLowerCase().includes('precio') ? 'Precio' : String(lead.loss_reason).slice(0, 18)}
-                            </Badge>
-                          )}
-                          
+                          {getLeadStatusBadge(lead.status, lead.loss_reason)}
                           {(lead.unread_count || 0) > 0 && (
                             <Badge className="bg-blue-600 text-white text-[10px] px-1.5 py-0">
                               {lead.unread_count}

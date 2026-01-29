@@ -7,7 +7,7 @@ import {
   Sparkles, AlertCircle, CheckCircle2, Clock, MapPin, Zap, X, Archive, Tag, 
   Flame, Filter, ChevronDown, Plus, Edit2, Trash2, Save, FolderOpen, Star,
   Bell, CalendarClock, UserPlus, MoreVertical, ExternalLink, RefreshCw,
-  StickyNote, CheckSquare, Square, FileText, History, Briefcase
+  StickyNote, CheckSquare, Square, FileText, History, Briefcase, Lock
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -44,16 +44,19 @@ type Lead = {
   notes?: string
   agent_name?: string
   assigned_to?: string
+  assigned_at?: string
   comments?: Comment[]
   reminders?: Reminder[]
   tags?: string[]
   priority?: 'normal' | 'high'
   archived?: boolean
+  blocked?: boolean
   inbox_status?: InboxStatus
   unread_count?: number
   last_message_from?: 'client' | 'agent' | 'ai'
   loss_reason?: string | null
   ai_labels?: string[]
+  chat_status?: 'pendiente' | 'derivado' | 'cerrado' | 'abierto'
 }
 
 
@@ -79,6 +82,7 @@ type OfficeHours = {
   days: number[]
   start: string
   end: string
+  is24h?: boolean
 }
 
 type QuickReplyFolder = {
@@ -126,12 +130,45 @@ const hhmmToMinutes = (hhmm: string) => {
 
 const isWithinOfficeHours = (cfg: OfficeHours) => {
   if (!cfg.enabled) return true
+  if (cfg.is24h) return true
   const { dow, hour, minute } = nowInTzParts(cfg.tz)
   if (!cfg.days.includes(dow)) return false
   const nowM = hour * 60 + minute
   const startM = hhmmToMinutes(cfg.start)
   const endM = hhmmToMinutes(cfg.end)
   return nowM >= startM && nowM <= endM
+}
+
+const getNextAvailableTime = (cfg: OfficeHours) => {
+  if (!cfg.enabled || cfg.is24h) return "en breve"
+  
+  const { dow, hour, minute } = nowInTzParts(cfg.tz)
+  const nowM = hour * 60 + minute
+  const startM = hhmmToMinutes(cfg.start)
+  const endM = hhmmToMinutes(cfg.end)
+  
+  // Si estamos en un día de trabajo pero fuera de horario
+  if (cfg.days.includes(dow)) {
+    if (nowM < startM) {
+      return `hoy a las ${cfg.start}`
+    }
+    if (nowM > endM) {
+      // Buscar el próximo día disponible
+      const nextDay = cfg.days.find(d => d > dow) ?? cfg.days[0]
+      const dayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+      return `el ${dayNames[nextDay]} a las ${cfg.start}`
+    }
+  }
+  
+  // Buscar el próximo día disponible
+  const nextDay = cfg.days.find(d => d > dow) ?? cfg.days[0]
+  const dayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+  
+  if (nextDay === 0) { // Domingo
+    return `el domingo a partir de las 9:30`
+  }
+  
+  return `el ${dayNames[nextDay]} a las ${cfg.start}`
 }
 
 const replaceVariables = (text: string, lead: Lead) => {
@@ -222,6 +259,7 @@ function useConfig() {
   const [officeDays, setOfficeDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [officeStart, setOfficeStart] = useState("09:00")
   const [officeEnd, setOfficeEnd] = useState("18:00")
+  const [is24h, setIs24h] = useState(false)
   const [offHoursMessage, setOffHoursMessage] = useState(
     "¡Hola! 🙌 Por acá te respondemos en nuestro horario de atención. Dejame tu edad y zona y te contacto apenas estemos online."
   )
@@ -244,6 +282,7 @@ function useConfig() {
           "office_days",
           "office_start",
           "office_end",
+          "is24h",
           "off_hours_message",
           "guard_enabled",
           "guard_days",
@@ -289,6 +328,7 @@ function useConfig() {
       } catch {}
       if (typeof map.office_start === "string" && map.office_start) setOfficeStart(map.office_start)
       if (typeof map.office_end === "string" && map.office_end) setOfficeEnd(map.office_end)
+      if (typeof map.is24h === "boolean") setIs24h(map.is24h)
       if (typeof map.off_hours_message === "string") setOffHoursMessage(map.off_hours_message)
 
       if (typeof map.guard_enabled === "boolean") setGuardEnabled(map.guard_enabled)
@@ -315,6 +355,7 @@ function useConfig() {
         { key: "office_days", value: JSON.stringify(officeDays) },
         { key: "office_start", value: officeStart },
         { key: "office_end", value: officeEnd },
+        { key: "is24h", value: is24h },
         { key: "off_hours_message", value: offHoursMessage },
         { key: "guard_enabled", value: guardEnabled },
         { key: "guard_days", value: JSON.stringify(guardDays) },
@@ -369,6 +410,8 @@ function useConfig() {
     setOfficeStart,
     officeEnd,
     setOfficeEnd,
+    is24h,
+    setIs24h,
     offHoursMessage,
     setOffHoursMessage,
     guardEnabled,
@@ -552,6 +595,7 @@ export default function AdminIABrain() {
   const [loading, setLoading] = useState(true)
   
   // --- FILTROS Y BÚSQUEDA ---
+  const [inboxTab, setInboxTab] = useState<'activos' | 'archivados' | 'bloqueados'>('activos')
   const [inboxFilter, setInboxFilter] = useState<'all' | InboxStatus>('all')
   const [searchQuery, setSearchQuery] = useState("")
   const [filterAgent, setFilterAgent] = useState<string>("all")
@@ -559,6 +603,7 @@ export default function AdminIABrain() {
   const [filterSource, setFilterSource] = useState<string>("all")
   const [filterLossReason, setFilterLossReason] = useState<string>("all")
   const [filterTags, setFilterTags] = useState<string[]>([])
+  const [filterChatStatus, setFilterChatStatus] = useState<'all' | 'pendiente' | 'derivado' | 'cerrado' | 'abierto'>('all')
   const [showFilters, setShowFilters] = useState(false)
 
   // --- CONFIG (via useConfig) ---
@@ -587,6 +632,8 @@ export default function AdminIABrain() {
     setOfficeStart,
     officeEnd,
     setOfficeEnd,
+    is24h,
+    setIs24h,
     offHoursMessage,
     setOffHoursMessage,
     guardEnabled,
@@ -630,7 +677,8 @@ export default function AdminIABrain() {
     days: officeDays,
     start: officeStart,
     end: officeEnd,
-  }), [officeEnabled, officeTz, officeDays, officeStart, officeEnd])
+    is24h: is24h,
+  }), [officeEnabled, officeTz, officeDays, officeStart, officeEnd, is24h])
 
   const inOfficeHours = useMemo(() => isWithinOfficeHours(officeCfg), [officeCfg])
 
@@ -785,11 +833,12 @@ export default function AdminIABrain() {
   const handleAssign = async (agentName: string) => {
     if (!selectedLead) return
     
-    await supabase.from('leads').update({ agent_name: agentName, assigned_to: agentName }).eq('id', selectedLead.id)
+    const assigned_at = new Date().toISOString()
+    await supabase.from('leads').update({ agent_name: agentName, assigned_to: agentName, assigned_at }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'assigned', `Conversación asignada a ${agentName}`)
     
-    setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, agent_name: agentName, assigned_to: agentName } : l)))
-    setSelectedLead({ ...selectedLead, agent_name: agentName, assigned_to: agentName })
+    setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, agent_name: agentName, assigned_to: agentName, assigned_at } : l)))
+    setSelectedLead({ ...selectedLead, agent_name: agentName, assigned_to: agentName, assigned_at })
     toast.success(`✅ Asignado a ${agentName}`)
   }
 
@@ -814,6 +863,29 @@ export default function AdminIABrain() {
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, archived: newArchived, inbox_status: newArchived ? 'archived' : 'pending' } : l)))
     setSelectedLead({ ...selectedLead, archived: newArchived, inbox_status: newArchived ? 'archived' : 'pending' })
     toast.success(newArchived ? '📦 Conversación archivada' : '✅ Conversación restaurada')
+  }
+
+  const handleChatStatusChange = async (status: 'pendiente' | 'derivado' | 'cerrado' | 'abierto') => {
+    if (!selectedLead) return
+    
+    await supabase.from('leads').update({ chat_status: status }).eq('id', selectedLead.id)
+    await logEvent(selectedLead.id, 'chat_status_changed', `Estado de chat cambiado a: ${status}`)
+    
+    setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, chat_status: status } : l)))
+    setSelectedLead({ ...selectedLead, chat_status: status })
+    toast.success(`✅ Chat marcado como ${status}`)
+  }
+
+  const handleBlock = async () => {
+    if (!selectedLead) return
+    
+    const newBlocked = !selectedLead.blocked
+    await supabase.from('leads').update({ blocked: newBlocked }).eq('id', selectedLead.id)
+    await logEvent(selectedLead.id, newBlocked ? 'blocked' : 'unblocked', newBlocked ? 'Lead bloqueado' : 'Lead desbloqueado')
+    
+    setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, blocked: newBlocked } : l)))
+    setSelectedLead({ ...selectedLead, blocked: newBlocked })
+    toast.success(newBlocked ? '🔒 Lead bloqueado' : '✅ Lead desbloqueado')
   }
 
   const handleAddTag = async () => {
@@ -930,9 +1002,24 @@ export default function AdminIABrain() {
   const filteredLeads = useMemo(() => {
     let arr = leads
 
+    // Filtro por tab (activos/archivados/bloqueados)
+    if (inboxTab === 'archivados') {
+      arr = arr.filter(l => l.archived === true)
+    } else if (inboxTab === 'bloqueados') {
+      arr = arr.filter(l => l.blocked === true)
+    } else {
+      // Activos: ni archivados ni bloqueados
+      arr = arr.filter(l => !l.archived && !l.blocked)
+    }
+
     // Filtro por inbox status
     if (inboxFilter !== 'all') {
       arr = arr.filter(l => l.inbox_status === inboxFilter)
+    }
+
+    // Filtro por chat status
+    if (filterChatStatus !== 'all') {
+      arr = arr.filter(l => l.chat_status === filterChatStatus)
     }
 
     // Filtro por búsqueda (nombre, teléfono, contenido del chat)
@@ -975,11 +1062,6 @@ export default function AdminIABrain() {
       )
     }
 
-    // No mostrar archivados a menos que se filtre explícitamente
-    if (inboxFilter !== 'archived') {
-      arr = arr.filter(l => !l.archived)
-    }
-
     // Ordenar: prioridad alta primero, luego por último mensaje del cliente
     return arr.sort((a, b) => {
       if (a.priority === 'high' && b.priority !== 'high') return -1
@@ -988,21 +1070,21 @@ export default function AdminIABrain() {
       if (a.last_message_from !== 'client' && b.last_message_from === 'client') return 1
       return new Date(b.last_update).getTime() - new Date(a.last_update).getTime()
     })
-  }, [leads, inboxFilter, searchQuery, filterAgent, filterStatus, filterSource, filterLossReason, filterTags])
+  }, [leads, inboxTab, inboxFilter, filterChatStatus, searchQuery, filterAgent, filterStatus, filterSource, filterLossReason, filterTags])
 
   // Obtener listas únicas para filtros
   const uniqueAgents = useMemo(() => 
-    Array.from(new Set(leads.map(l => l.agent_name).filter(Boolean))),
+    Array.from(new Set(leads.map(l => l.agent_name).filter((v): v is string => typeof v === 'string' && v.trim().length > 0))),
     [leads]
   )
   
   const uniqueStatuses = useMemo(() => 
-    Array.from(new Set(leads.map(l => l.status).filter(Boolean))),
+    Array.from(new Set(leads.map(l => l.status).filter((v): v is string => typeof v === 'string' && v.trim().length > 0))),
     [leads]
   )
   
   const uniqueSources = useMemo(() => 
-    Array.from(new Set(leads.map(l => l.source).filter(Boolean))),
+    Array.from(new Set(leads.map(l => l.source).filter((v): v is string => typeof v === 'string' && v.trim().length > 0))),
     [leads]
   )
   
@@ -1183,24 +1265,23 @@ return (
                   <TooltipContent>Actualizar</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 hover:bg-violet-100"
-                      onClick={() => setActiveTab(activeTab === 'chat' ? 'settings' : 'chat')}
-                    >
-                      <Sliders className="w-4 h-4 text-violet-600"/>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Configuración</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
             </div>
           </div>
+
+          {/* Tabs: Activos / Archivados / Bloqueados */}
+          <Tabs value={inboxTab} onValueChange={(v: any) => setInboxTab(v)} className="mb-3">
+            <TabsList className="grid w-full grid-cols-3 bg-slate-100 rounded-xl">
+              <TabsTrigger value="activos" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                Activos
+              </TabsTrigger>
+              <TabsTrigger value="archivados" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                Archivados
+              </TabsTrigger>
+              <TabsTrigger value="bloqueados" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                Bloqueados
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
           {/* Búsqueda */}
           <div className="relative mb-3">
@@ -1413,6 +1494,16 @@ return (
                         </p>
                         
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          {lead.chat_status && (
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                              lead.chat_status === 'pendiente' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                              lead.chat_status === 'abierto' ? 'bg-green-50 border-green-200 text-green-700' :
+                              lead.chat_status === 'derivado' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                              'bg-gray-50 border-gray-200 text-gray-700'
+                            }`}>
+                              {lead.chat_status}
+                            </Badge>
+                          )}
                           {lead.inbox_status && getInboxStatusBadge(lead.inbox_status)}
                           {getLeadStatusBadge(lead.status, lead.loss_reason)}
                           {(lead.unread_count || 0) > 0 && (
@@ -1608,53 +1699,65 @@ return (
 
                   {officeEnabled && (
                     <div className="space-y-4 pt-2">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-xs font-semibold text-slate-600">Hora inicio</label>
-                          <Input
-                            type="time"
-                            value={officeStart}
-                            onChange={e => setOfficeStart(e.target.value)}
-                            className="bg-slate-50 border-slate-200 focus-visible:ring-violet-500"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-xs font-semibold text-slate-600">Hora fin</label>
-                          <Input
-                            type="time"
-                            value={officeEnd}
-                            onChange={e => setOfficeEnd(e.target.value)}
-                            className="bg-slate-50 border-slate-200 focus-visible:ring-violet-500"
-                          />
+                      <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                        <Switch checked={is24h} onCheckedChange={setIs24h}/>
+                        <div className="flex-1">
+                          <label className="text-sm font-semibold text-slate-800">Sofía trabaja 24 horas</label>
+                          <p className="text-xs text-slate-600">Desactiva las restricciones de horario</p>
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-600">Días activos</label>
-                        <div className="flex gap-2">
-                          {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((day, i) => (
-                            <Button
-                              key={i}
-                              variant={officeDays.includes(i) ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() =>
-                                setOfficeDays(
-                                  officeDays.includes(i)
-                                    ? officeDays.filter(d => d !== i)
-                                    : [...officeDays, i]
-                                )
-                              }
-                              className={`flex-1 h-9 text-xs ${
-                                officeDays.includes(i)
-                                  ? 'bg-violet-600 hover:bg-violet-700'
-                                  : 'border-slate-200 hover:bg-slate-50'
-                              }`}
-                            >
-                              {day}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
+                      {!is24h && (
+                        <>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-xs font-semibold text-slate-600">Hora inicio</label>
+                              <Input
+                                type="time"
+                                value={officeStart}
+                                onChange={e => setOfficeStart(e.target.value)}
+                                className="bg-slate-50 border-slate-200 focus-visible:ring-violet-500"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-semibold text-slate-600">Hora fin</label>
+                              <Input
+                                type="time"
+                                value={officeEnd}
+                                onChange={e => setOfficeEnd(e.target.value)}
+                                className="bg-slate-50 border-slate-200 focus-visible:ring-violet-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-600">Días activos</label>
+                            <div className="flex gap-2">
+                              {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((day, i) => (
+                                <Button
+                                  key={i}
+                                  variant={officeDays.includes(i) ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() =>
+                                    setOfficeDays(
+                                      officeDays.includes(i)
+                                        ? officeDays.filter(d => d !== i)
+                                        : [...officeDays, i]
+                                    )
+                                  }
+                                  className={`flex-1 h-9 text-xs ${
+                                    officeDays.includes(i)
+                                      ? 'bg-violet-600 hover:bg-violet-700'
+                                      : 'border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {day}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
 
                       
                       <div className="p-4 rounded-2xl border border-slate-200 bg-white">
@@ -1977,9 +2080,26 @@ return (
                           
                           <DropdownMenuSeparator />
                           
-                          <DropdownMenuItem onClick={() => handleInboxStatusChange('blocked')}>
-                            <X className="w-4 h-4 mr-2 text-red-600"/>
-                            Bloquear conversación
+                          <DropdownMenuItem onClick={() => handleChatStatusChange('abierto')}>
+                            <MessageSquare className="w-4 h-4 mr-2 text-green-600"/>
+                            Abrir chat
+                          </DropdownMenuItem>
+                          
+                          <DropdownMenuItem onClick={() => handleChatStatusChange('derivado')}>
+                            <ExternalLink className="w-4 h-4 mr-2 text-blue-600"/>
+                            Marcar como derivado
+                          </DropdownMenuItem>
+                          
+                          <DropdownMenuItem onClick={() => handleChatStatusChange('cerrado')}>
+                            <X className="w-4 h-4 mr-2 text-gray-600"/>
+                            Cerrar chat
+                          </DropdownMenuItem>
+                          
+                          <DropdownMenuSeparator />
+                          
+                          <DropdownMenuItem onClick={handleBlock}>
+                            <Lock className="w-4 h-4 mr-2 text-red-600"/>
+                            {selectedLead.blocked ? 'Desbloquear' : 'Bloquear'} lead
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -2231,6 +2351,17 @@ return (
                       ))}
                   </SelectContent>
                 </Select>
+                {selectedLead.assigned_to && selectedLead.assigned_at && (
+                  <div className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded-lg p-2">
+                    <div className="flex items-center gap-1">
+                      <UserPlus className="w-3 h-3 text-blue-600"/>
+                      <span>Asignado a <strong>{selectedLead.assigned_to}</strong></span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      {new Date(selectedLead.assigned_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Separator className="bg-slate-100" />
@@ -2422,24 +2553,6 @@ return (
 
               <Separator className="bg-slate-100" />
 
-              {/* Acciones Rápidas */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Acciones</label>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start text-xs h-9 border-slate-200 bg-white hover:bg-slate-50 hover:text-slate-900 shadow-sm"
-                  onClick={() => setLeadDetailOpen(true)}
-                >
-                  <ExternalLink className="w-3.5 h-3.5 mr-2 text-blue-500"/> Ver ficha completa
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start text-xs h-9 border-slate-200 bg-white hover:bg-slate-50 hover:text-slate-900 shadow-sm"
-                  onClick={() => handleInboxStatusChange('snoozed')}
-                >
-                  <CalendarClock className="w-3.5 h-3.5 mr-2 text-purple-500"/> Posponer seguimiento
-                </Button>
-              </div>
             </div>
           </div>
           </ScrollArea>

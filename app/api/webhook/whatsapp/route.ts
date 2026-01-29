@@ -1,10 +1,11 @@
-// api/webhook/whatsapp/route.ts
+// app/api/webhook/whatsapp/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase'; 
-import { generateAIResponse } from '@/chat-ia'; // Tu archivo de IA
-import { sendWhatsAppMessage } from '@/lib/whatsapp'; // El archivo que creamos recién
+// 👇 CORREGIDO: Apunta a donde me dijiste que está el archivo
+import { generateAIResponse } from '@/app/actions/chat-ia'; 
+import { sendWhatsAppMessage } from '@/lib/whatsapp'; 
 
-// 1. VERIFICACIÓN (Esto es lo que Meta va a probar primero)
+// 1. VERIFICACIÓN (Esto es lo que Meta prueba al configurar el webhook)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get('hub.mode');
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
     const value = changes?.value;
     const message = value?.messages?.[0];
 
-    // Si no es un mensaje de texto, lo ignoramos (pero respondemos OK a Meta)
+    // Si no es un mensaje de texto, lo ignoramos (pero respondemos OK a Meta para que no insista)
     if (!message || message.type !== 'text') {
       return new NextResponse('OK');
     }
@@ -84,6 +85,7 @@ export async function POST(request: Request) {
 
     // 4. Si la IA está activa, responde
     if (lead.ai_status === 'active') {
+      // Llamamos a la Server Action en app/actions
       const aiResponse = await generateAIResponse(updatedChat);
 
       if (aiResponse.success && aiResponse.text) {

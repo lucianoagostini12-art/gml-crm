@@ -15,6 +15,7 @@ if (!apiKey) {
 const genAI = new GoogleGenerativeAI(apiKey || "")
 
 // ✅ Modelo estable (evita 404 NotFound)
+// Nota: la variación real (para que no suene "chatbot") se controla con generationConfig.
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
 
 function normalize(s: string) {
@@ -137,14 +138,14 @@ function limitToOneQuestion(text: string) {
   return text
 }
 
-function limitToTwoLines(text: string) {
+function limitToMaxLines(text: string, maxLines: number) {
   const lines = text
     .split("\n")
     .map((x) => x.trim())
     .filter(Boolean)
 
-  if (lines.length <= 2) return text.trim()
-  return lines.slice(0, 2).join("\n").trim()
+  if (lines.length <= maxLines) return text.trim()
+  return lines.slice(0, maxLines).join("\n").trim()
 }
 
 function limitToMaxChars(text: string, maxChars: number) {
@@ -156,16 +157,16 @@ function limitToMaxChars(text: string, maxChars: number) {
   return t.slice(0, maxChars).trim()
 }
 
-function limitToOneEmoji(text: string) {
+function limitToMaxEmojis(text: string, maxEmojis: number) {
   const emojiRegex = /([\u{1F300}-\u{1F6FF}]|[\u{1F900}-\u{1FAFF}]|[\u2600-\u27BF])/gu
 
   const matches = text.match(emojiRegex) || []
-  if (matches.length <= 1) return text
+  if (matches.length <= maxEmojis) return text
 
-  let kept = false
+  let kept = 0
   return text.replace(emojiRegex, (m) => {
-    if (!kept) {
-      kept = true
+    if (kept < maxEmojis) {
+      kept += 1
       return m
     }
     return ""
@@ -179,9 +180,10 @@ function postProcess(raw: string) {
   t = enforcePhoneOnly(t)
 
   t = limitToOneQuestion(t)
-  t = limitToTwoLines(t)
-  t = limitToOneEmoji(t)
-  t = limitToMaxChars(t, 220)
+  // Más aire para sonar humano (sin descontrolarse)
+  t = limitToMaxLines(t, 4)
+  t = limitToMaxEmojis(t, 2)
+  t = limitToMaxChars(t, 360)
 
   return t
 }
@@ -196,7 +198,8 @@ function buildHistoryFromIsMe(chatHistory: any[]) {
   const msgs = (chatHistory || [])
     .map((m: any) => ({
       role: m?.isMe ? ("model" as const) : ("user" as const),
-      text: normalize(String(m?.text || "")),
+      // 🔥 ACÁ ESTABA EL ERROR: agregamos m?.content para que lea lo que manda el Webhook
+      text: normalize(String(m?.content || m?.text || "")),
     }))
     .filter((m: any) => m.text)
 
@@ -304,7 +307,8 @@ async function getSofiaPromptBase(): Promise<string> {
 export async function generateAIResponse(chatHistory: any[]): Promise<AIResult> {
   try {
     const { day, hour, minutes, isWorkHours, isWeekend } = getTimeContext()
-    const allText = (chatHistory || []).map((m: any) => String(m?.text || "")).join("\n")
+    // Importante: en tu webhook usás "content"; esto asegura que las señales (nombre/edad/etc.) se detecten.
+    const allText = (chatHistory || []).map((m: any) => String(m?.content || m?.text || "")).join("\n")
     const signals = extractSignals(allText)
     const name = extractName(allText)
 
@@ -330,9 +334,9 @@ No sos vendedora; preparás al cliente y derivás a una asesora humana para cerr
 
 [[ESTILO]]
 - WhatsApp real, premium (conciso).
-- Máx 2 renglones.
+- Máx 4 renglones.
 - Máx 1 pregunta.
-- Emojis: SELECTIVOS (no siempre). Cuando uses: 1 solo emoji suave.
+- Emojis: SELECTIVOS (no siempre). Cuando uses: hasta 2 emojis suaves.
   Set permitido: 🙂 ✨ 🫶 📍 ✅ 🙌
 - Evitá explicaciones largas. 1 frase + 1 pregunta.
 
@@ -393,6 +397,13 @@ Si ya tenés lo mínimo (o el cliente está evasivo): cerrá con DERIVACIÓN A L
         { role: "model", parts: [{ text: "Entendido. Soy Sofía (premium): breve, cálida, con voseo y derivando por llamada." }] },
         ...history,
       ],
+      // Más variedad, manteniendo coherencia.
+      generationConfig: {
+        temperature: 0.7,
+        topP: 0.9,
+        topK: 40,
+        maxOutputTokens: 320,
+      },
     })
 
     const result = await sendWithRetry(chat, lastUserText)

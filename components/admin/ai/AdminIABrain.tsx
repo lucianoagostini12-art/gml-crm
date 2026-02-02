@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase"
-import { 
-  Bot, User, Send, Sliders, MessageSquare, PauseCircle, Search, BrainCircuit, 
-  Sparkles, AlertCircle, CheckCircle2, Clock, MapPin, Zap, X, Archive, Tag, 
+import {
+  Bot, User, Send, Sliders, MessageSquare, PauseCircle, Search, BrainCircuit,
+  Sparkles, AlertCircle, CheckCircle2, Clock, MapPin, Zap, X, Archive, Tag,
   Flame, Filter, ChevronDown, Plus, Edit2, Trash2, Save, FolderOpen, Star,
   Bell, CalendarClock, UserPlus, MoreVertical, ExternalLink, RefreshCw,
   StickyNote, CheckSquare, Square, FileText, History, Briefcase, Lock
@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { sendManualWhatsAppMessage } from "@/app/actions/send-whatsapp"
 
 // --- TIPOS ---
 type Lead = {
@@ -57,6 +58,7 @@ type Lead = {
   loss_reason?: string | null
   ai_labels?: string[]
   chat_status?: 'pendiente' | 'derivado' | 'cerrado' | 'abierto'
+  chat_source?: 'wati_form' | 'wati_whatsapp' | 'sofia_ai' | null // ✅ NUEVO: Identifica el origen del chat
 }
 
 
@@ -141,12 +143,12 @@ const isWithinOfficeHours = (cfg: OfficeHours) => {
 
 const getNextAvailableTime = (cfg: OfficeHours) => {
   if (!cfg.enabled || cfg.is24h) return "en breve"
-  
+
   const { dow, hour, minute } = nowInTzParts(cfg.tz)
   const nowM = hour * 60 + minute
   const startM = hhmmToMinutes(cfg.start)
   const endM = hhmmToMinutes(cfg.end)
-  
+
   // Si estamos en un día de trabajo pero fuera de horario
   if (cfg.days.includes(dow)) {
     if (nowM < startM) {
@@ -159,15 +161,15 @@ const getNextAvailableTime = (cfg: OfficeHours) => {
       return `el ${dayNames[nextDay]} a las ${cfg.start}`
     }
   }
-  
+
   // Buscar el próximo día disponible
   const nextDay = cfg.days.find(d => d > dow) ?? cfg.days[0]
   const dayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
-  
+
   if (nextDay === 0) { // Domingo
     return `el domingo a partir de las 9:30`
   }
-  
+
   return `el ${dayNames[nextDay]} a las ${cfg.start}`
 }
 
@@ -268,6 +270,16 @@ function useConfig() {
   const [guardStart, setGuardStart] = useState("10:00")
   const [guardEnd, setGuardEnd] = useState("13:00")
 
+  // Helper para parsear booleanos que pueden venir como string o boolean
+  const parseBool = (val: any, defaultVal: boolean = false): boolean => {
+    if (typeof val === "boolean") return val
+    if (typeof val === "string") {
+      if (val.toLowerCase() === "true") return true
+      if (val.toLowerCase() === "false") return false
+    }
+    return defaultVal
+  }
+
   const reloadConfig = async () => {
     try {
       const { data, error } = await supabase
@@ -293,9 +305,11 @@ function useConfig() {
       if (error) throw error
 
       const map: Record<string, any> = {}
-      ;(data || []).forEach((row: any) => {
-        map[row.key] = row.value
-      })
+        ; (data || []).forEach((row: any) => {
+          map[row.key] = row.value
+        })
+
+
 
       const sp =
         typeof map.sofia_system_prompt === "string" && map.sofia_system_prompt.trim()
@@ -318,24 +332,30 @@ function useConfig() {
         if (folders?.folders && Array.isArray(folders.folders)) {
           setQuickReplyFolders(folders.folders)
         }
-      } catch {}
+      } catch { }
 
-      if (typeof map.office_enabled === "boolean") setOfficeEnabled(map.office_enabled)
+      // Office hours - usar parseBool para manejar strings y booleans
+      if (map.office_enabled !== undefined) setOfficeEnabled(parseBool(map.office_enabled, true))
       if (typeof map.office_tz === "string" && map.office_tz) setOfficeTz(map.office_tz)
       try {
-        const days = JSON.parse(map.office_days || "[]")
+        const daysRaw = map.office_days
+        const days = typeof daysRaw === "string" ? JSON.parse(daysRaw) : daysRaw
         if (Array.isArray(days) && days.length) setOfficeDays(days)
-      } catch {}
+      } catch { }
       if (typeof map.office_start === "string" && map.office_start) setOfficeStart(map.office_start)
       if (typeof map.office_end === "string" && map.office_end) setOfficeEnd(map.office_end)
-      if (typeof map.is24h === "boolean") setIs24h(map.is24h)
+
+      // is24h - usar parseBool
+      if (map.is24h !== undefined) setIs24h(parseBool(map.is24h, false))
       if (typeof map.off_hours_message === "string") setOffHoursMessage(map.off_hours_message)
 
-      if (typeof map.guard_enabled === "boolean") setGuardEnabled(map.guard_enabled)
+      // Guard settings - usar parseBool
+      if (map.guard_enabled !== undefined) setGuardEnabled(parseBool(map.guard_enabled, false))
       try {
-        const gdays = JSON.parse(map.guard_days || "[]")
+        const gdaysRaw = map.guard_days
+        const gdays = typeof gdaysRaw === "string" ? JSON.parse(gdaysRaw) : gdaysRaw
         if (Array.isArray(gdays) && gdays.length) setGuardDays(gdays)
-      } catch {}
+      } catch { }
       if (typeof map.guard_start === "string" && map.guard_start) setGuardStart(map.guard_start)
       if (typeof map.guard_end === "string" && map.guard_end) setGuardEnd(map.guard_end)
     } catch (e: any) {
@@ -362,6 +382,8 @@ function useConfig() {
         { key: "guard_start", value: guardStart },
         { key: "guard_end", value: guardEnd },
       ]
+
+
 
       for (const u of updates) {
         const { error } = await supabase.from("ai_settings").upsert(u, { onConflict: "key" })
@@ -586,14 +608,14 @@ function getLeadStatusBadge(statusRaw: string, lossReason?: string | null) {
 
 export default function AdminIABrain() {
   const supabase = createClient()
-  
+
   // --- ESTADOS PRINCIPALES ---
   const [leads, setLeads] = useState<Lead[]>([])
   const [allProfiles, setAllProfiles] = useState<Profile[]>([])
   const [currentUser, setCurrentUser] = useState<Profile | null>(null)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [loading, setLoading] = useState(true)
-  
+
   // --- FILTROS Y BÚSQUEDA ---
   const [inboxTab, setInboxTab] = useState<'activos' | 'archivados' | 'bloqueados'>('activos')
   const [inboxFilter, setInboxFilter] = useState<'all' | InboxStatus>('all')
@@ -668,9 +690,9 @@ export default function AdminIABrain() {
   const [campaignMessage, setCampaignMessage] = useState("")
   const [campaignPreviewOpen, setCampaignPreviewOpen] = useState(false)
 
-  
+
   const scrollRef = useRef<HTMLDivElement>(null)
-  
+
   const officeCfg = useMemo<OfficeHours>(() => ({
     enabled: officeEnabled,
     tz: officeTz,
@@ -700,13 +722,13 @@ export default function AdminIABrain() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single()
-      
+
       if (profile) setCurrentUser(profile)
     } catch (err) {
       console.error('Error fetching user:', err)
@@ -719,7 +741,7 @@ export default function AdminIABrain() {
       .from('profiles')
       .select('id, full_name, email, role')
       .order('full_name')
-    
+
     if (data) setAllProfiles(data)
   }
 
@@ -731,16 +753,17 @@ export default function AdminIABrain() {
         .from('leads')
         .select('*')
         .not('chat', 'is', null)
+        .eq('chat_source', 'sofia_ai') // ✅ NUEVO: Solo chats de Sofía
         .order('last_update', { ascending: false })
         .limit(100)
-      
+
       // Filtro por rol
       if (currentUser?.role === 'seller') {
         query = query.eq('agent_name', currentUser.full_name)
       }
-      
+
       const { data } = await query
-      
+
       if (data) {
         // Asegurar que tienen las nuevas columnas con defaults
         const enriched = data.map(lead => ({
@@ -782,61 +805,104 @@ export default function AdminIABrain() {
   // --- ACCIONES SOBRE CONVERSACIONES ---
   const handleSendMessage = async (text: string) => {
     if (!selectedLead || !text.trim()) return
-    
-    const newMsg = { 
-      role: 'user', 
-      content: text.trim(), 
-      timestamp: new Date().toISOString(),
-      sender: currentUser?.full_name || 'Agent'
+
+    const phone = selectedLead.phone
+    if (!phone) {
+      toast.error('❌ Este lead no tiene número de teléfono')
+      return
     }
-    
-    const updatedChat = [...(selectedLead.chat || []), newMsg]
-    
-    await supabase
-      .from('leads')
-      .update({ 
-        chat: updatedChat, 
-        last_update: new Date().toISOString(),
-        last_message_from: 'agent',
-        unread_count: 0
-      })
-      .eq('id', selectedLead.id)
-    
-    await logEvent(selectedLead.id, 'message_sent', `Mensaje enviado por ${currentUser?.full_name}`)
-    
-    setLeads(prev =>
-      prev.map(l => (l.id === selectedLead.id ? { 
-        ...l, 
-        chat: updatedChat, 
-        last_update: new Date().toISOString(),
-        last_message_from: 'agent',
-        unread_count: 0
-      } : l))
-    )
-    setSelectedLead({ ...selectedLead, chat: updatedChat, last_message_from: 'agent', unread_count: 0 })
-    toast.success('✅ Mensaje enviado')
+
+    // Mostrar loading
+    const toastId = toast.loading('📤 Enviando mensaje...')
+
+    try {
+      // 1. Enviar a WhatsApp primero
+      const result = await sendManualWhatsAppMessage(phone, text.trim())
+
+      if (!result.success) {
+        toast.dismiss(toastId)
+        toast.error(`❌ Error: ${result.error}`)
+        return
+      }
+
+      // 2. Si se envió correctamente, guardar en la base de datos
+      const newMsg = {
+        role: 'assistant', // Marcamos como assistant porque es respuesta del agente/sistema
+        content: text.trim(),
+        timestamp: new Date().toISOString(),
+        sender: currentUser?.full_name || 'Agente',
+        isMe: true
+      }
+
+      const updatedChat = [...(selectedLead.chat || []), newMsg]
+
+      // ✅ NUEVO: Pausar IA automáticamente cuando el agente escribe
+      const shouldPauseAI = selectedLead.ai_status === 'active'
+
+      await supabase
+        .from('leads')
+        .update({
+          chat: updatedChat,
+          last_update: new Date().toISOString(),
+          last_message_from: 'agent',
+          unread_count: 0,
+          ai_status: shouldPauseAI ? 'paused' : selectedLead.ai_status // ✅ Pausar si estaba activa
+        })
+        .eq('id', selectedLead.id)
+
+      if (shouldPauseAI) {
+        await logEvent(selectedLead.id, 'ai_status_changed', 'IA pausada automáticamente por intervención de agente', { new_status: 'paused' })
+      }
+      await logEvent(selectedLead.id, 'message_sent', `Mensaje enviado por ${currentUser?.full_name} a WhatsApp`)
+
+      const newAiStatus = shouldPauseAI ? 'paused' : selectedLead.ai_status
+
+      setLeads(prev =>
+        prev.map(l => (l.id === selectedLead.id ? {
+          ...l,
+          chat: updatedChat,
+          last_update: new Date().toISOString(),
+          last_message_from: 'agent',
+          unread_count: 0,
+          ai_status: newAiStatus
+        } : l))
+      )
+      setSelectedLead({ ...selectedLead, chat: updatedChat, last_message_from: 'agent', unread_count: 0, ai_status: newAiStatus })
+
+      toast.dismiss(toastId)
+      if (shouldPauseAI) {
+        toast.success('✅ Mensaje enviado • IA pausada automáticamente')
+      } else {
+        toast.success('✅ Mensaje enviado a WhatsApp')
+      }
+
+    } catch (error: any) {
+      toast.dismiss(toastId)
+      toast.error('❌ Error inesperado al enviar')
+      console.error('Error enviando mensaje:', error)
+    }
   }
 
   const handleStatusChange = async (newStatus: 'active' | 'paused' | 'disabled') => {
     if (!selectedLead) return
-    
+
     await supabase.from('leads').update({ ai_status: newStatus }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'ai_status_changed', `IA cambió a: ${newStatus}`, { new_status: newStatus })
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, ai_status: newStatus } : l)))
     setSelectedLead({ ...selectedLead, ai_status: newStatus })
-    
+
     const labels = { active: '🟢 IA Activada', paused: '⏸️ IA Pausada', disabled: '🔴 IA Desactivada' }
     toast.success(labels[newStatus])
   }
 
   const handleAssign = async (agentName: string) => {
     if (!selectedLead) return
-    
+
     const assigned_at = new Date().toISOString()
     await supabase.from('leads').update({ agent_name: agentName, assigned_to: agentName, assigned_at }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'assigned', `Conversación asignada a ${agentName}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, agent_name: agentName, assigned_to: agentName, assigned_at } : l)))
     setSelectedLead({ ...selectedLead, agent_name: agentName, assigned_to: agentName, assigned_at })
     toast.success(`✅ Asignado a ${agentName}`)
@@ -844,10 +910,10 @@ export default function AdminIABrain() {
 
   const handlePriorityChange = async (priority: 'normal' | 'high') => {
     if (!selectedLead) return
-    
+
     await supabase.from('leads').update({ priority }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'priority_changed', `Prioridad cambiada a: ${priority}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, priority } : l)))
     setSelectedLead({ ...selectedLead, priority })
     toast.success(priority === 'high' ? '🔥 Marcado como prioritario' : '✅ Prioridad normal')
@@ -855,11 +921,11 @@ export default function AdminIABrain() {
 
   const handleArchive = async () => {
     if (!selectedLead) return
-    
+
     const newArchived = !selectedLead.archived
     await supabase.from('leads').update({ archived: newArchived, inbox_status: newArchived ? 'archived' : 'pending' }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, newArchived ? 'archived' : 'unarchived', newArchived ? 'Conversación archivada' : 'Conversación restaurada')
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, archived: newArchived, inbox_status: newArchived ? 'archived' : 'pending' } : l)))
     setSelectedLead({ ...selectedLead, archived: newArchived, inbox_status: newArchived ? 'archived' : 'pending' })
     toast.success(newArchived ? '📦 Conversación archivada' : '✅ Conversación restaurada')
@@ -867,10 +933,10 @@ export default function AdminIABrain() {
 
   const handleChatStatusChange = async (status: 'pendiente' | 'derivado' | 'cerrado' | 'abierto') => {
     if (!selectedLead) return
-    
+
     await supabase.from('leads').update({ chat_status: status }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'chat_status_changed', `Estado de chat cambiado a: ${status}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, chat_status: status } : l)))
     setSelectedLead({ ...selectedLead, chat_status: status })
     toast.success(`✅ Chat marcado como ${status}`)
@@ -878,11 +944,11 @@ export default function AdminIABrain() {
 
   const handleBlock = async () => {
     if (!selectedLead) return
-    
+
     const newBlocked = !selectedLead.blocked
     await supabase.from('leads').update({ blocked: newBlocked }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, newBlocked ? 'blocked' : 'unblocked', newBlocked ? 'Lead bloqueado' : 'Lead desbloqueado')
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, blocked: newBlocked } : l)))
     setSelectedLead({ ...selectedLead, blocked: newBlocked })
     toast.success(newBlocked ? '🔒 Lead bloqueado' : '✅ Lead desbloqueado')
@@ -890,17 +956,17 @@ export default function AdminIABrain() {
 
   const handleAddTag = async () => {
     if (!selectedLead || !newTag.trim()) return
-    
+
     const currentTags = selectedLead.tags || []
     if (currentTags.includes(newTag.trim())) {
       toast.error('⚠️ Tag ya existe')
       return
     }
-    
+
     const updatedTags = [...currentTags, newTag.trim()]
     await supabase.from('leads').update({ tags: updatedTags }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'tag_added', `Tag agregado: ${newTag.trim()}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, tags: updatedTags } : l)))
     setSelectedLead({ ...selectedLead, tags: updatedTags })
     setNewTag("")
@@ -909,11 +975,11 @@ export default function AdminIABrain() {
 
   const handleRemoveTag = async (tag: string) => {
     if (!selectedLead) return
-    
+
     const updatedTags = (selectedLead.tags || []).filter(t => t !== tag)
     await supabase.from('leads').update({ tags: updatedTags }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'tag_removed', `Tag removido: ${tag}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, tags: updatedTags } : l)))
     setSelectedLead({ ...selectedLead, tags: updatedTags })
     toast.success('🗑️ Tag removido')
@@ -921,17 +987,17 @@ export default function AdminIABrain() {
 
   const handleAddNote = async () => {
     if (!selectedLead || !newNote.trim()) return
-    
+
     const newComment: Comment = {
       text: newNote.trim(),
       author: currentUser?.full_name || 'Usuario',
       timestamp: new Date().toISOString()
     }
-    
+
     const updatedComments = [...(selectedLead.comments || []), newComment]
     await supabase.from('leads').update({ comments: updatedComments }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'note_added', `Nota interna agregada`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, comments: updatedComments } : l)))
     setSelectedLead({ ...selectedLead, comments: updatedComments })
     setNewNote("")
@@ -940,7 +1006,7 @@ export default function AdminIABrain() {
 
   const handleAddTask = async () => {
     if (!selectedLead || !newTask.trim()) return
-    
+
     const newReminder: Reminder = {
       task: newTask.trim(),
       status: 'pending',
@@ -948,11 +1014,11 @@ export default function AdminIABrain() {
       assigned_to: currentUser?.full_name,
       created_at: new Date().toISOString()
     }
-    
+
     const updatedReminders = [...(selectedLead.reminders || []), newReminder]
     await supabase.from('leads').update({ reminders: updatedReminders }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'task_created', `Tarea creada: ${newTask.trim()}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, reminders: updatedReminders } : l)))
     setSelectedLead({ ...selectedLead, reminders: updatedReminders })
     setNewTask("")
@@ -963,15 +1029,15 @@ export default function AdminIABrain() {
 
   const handleToggleTask = async (taskIndex: number) => {
     if (!selectedLead) return
-    
+
     const updatedReminders = [...(selectedLead.reminders || [])]
     updatedReminders[taskIndex] = {
       ...updatedReminders[taskIndex],
       status: updatedReminders[taskIndex].status === 'done' ? 'pending' : 'done'
     }
-    
+
     await supabase.from('leads').update({ reminders: updatedReminders }).eq('id', selectedLead.id)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, reminders: updatedReminders } : l)))
     setSelectedLead({ ...selectedLead, reminders: updatedReminders })
     toast.success('✅ Tarea actualizada')
@@ -979,9 +1045,9 @@ export default function AdminIABrain() {
 
   const handleMarkAsRead = async () => {
     if (!selectedLead) return
-    
+
     await supabase.from('leads').update({ unread_count: 0, inbox_status: 'pending' }).eq('id', selectedLead.id)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, unread_count: 0, inbox_status: 'pending' } : l)))
     setSelectedLead({ ...selectedLead, unread_count: 0, inbox_status: 'pending' })
     toast.success('✅ Marcado como leído')
@@ -989,10 +1055,10 @@ export default function AdminIABrain() {
 
   const handleInboxStatusChange = async (status: InboxStatus) => {
     if (!selectedLead) return
-    
+
     await supabase.from('leads').update({ inbox_status: status }).eq('id', selectedLead.id)
     await logEvent(selectedLead.id, 'inbox_status_changed', `Estado cambiado a: ${status}`)
-    
+
     setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, inbox_status: status } : l)))
     setSelectedLead({ ...selectedLead, inbox_status: status })
     toast.success('✅ Estado actualizado')
@@ -1028,7 +1094,7 @@ export default function AdminIABrain() {
       arr = arr.filter(l => {
         const inName = l.name.toLowerCase().includes(q)
         const inPhone = l.phone?.includes(q)
-        const inChat = (l.chat || []).some((m: any) => 
+        const inChat = (l.chat || []).some((m: any) =>
           m.content?.toLowerCase().includes(q)
         )
         return inName || inPhone || inChat
@@ -1057,7 +1123,7 @@ export default function AdminIABrain() {
 
     // Filtro por tags
     if (filterTags.length > 0) {
-      arr = arr.filter(l => 
+      arr = arr.filter(l =>
         filterTags.some(tag => (l.tags || []).includes(tag))
       )
     }
@@ -1073,28 +1139,28 @@ export default function AdminIABrain() {
   }, [leads, inboxTab, inboxFilter, filterChatStatus, searchQuery, filterAgent, filterStatus, filterSource, filterLossReason, filterTags])
 
   // Obtener listas únicas para filtros
-  const uniqueAgents = useMemo(() => 
+  const uniqueAgents = useMemo(() =>
     Array.from(new Set(leads.map(l => l.agent_name).filter((v): v is string => typeof v === 'string' && v.trim().length > 0))),
     [leads]
   )
-  
-  const uniqueStatuses = useMemo(() => 
+
+  const uniqueStatuses = useMemo(() =>
     Array.from(new Set(leads.map(l => l.status).filter((v): v is string => typeof v === 'string' && v.trim().length > 0))),
     [leads]
   )
-  
-  const uniqueSources = useMemo(() => 
+
+  const uniqueSources = useMemo(() =>
     Array.from(new Set(leads.map(l => l.source).filter((v): v is string => typeof v === 'string' && v.trim().length > 0))),
     [leads]
   )
-  
 
-  const uniqueLossReasons = useMemo(() => 
+
+  const uniqueLossReasons = useMemo(() =>
     Array.from(new Set(leads.map((l: any) => (l as any).loss_reason).filter(Boolean))),
     [leads]
   )
 
-  const allTags = useMemo(() => 
+  const allTags = useMemo(() =>
     Array.from(new Set(leads.flatMap(l => l.tags || []))),
     [leads]
   )
@@ -1109,6 +1175,95 @@ export default function AdminIABrain() {
     if (currentUser) {
       fetchLeads()
       reloadConfig()
+    }
+  }, [currentUser])
+
+  // ✅ Suscripción Realtime para ver mensajes en vivo
+  useEffect(() => {
+    if (!currentUser) return
+
+    console.log('🔌 Conectando realtime para Sofía IA...')
+
+    const channel = supabase
+      .channel('sofia_leads_realtime_v2')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'leads'
+          // Sin filtro - filtramos en el cliente
+        },
+        (payload) => {
+          const updatedLead = payload.new as any
+
+          // Solo procesar si es de Sofía
+          if (updatedLead.chat_source !== 'sofia_ai') return
+
+          console.log('📩 Realtime UPDATE recibido:', updatedLead.name)
+
+          // Actualizar en la lista de leads
+          setLeads(prev => prev.map(l =>
+            l.id === updatedLead.id
+              ? {
+                ...l,
+                ...updatedLead,
+                tags: updatedLead.tags || [],
+                ai_labels: updatedLead.ai_labels || []
+              }
+              : l
+          ))
+
+          // Si es el lead seleccionado, actualizarlo también
+          setSelectedLead(prev => {
+            if (prev && prev.id === updatedLead.id) {
+              return {
+                ...prev,
+                ...updatedLead,
+                tags: updatedLead.tags || [],
+                ai_labels: updatedLead.ai_labels || []
+              }
+            }
+            return prev
+          })
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'leads'
+          // Sin filtro - filtramos en el cliente
+        },
+        (payload) => {
+          const newLead = payload.new as any
+
+          // Solo procesar si es de Sofía
+          if (newLead.chat_source !== 'sofia_ai') return
+
+          console.log('🆕 Realtime INSERT recibido:', newLead.name)
+
+          // Nuevo lead de Sofía - agregarlo al inicio
+          setLeads(prev => [{
+            ...newLead,
+            tags: newLead.tags || [],
+            priority: newLead.priority || 'normal',
+            archived: newLead.archived || false,
+            inbox_status: newLead.inbox_status || 'pending',
+            ai_labels: newLead.ai_labels || []
+          }, ...prev])
+
+          toast.info(`🆕 Nuevo chat de ${newLead.name || 'Cliente'}`)
+        }
+      )
+      .subscribe((status) => {
+        console.log('🔌 Realtime status:', status)
+      })
+
+    return () => {
+      console.log('🔌 Desconectando realtime...')
+      supabase.removeChannel(channel)
     }
   }, [currentUser])
 
@@ -1153,7 +1308,7 @@ export default function AdminIABrain() {
     return 'bg-slate-400'
   }
 
-  
+
   const sofiaExtracted = useMemo(() => {
     const lead: any = selectedLead as any
     if (!lead) {
@@ -1239,7 +1394,7 @@ export default function AdminIABrain() {
       toast.error("Error guardando etiquetas IA: " + (e?.message || ""))
     }
   }
-return (
+  return (
     <div className="flex h-screen w-full bg-slate-50 overflow-hidden">
       {/* 1. SIDEBAR IZQUIERDO - BANDEJA */}
       <div className="w-96 flex-none flex flex-col min-h-0 bg-white border-r border-slate-200 shadow-lg overflow-hidden">
@@ -1247,7 +1402,7 @@ return (
         <div className="flex-none p-5 border-b border-slate-100 bg-gradient-to-br from-violet-50 to-white">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-              <BrainCircuit className="w-5 h-5 text-violet-600"/> Brain IA
+              <BrainCircuit className="w-5 h-5 text-violet-600" /> Brain IA
             </h2>
             <div className="flex gap-2">
               <TooltipProvider>
@@ -1259,7 +1414,7 @@ return (
                       className="h-9 w-9 hover:bg-violet-100"
                       onClick={() => fetchLeads()}
                     >
-                      <RefreshCw className="w-4 h-4 text-violet-600"/>
+                      <RefreshCw className="w-4 h-4 text-violet-600" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Actualizar</TooltipContent>
@@ -1285,7 +1440,7 @@ return (
 
           {/* Búsqueda */}
           <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"/>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input
               placeholder="Buscar conversación..."
               value={searchQuery}
@@ -1345,8 +1500,8 @@ return (
             onClick={() => setShowFilters(!showFilters)}
             className="w-full mt-2 h-8 text-xs text-slate-600 hover:bg-slate-100"
           >
-            <Filter className="w-3 h-3 mr-2"/> Filtros avanzados
-            <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showFilters ? 'rotate-180' : ''}`}/>
+            <Filter className="w-3 h-3 mr-2" /> Filtros avanzados
+            <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showFilters ? 'rotate-180' : ''}`} />
           </Button>
 
           {showFilters && (
@@ -1406,11 +1561,10 @@ return (
                     <Badge
                       key={tag}
                       variant={filterTags.includes(tag) ? 'default' : 'outline'}
-                      className={`text-[10px] cursor-pointer ${
-                        filterTags.includes(tag) 
-                          ? 'bg-violet-600 hover:bg-violet-700' 
-                          : 'hover:bg-slate-100'
-                      }`}
+                      className={`text-[10px] cursor-pointer ${filterTags.includes(tag)
+                        ? 'bg-violet-600 hover:bg-violet-700'
+                        : 'hover:bg-slate-100'
+                        }`}
                       onClick={() => {
                         setFilterTags(prev =>
                           prev.includes(tag)
@@ -1476,31 +1630,30 @@ return (
                         <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${statusColor(lead.ai_status)}`} />
                         {lead.priority === 'high' && (
                           <div className="absolute -top-1 -right-1">
-                            <Flame className="w-4 h-4 text-orange-500 fill-orange-500"/>
+                            <Flame className="w-4 h-4 text-orange-500 fill-orange-500" />
                           </div>
                         )}
                       </div>
-                      
+
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <h4 className="font-bold text-sm text-slate-800 truncate">{lead.name}</h4>
                           <span className="text-[10px] text-slate-400 flex-none">
-                            {new Date(lead.last_update).toLocaleTimeString('es-AR', {hour: '2-digit', minute: '2-digit'})}
+                            {new Date(lead.last_update).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
-                        
+
                         <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed mb-2">
                           {lastMsg?.content || 'Sin mensajes'}
                         </p>
-                        
+
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {lead.chat_status && (
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
-                              lead.chat_status === 'pendiente' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${lead.chat_status === 'pendiente' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
                               lead.chat_status === 'abierto' ? 'bg-green-50 border-green-200 text-green-700' :
-                              lead.chat_status === 'derivado' ? 'bg-blue-50 border-blue-200 text-blue-700' :
-                              'bg-gray-50 border-gray-200 text-gray-700'
-                            }`}>
+                                lead.chat_status === 'derivado' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                                  'bg-gray-50 border-gray-200 text-gray-700'
+                              }`}>
                               {lead.chat_status}
                             </Badge>
                           )}
@@ -1511,13 +1664,13 @@ return (
                               {lead.unread_count}
                             </Badge>
                           )}
-                          
+
                           {lead.tags && lead.tags.slice(0, 2).map(tag => (
                             <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 border-slate-200 text-slate-600">
                               {tag}
                             </Badge>
                           ))}
-                          
+
                           {lead.tags && lead.tags.length > 2 && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 border-slate-200 text-slate-600">
                               +{lead.tags.length - 2}
@@ -1538,23 +1691,23 @@ return (
       <div className="flex-1 flex flex-col min-h-0 bg-white min-w-0 overflow-hidden">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <TabsList className="w-full rounded-none border-b border-slate-200 bg-white h-14 p-0 justify-start px-6">
-            <TabsTrigger 
-              value="chat" 
+            <TabsTrigger
+              value="chat"
               className="data-[state=active]:bg-violet-50 data-[state=active]:text-violet-700 data-[state=active]:border-b-2 data-[state=active]:border-violet-600 rounded-none h-full px-6 font-semibold"
             >
-              <MessageSquare className="w-4 h-4 mr-2"/> Chat
+              <MessageSquare className="w-4 h-4 mr-2" /> Chat
             </TabsTrigger>
-            <TabsTrigger 
+            <TabsTrigger
               value="settings"
               className="data-[state=active]:bg-violet-50 data-[state=active]:text-violet-700 data-[state=active]:border-b-2 data-[state=active]:border-violet-600 rounded-none h-full px-6 font-semibold"
             >
-              <Sliders className="w-4 h-4 mr-2"/> Configuración
+              <Sliders className="w-4 h-4 mr-2" /> Configuración
             </TabsTrigger>
-            <TabsTrigger 
+            <TabsTrigger
               value="campaigns"
               className="data-[state=active]:bg-violet-50 data-[state=active]:text-violet-700 data-[state=active]:border-b-2 data-[state=active]:border-violet-600 rounded-none h-full px-6 font-semibold"
             >
-              <Bell className="w-4 h-4 mr-2"/> Campañas
+              <Bell className="w-4 h-4 mr-2" /> Campañas
             </TabsTrigger>
           </TabsList>
 
@@ -1566,7 +1719,7 @@ return (
                 <div className="space-y-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                     <div className="h-10 w-10 rounded-lg bg-violet-100 flex items-center justify-center">
-                      <BrainCircuit className="w-5 h-5 text-violet-600"/>
+                      <BrainCircuit className="w-5 h-5 text-violet-600" />
                     </div>
                     <div>
                       <h3 className="font-bold text-slate-800">Prompt del Sistema</h3>
@@ -1609,7 +1762,7 @@ return (
                           toast.success("✅ Indicación agregada al final (no se guardó aún)")
                         }}
                       >
-                        <Plus className="w-3 h-3 mr-2"/> Adjuntar al prompt
+                        <Plus className="w-3 h-3 mr-2" /> Adjuntar al prompt
                       </Button>
 
                       <Button
@@ -1644,7 +1797,7 @@ return (
                 <div className="space-y-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                     <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                      <Zap className="w-5 h-5 text-blue-600"/>
+                      <Zap className="w-5 h-5 text-blue-600" />
                     </div>
                     <div className="flex-1">
                       <h3 className="font-bold text-slate-800">Respuestas Rápidas</h3>
@@ -1655,15 +1808,15 @@ return (
                       onClick={() => setShowQuickRepliesModal(true)}
                       className="bg-blue-600 hover:bg-blue-700 h-8"
                     >
-                      <Edit2 className="w-3 h-3 mr-2"/> Gestionar
+                      <Edit2 className="w-3 h-3 mr-2" /> Gestionar
                     </Button>
                   </div>
-                  
+
                   <div className="space-y-3">
                     {quickReplyFolders.map((folder, idx) => (
                       <div key={idx} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                         <div className="flex items-center gap-2 mb-2">
-                          <FolderOpen className="w-4 h-4 text-slate-600"/>
+                          <FolderOpen className="w-4 h-4 text-slate-600" />
                           <span className="font-semibold text-sm text-slate-700">{folder.name}</span>
                           <Badge variant="outline" className="ml-auto text-[10px]">
                             {folder.replies.length} respuestas
@@ -1688,19 +1841,19 @@ return (
                 <div className="space-y-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                     <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
-                      <Clock className="w-5 h-5 text-amber-600"/>
+                      <Clock className="w-5 h-5 text-amber-600" />
                     </div>
                     <div className="flex-1">
                       <h3 className="font-bold text-slate-800">Horario de Atención</h3>
                       <p className="text-xs text-slate-500">Configura cuándo Sofía responde automáticamente</p>
                     </div>
-                    <Switch checked={officeEnabled} onCheckedChange={setOfficeEnabled}/>
+                    <Switch checked={officeEnabled} onCheckedChange={setOfficeEnabled} />
                   </div>
 
                   {officeEnabled && (
                     <div className="space-y-4 pt-2">
                       <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
-                        <Switch checked={is24h} onCheckedChange={setIs24h}/>
+                        <Switch checked={is24h} onCheckedChange={setIs24h} />
                         <div className="flex-1">
                           <label className="text-sm font-semibold text-slate-800">Sofía trabaja 24 horas</label>
                           <p className="text-xs text-slate-600">Desactiva las restricciones de horario</p>
@@ -1745,11 +1898,10 @@ return (
                                         : [...officeDays, i]
                                     )
                                   }
-                                  className={`flex-1 h-9 text-xs ${
-                                    officeDays.includes(i)
-                                      ? 'bg-violet-600 hover:bg-violet-700'
-                                      : 'border-slate-200 hover:bg-slate-50'
-                                  }`}
+                                  className={`flex-1 h-9 text-xs ${officeDays.includes(i)
+                                    ? 'bg-violet-600 hover:bg-violet-700'
+                                    : 'border-slate-200 hover:bg-slate-50'
+                                    }`}
                                 >
                                   {day}
                                 </Button>
@@ -1759,13 +1911,13 @@ return (
                         </>
                       )}
 
-                      
+
                       <div className="p-4 rounded-2xl border border-slate-200 bg-white">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-emerald-600"/> Guardia
+                            <Clock className="w-4 h-4 text-emerald-600" /> Guardia
                           </div>
-                          <Switch checked={guardEnabled} onCheckedChange={setGuardEnabled}/>
+                          <Switch checked={guardEnabled} onCheckedChange={setGuardEnabled} />
                         </div>
 
                         {guardEnabled && (
@@ -1773,7 +1925,7 @@ return (
                             <div className="space-y-2">
                               <label className="text-xs font-semibold text-slate-600">Días de guardia</label>
                               <div className="flex flex-wrap gap-2">
-                                {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'].map((day, i) => (
+                                {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((day, i) => (
                                   <Button
                                     key={i}
                                     variant={guardDays.includes(i) ? 'default' : 'outline'}
@@ -1817,7 +1969,7 @@ return (
                         )}
                       </div>
 
-<div className="space-y-2">
+                      <div className="space-y-2">
                         <label className="text-xs font-semibold text-slate-600">Mensaje fuera de horario</label>
                         <Textarea
                           value={offHoursMessage}
@@ -1835,7 +1987,7 @@ return (
                   onClick={saveConfig}
                   className="w-full h-12 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white font-bold shadow-lg shadow-violet-200"
                 >
-                  <CheckCircle2 className="w-5 h-5 mr-2"/> Guardar Configuración
+                  <CheckCircle2 className="w-5 h-5 mr-2" /> Guardar Configuración
                 </Button>
               </div>
             </ScrollArea>
@@ -1848,7 +2000,7 @@ return (
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                   <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                     <div className="h-10 w-10 rounded-lg bg-purple-100 flex items-center justify-center">
-                      <Bell className="w-5 h-5 text-purple-600"/>
+                      <Bell className="w-5 h-5 text-purple-600" />
                     </div>
                     <div className="flex-1">
                       <h3 className="font-bold text-slate-800">Campañas</h3>
@@ -1895,7 +2047,7 @@ return (
                     <div className="space-y-2">
                       <label className="text-xs font-semibold text-slate-600">Incluir archivados</label>
                       <div className="h-10 flex items-center gap-2 px-3 rounded-lg border border-slate-200 bg-slate-50">
-                        <Switch checked={campaignIncludeArchived} onCheckedChange={setCampaignIncludeArchived}/>
+                        <Switch checked={campaignIncludeArchived} onCheckedChange={setCampaignIncludeArchived} />
                         <span className="text-sm text-slate-600">Sí</span>
                       </div>
                     </div>
@@ -1928,7 +2080,7 @@ return (
                       className="h-10"
                       onClick={() => setCampaignPreviewOpen(true)}
                     >
-                      <FolderOpen className="w-4 h-4 mr-2"/> Ver destinatarios
+                      <FolderOpen className="w-4 h-4 mr-2" /> Ver destinatarios
                     </Button>
 
                     <Button
@@ -1936,7 +2088,7 @@ return (
                       className="h-10"
                       onClick={() => {
                         const rows = buildCampaignRecipients(leads, campaignLoss, campaignStatus, campaignIncludeArchived)
-                        const header = ["id","name","phone","loss_reason","status","source","agent_name"].join(",")
+                        const header = ["id", "name", "phone", "loss_reason", "status", "source", "agent_name"].join(",")
                         const csv = [header, ...rows.map(r => [
                           safeCsv(r.id),
                           safeCsv(r.name),
@@ -1950,7 +2102,7 @@ return (
                         toast.success("⬇️ CSV generado")
                       }}
                     >
-                      <Save className="w-4 h-4 mr-2"/> Exportar CSV
+                      <Save className="w-4 h-4 mr-2" /> Exportar CSV
                     </Button>
 
                     <Button
@@ -1960,7 +2112,7 @@ return (
                       }}
                       disabled={!campaignMessage.trim()}
                     >
-                      <Zap className="w-4 h-4 mr-2"/> Preparar envío
+                      <Zap className="w-4 h-4 mr-2" /> Preparar envío
                     </Button>
                   </div>
                 </div>
@@ -2021,16 +2173,16 @@ return (
                         <div className="flex items-center gap-2">
                           <h3 className="font-bold text-slate-800 text-lg">{selectedLead.name}</h3>
                           {selectedLead.priority === 'high' && (
-                            <Flame className="w-5 h-5 text-orange-500 fill-orange-500"/>
+                            <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
                           )}
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">
                           <span className="text-xs text-slate-500 flex items-center gap-1">
-                            <User className="w-3 h-3"/> {selectedLead.phone}
+                            <User className="w-3 h-3" /> {selectedLead.phone}
                           </span>
                           {selectedLead.province && (
                             <span className="text-xs text-slate-500 flex items-center gap-1">
-                              <MapPin className="w-3 h-3"/> {selectedLead.province}
+                              <MapPin className="w-3 h-3" /> {selectedLead.province}
                             </span>
                           )}
                         </div>
@@ -2041,17 +2193,17 @@ return (
                       {/* IA Status Badge */}
                       {selectedLead.ai_status === 'active' && (
                         <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 font-semibold">
-                          <Sparkles className="w-3.5 h-3.5 mr-1.5"/> IA Activa
+                          <Sparkles className="w-3.5 h-3.5 mr-1.5" /> IA Activa
                         </Badge>
                       )}
                       {selectedLead.ai_status === 'paused' && (
                         <Badge className="bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 font-semibold">
-                          <PauseCircle className="w-3.5 h-3.5 mr-1.5"/> IA Pausada
+                          <PauseCircle className="w-3.5 h-3.5 mr-1.5" /> IA Pausada
                         </Badge>
                       )}
                       {selectedLead.ai_status === 'disabled' && (
                         <Badge className="bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 font-semibold">
-                          <X className="w-3.5 h-3.5 mr-1.5"/> IA Desactivada
+                          <X className="w-3.5 h-3.5 mr-1.5" /> IA Desactivada
                         </Badge>
                       )}
 
@@ -2059,46 +2211,46 @@ return (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="sm" className="h-9">
-                            <MoreVertical className="w-4 h-4"/>
+                            <MoreVertical className="w-4 h-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-56">
                           <DropdownMenuItem onClick={() => handlePriorityChange(selectedLead.priority === 'high' ? 'normal' : 'high')}>
-                            <Flame className="w-4 h-4 mr-2"/>
+                            <Flame className="w-4 h-4 mr-2" />
                             {selectedLead.priority === 'high' ? 'Quitar prioridad' : 'Marcar prioritario'}
                           </DropdownMenuItem>
-                          
+
                           <DropdownMenuItem onClick={handleMarkAsRead}>
-                            <CheckCircle2 className="w-4 h-4 mr-2"/>
+                            <CheckCircle2 className="w-4 h-4 mr-2" />
                             Marcar como leído
                           </DropdownMenuItem>
-                          
+
                           <DropdownMenuItem onClick={handleArchive}>
-                            <Archive className="w-4 h-4 mr-2"/>
+                            <Archive className="w-4 h-4 mr-2" />
                             {selectedLead.archived ? 'Desarchivar' : 'Archivar'}
                           </DropdownMenuItem>
-                          
+
                           <DropdownMenuSeparator />
-                          
+
                           <DropdownMenuItem onClick={() => handleChatStatusChange('abierto')}>
-                            <MessageSquare className="w-4 h-4 mr-2 text-green-600"/>
+                            <MessageSquare className="w-4 h-4 mr-2 text-green-600" />
                             Abrir chat
                           </DropdownMenuItem>
-                          
+
                           <DropdownMenuItem onClick={() => handleChatStatusChange('derivado')}>
-                            <ExternalLink className="w-4 h-4 mr-2 text-blue-600"/>
+                            <ExternalLink className="w-4 h-4 mr-2 text-blue-600" />
                             Marcar como derivado
                           </DropdownMenuItem>
-                          
+
                           <DropdownMenuItem onClick={() => handleChatStatusChange('cerrado')}>
-                            <X className="w-4 h-4 mr-2 text-gray-600"/>
+                            <X className="w-4 h-4 mr-2 text-gray-600" />
                             Cerrar chat
                           </DropdownMenuItem>
-                          
+
                           <DropdownMenuSeparator />
-                          
+
                           <DropdownMenuItem onClick={handleBlock}>
-                            <Lock className="w-4 h-4 mr-2 text-red-600"/>
+                            <Lock className="w-4 h-4 mr-2 text-red-600" />
                             {selectedLead.blocked ? 'Desbloquear' : 'Bloquear'} lead
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -2116,11 +2268,11 @@ return (
                       >
                         {selectedLead.ai_status === 'active' ? (
                           <>
-                            <PauseCircle className="w-4 h-4 mr-2"/> Pausar IA
+                            <PauseCircle className="w-4 h-4 mr-2" /> Pausar IA
                           </>
                         ) : (
                           <>
-                            <Sparkles className="w-4 h-4 mr-2"/> Activar IA
+                            <Sparkles className="w-4 h-4 mr-2" /> Activar IA
                           </>
                         )}
                       </Button>
@@ -2136,13 +2288,13 @@ return (
                         const isAI = msg.role === 'assistant'
                         const isUser = msg.role === 'user'
                         const isEvent = msg.role === 'system'
-                        
+
                         // Separador por día
                         const showDateSeparator = idx === 0 || (
-                          new Date(msg.timestamp).toDateString() !== 
+                          new Date(msg.timestamp).toDateString() !==
                           new Date((selectedLead.chat || [])[idx - 1].timestamp).toDateString()
                         )
-                        
+
                         return (
                           <div key={idx}>
                             {showDateSeparator && (
@@ -2159,26 +2311,25 @@ return (
                                 <div className="flex-1 h-px bg-slate-200"></div>
                               </div>
                             )}
-                            
+
                             {isEvent ? (
                               // Evento del sistema
                               <div className="flex justify-center">
                                 <div className="bg-slate-100 text-slate-600 px-4 py-2 rounded-full text-xs flex items-center gap-2">
-                                  <History className="w-3 h-3"/>
+                                  <History className="w-3 h-3" />
                                   {msg.content}
                                 </div>
                               </div>
                             ) : (
                               // Mensaje normal
                               <div
-                                className={`flex gap-3 animate-in slide-in-from-bottom-2 ${
-                                  isUser ? 'justify-end' : 'justify-start'
-                                }`}
+                                className={`flex gap-3 animate-in slide-in-from-bottom-2 ${isUser ? 'justify-end' : 'justify-start'
+                                  }`}
                               >
                                 {!isUser && (
                                   <Avatar className="h-9 w-9 flex-none border-2 border-white shadow-sm">
                                     <AvatarFallback className="bg-gradient-to-br from-violet-400 to-purple-500">
-                                      <Bot className="w-4 h-4 text-white"/>
+                                      <Bot className="w-4 h-4 text-white" />
                                     </AvatarFallback>
                                   </Avatar>
                                 )}
@@ -2202,7 +2353,7 @@ return (
                                 {isUser && (
                                   <Avatar className="h-9 w-9 flex-none border-2 border-white shadow-sm">
                                     <AvatarFallback className="bg-gradient-to-br from-slate-400 to-slate-500">
-                                      <User className="w-4 h-4 text-white"/>
+                                      <User className="w-4 h-4 text-white" />
                                     </AvatarFallback>
                                   </Avatar>
                                 )}
@@ -2223,12 +2374,12 @@ return (
                     {selectedLead.ai_status === 'active' && (
                       <div className="bg-violet-50/80 backdrop-blur-sm border border-violet-200 text-violet-700 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between">
                         <span className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 animate-pulse text-violet-500"/> 
+                          <Sparkles className="w-4 h-4 animate-pulse text-violet-500" />
                           Sofía responderá automáticamente
                         </span>
-                        <Button 
-                          size="sm" 
-                          variant="ghost" 
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           className="h-7 text-xs hover:bg-violet-100 text-violet-700 px-3 rounded-lg font-semibold"
                           onClick={() => handleStatusChange('paused')}
                         >
@@ -2240,7 +2391,7 @@ return (
                     {officeEnabled && !inServiceHours && (
                       <div className="bg-amber-50/80 backdrop-blur-sm border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between">
                         <span className="flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-amber-500"/> 
+                          <Clock className="w-4 h-4 text-amber-500" />
                           Fuera de horario ({officeStart}–{officeEnd})
                         </span>
                         <Button
@@ -2257,7 +2408,7 @@ return (
                     {officeEnabled && inGuardHours && !inOfficeHours && (
                       <div className="bg-emerald-50/80 backdrop-blur-sm border border-emerald-200 text-emerald-700 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between">
                         <span className="flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-emerald-500"/> 
+                          <Clock className="w-4 h-4 text-emerald-500" />
                           Guardia activa ({guardStart}–{guardEnd})
                         </span>
                         <Badge variant="outline" className="text-[10px] bg-emerald-100 border-emerald-200 text-emerald-700">
@@ -2290,14 +2441,14 @@ return (
 
                     {/* Input */}
                     <div className="flex gap-3">
-                      <InputChat 
-                        value={draft} 
-                        onChange={setDraft} 
-                        onSend={(t) => { 
+                      <InputChat
+                        value={draft}
+                        onChange={setDraft}
+                        onSend={(t) => {
                           handleSendMessage(t)
-                          setDraft("") 
-                        }} 
-                        disabled={false} 
+                          setDraft("")
+                        }}
+                        disabled={false}
                       />
                     </div>
                   </div>
@@ -2325,7 +2476,7 @@ return (
         <div className="w-80 flex-none hidden xl:flex flex-col min-h-0 bg-white border-l border-slate-200 shadow-xl overflow-hidden">
           <div className="flex-none p-5 border-b border-slate-100 bg-gradient-to-br from-violet-50 to-white">
             <h4 className="font-black text-slate-700 text-sm flex items-center gap-2 uppercase tracking-wide">
-              <BrainCircuit className="w-5 h-5 text-violet-600"/> Contexto & Acciones
+              <BrainCircuit className="w-5 h-5 text-violet-600" /> Contexto & Acciones
             </h4>
           </div>
 
@@ -2334,7 +2485,7 @@ return (
               {/* Asignar */}
               <div className="space-y-3">
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Asignar a</label>
-                <Select 
+                <Select
                   value={selectedLead.assigned_to || selectedLead.agent_name || ""}
                   onValueChange={handleAssign}
                 >
@@ -2354,7 +2505,7 @@ return (
                 {selectedLead.assigned_to && selectedLead.assigned_at && (
                   <div className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded-lg p-2">
                     <div className="flex items-center gap-1">
-                      <UserPlus className="w-3 h-3 text-blue-600"/>
+                      <UserPlus className="w-3 h-3 text-blue-600" />
                       <span>Asignado a <strong>{selectedLead.assigned_to}</strong></span>
                     </div>
                     <div className="text-[10px] text-slate-400 mt-1">
@@ -2375,7 +2526,7 @@ return (
                   ) : (
                     (((selectedLead as any).ai_labels || []) as any[]).map((t: any) => (
                       <Badge key={String(t)} variant="outline" className="bg-violet-50 text-violet-700 border-violet-200 py-1 px-2 rounded-lg font-medium">
-                        <Sparkles className="w-3 h-3 mr-1"/> {String(t)}
+                        <Sparkles className="w-3 h-3 mr-1" /> {String(t)}
                       </Badge>
                     ))
                   )}
@@ -2396,7 +2547,7 @@ return (
                       onClick={() => handleRemoveTag(tag)}
                     >
                       {tag}
-                      <X className="w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity"/>
+                      <X className="w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </Badge>
                   ))}
                 </div>
@@ -2414,7 +2565,7 @@ return (
                     variant="outline"
                     className="h-8 px-2"
                   >
-                    <Plus className="w-4 h-4"/>
+                    <Plus className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -2427,21 +2578,21 @@ return (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs p-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-100 transition-all">
                     <span className="text-slate-500 flex items-center gap-2 font-medium">
-                      <User className="w-4 h-4"/> Nombre
+                      <User className="w-4 h-4" /> Nombre
                     </span>
                     <span className="font-bold text-slate-700">{sofiaExtracted.name || "-"}</span>
                   </div>
 
                   <div className="flex items-center justify-between text-xs p-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-100 transition-all">
                     <span className="text-slate-500 flex items-center gap-2 font-medium">
-                      <History className="w-4 h-4"/> Edad
+                      <History className="w-4 h-4" /> Edad
                     </span>
                     <span className="font-bold text-slate-700">{sofiaExtracted.age ?? "-"}</span>
                   </div>
 
                   <div className="flex items-center justify-between text-xs p-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-100 transition-all">
                     <span className="text-slate-500 flex items-center gap-2 font-medium">
-                      <MapPin className="w-4 h-4"/> Prov / Localidad
+                      <MapPin className="w-4 h-4" /> Prov / Localidad
                     </span>
                     <span className="font-bold text-slate-700">
                       {(sofiaExtracted.province || "N/D")}{sofiaExtracted.locality ? ` / ${sofiaExtracted.locality}` : ""}
@@ -2450,14 +2601,14 @@ return (
 
                   <div className="flex items-center justify-between text-xs p-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-100 transition-all">
                     <span className="text-slate-500 flex items-center gap-2 font-medium">
-                      <UserPlus className="w-4 h-4"/> Grupo
+                      <UserPlus className="w-4 h-4" /> Grupo
                     </span>
                     <span className="font-bold text-slate-700">{sofiaExtracted.group || "-"}</span>
                   </div>
 
                   <div className="flex items-center justify-between text-xs p-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-100 transition-all">
                     <span className="text-slate-500 flex items-center gap-2 font-medium">
-                      <Briefcase className="w-4 h-4"/> Trabajo
+                      <Briefcase className="w-4 h-4" /> Trabajo
                     </span>
                     <span className="font-bold text-slate-700">{sofiaExtracted.work || "-"}</span>
                   </div>
@@ -2471,90 +2622,90 @@ return (
                       onClick={saveAiLabels}
                       disabled={!selectedLead}
                     >
-                      <Sparkles className="w-3.5 h-3.5 mr-2"/> Guardar etiquetas IA
+                      <Sparkles className="w-3.5 h-3.5 mr-2" /> Guardar etiquetas IA
                     </Button>
                   </div>
                 </div>
-<Separator className="bg-slate-100" />
+                <Separator className="bg-slate-100" />
 
-              {/* Notas Internas */}
-              <div className="space-y-3">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Notas Internas</label>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {(selectedLead.comments || []).map((comment, idx) => (
-                    <div key={idx} className="p-2 bg-amber-50 border border-amber-100 rounded-lg text-xs">
-                      <div className="font-semibold text-amber-800 mb-1">{comment.author}</div>
-                      <div className="text-slate-700">{comment.text}</div>
-                      <div className="text-[10px] text-amber-600 mt-1">
-                        {new Date(comment.timestamp).toLocaleString('es-AR')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Textarea
-                    value={newNote}
-                    onChange={e => setNewNote(e.target.value)}
-                    placeholder="Agregar nota interna..."
-                    className="h-16 text-xs bg-slate-50 border-slate-200 focus-visible:ring-violet-500 resize-none"
-                  />
-                  <Button
-                    onClick={handleAddNote}
-                    size="sm"
-                    variant="outline"
-                    className="h-16 px-2"
-                  >
-                    <Plus className="w-4 h-4"/>
-                  </Button>
-                </div>
-              </div>
-
-              <Separator className="bg-slate-100" />
-
-              {/* Tareas */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Tareas</label>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setShowTaskModal(true)}
-                    className="h-6 px-2 text-xs text-violet-600 hover:bg-violet-50"
-                  >
-                    <Plus className="w-3 h-3 mr-1"/> Nueva
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  {(selectedLead.reminders || []).map((reminder, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-start gap-2 p-2 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100 transition-all cursor-pointer"
-                      onClick={() => handleToggleTask(idx)}
-                    >
-                      {reminder.status === 'done' ? (
-                        <CheckSquare className="w-4 h-4 text-green-600 flex-none mt-0.5"/>
-                      ) : (
-                        <Square className="w-4 h-4 text-slate-400 flex-none mt-0.5"/>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-xs ${reminder.status === 'done' ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-                          {reminder.task}
+                {/* Notas Internas */}
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Notas Internas</label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {(selectedLead.comments || []).map((comment, idx) => (
+                      <div key={idx} className="p-2 bg-amber-50 border border-amber-100 rounded-lg text-xs">
+                        <div className="font-semibold text-amber-800 mb-1">{comment.author}</div>
+                        <div className="text-slate-700">{comment.text}</div>
+                        <div className="text-[10px] text-amber-600 mt-1">
+                          {new Date(comment.timestamp).toLocaleString('es-AR')}
                         </div>
-                        {reminder.due_date && (
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            📅 {new Date(reminder.due_date).toLocaleDateString('es-AR')}
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Textarea
+                      value={newNote}
+                      onChange={e => setNewNote(e.target.value)}
+                      placeholder="Agregar nota interna..."
+                      className="h-16 text-xs bg-slate-50 border-slate-200 focus-visible:ring-violet-500 resize-none"
+                    />
+                    <Button
+                      onClick={handleAddNote}
+                      size="sm"
+                      variant="outline"
+                      className="h-16 px-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
+
+                <Separator className="bg-slate-100" />
+
+                {/* Tareas */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Tareas</label>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setShowTaskModal(true)}
+                      className="h-6 px-2 text-xs text-violet-600 hover:bg-violet-50"
+                    >
+                      <Plus className="w-3 h-3 mr-1" /> Nueva
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {(selectedLead.reminders || []).map((reminder, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-2 p-2 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100 transition-all cursor-pointer"
+                        onClick={() => handleToggleTask(idx)}
+                      >
+                        {reminder.status === 'done' ? (
+                          <CheckSquare className="w-4 h-4 text-green-600 flex-none mt-0.5" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-400 flex-none mt-0.5" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-xs ${reminder.status === 'done' ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                            {reminder.task}
+                          </div>
+                          {reminder.due_date && (
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              📅 {new Date(reminder.due_date).toLocaleDateString('es-AR')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <Separator className="bg-slate-100" />
+
               </div>
-
-              <Separator className="bg-slate-100" />
-
             </div>
-          </div>
           </ScrollArea>
         </div>
       )}
@@ -2571,7 +2722,7 @@ return (
               <div key={folderIdx} className="border border-slate-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <FolderOpen className="w-5 h-5 text-violet-600"/>
+                    <FolderOpen className="w-5 h-5 text-violet-600" />
                     <Input
                       value={folder.name}
                       onChange={e => {
@@ -2596,7 +2747,7 @@ return (
                     }}
                     className="h-7 text-xs"
                   >
-                    <Plus className="w-3 h-3 mr-1"/> Agregar respuesta
+                    <Plus className="w-3 h-3 mr-1" /> Agregar respuesta
                   </Button>
                 </div>
                 <div className="space-y-2">
@@ -2612,7 +2763,7 @@ return (
                           setQuickReplyFolders(updated)
                         }}
                       >
-                        <Star className={`w-4 h-4 ${reply.favorite ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`}/>
+                        <Star className={`w-4 h-4 ${reply.favorite ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
                       </Button>
                       <Textarea
                         value={reply.text}
@@ -2634,7 +2785,7 @@ return (
                           setQuickReplyFolders(updated)
                         }}
                       >
-                        <Trash2 className="w-4 h-4"/>
+                        <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
                   ))}
@@ -2648,7 +2799,7 @@ return (
                 setQuickReplyFolders([...quickReplyFolders, { name: 'Nueva Carpeta', replies: [] }])
               }}
             >
-              <Plus className="w-4 h-4 mr-2"/> Agregar Carpeta
+              <Plus className="w-4 h-4 mr-2" /> Agregar Carpeta
             </Button>
           </div>
           <DialogFooter>
@@ -2656,7 +2807,7 @@ return (
               saveConfig()
               setShowQuickRepliesModal(false)
             }}>
-              <Save className="w-4 h-4 mr-2"/> Guardar
+              <Save className="w-4 h-4 mr-2" /> Guardar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2692,7 +2843,7 @@ return (
               Cancelar
             </Button>
             <Button onClick={handleAddTask}>
-              <CheckCircle2 className="w-4 h-4 mr-2"/> Crear Tarea
+              <CheckCircle2 className="w-4 h-4 mr-2" /> Crear Tarea
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2735,7 +2886,7 @@ return (
               <div className="p-4 rounded-xl border border-slate-200 bg-white">
                 <div className="text-xs text-slate-400 font-bold uppercase mb-2">Datos crudos (debug)</div>
                 <pre className="text-xs font-mono whitespace-pre-wrap text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200">
-{JSON.stringify(selectedLead, null, 2)}
+                  {JSON.stringify(selectedLead, null, 2)}
                 </pre>
               </div>
             </div>
@@ -2882,7 +3033,7 @@ function InputChat({
           size="icon"
           className="h-9 w-9 rounded-lg bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 shadow-md transition-all active:scale-95 disabled:opacity-50"
         >
-          <Send className="w-4 h-4 text-white"/>
+          <Send className="w-4 h-4 text-white" />
         </Button>
       </div>
     </div>

@@ -1,132 +1,209 @@
 "use server"
 
-import { GoogleGenerativeAI } from "@google/generative-ai"
-import { createServerClient } from "@/lib/supabase-server" // ✅ NUEVO
+import OpenAI from "openai"
+import { createServerClient } from "@/lib/supabase-server"
 
 type AIResult =
   | { success: true; text: string }
   | { success: false; text: string; silent?: boolean }
 
-const apiKey = process.env.GEMINI_API_KEY
+const apiKey = process.env.OPENAI_API_KEY
 if (!apiKey) {
-  console.error("❌ ERROR CRÍTICO: No se encontró la GEMINI_API_KEY.")
+  console.error("❌ ERROR CRÍTICO: No se encontró la OPENAI_API_KEY.")
 }
 
-const genAI = new GoogleGenerativeAI(apiKey || "")
-
-// ✅ Modelo estable (evita 404 NotFound)
-// Nota: la variación real (para que no suene "chatbot") se controla con generationConfig.
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+const openai = new OpenAI({ apiKey: apiKey || "" })
 
 function normalize(s: string) {
   return String(s || "").replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim()
-}
-
-function getTimeContext() {
-  const now = new Date()
-  const options = {
-    timeZone: "America/Argentina/Buenos_Aires",
-    hour12: false,
-    weekday: "long",
-    hour: "numeric",
-    minute: "numeric",
-  }
-  const parts = new Intl.DateTimeFormat("es-AR", options as any).formatToParts(now)
-
-  const day = (parts.find((p) => p.type === "weekday")?.value || "").toLowerCase()
-  const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10)
-  const minutes = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10)
-
-  const isWeekend = day.includes("sábado") || day.includes("domingo")
-  const isAfterStart = hour > 9 || (hour === 9 && minutes >= 30)
-  const isBeforeEnd = hour < 14 || (hour === 14 && minutes <= 30)
-  const isWorkHours = !isWeekend && isAfterStart && isBeforeEnd
-
-  return { day, hour, minutes, isWorkHours, isWeekend }
 }
 
 function pick<T>(arr: T[]) {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0")
-}
-
-function nextBusinessDayLabel(day: string) {
-  // day viene en es-AR: lunes/martes/miércoles/jueves/viernes/sábado/domingo
-  if (day.includes("viernes")) return "el lunes a primera hora"
-  if (day.includes("sábado")) return "el lunes a primera hora"
-  if (day.includes("domingo")) return "el lunes a primera hora"
+function nextBusinessDayLabel(dayIndex: number) {
+  // 0 Domingo, 1 Lunes ... 6 Sábado
+  if (dayIndex === 5) return "el lunes a primera hora"
+  if (dayIndex === 6) return "el lunes a primera hora"
+  if (dayIndex === 0) return "el lunes a primera hora"
   return "mañana a primera hora"
 }
 
-function extractName(allText: string) {
-  const t = String(allText || "").trim()
-
-  // "me llamo Juan" / "soy Juan" / "soy Juan Pérez"
-  const m =
-    t.match(/\bme llamo\s+([a-záéíóúñ]{2,})(?:\s+[a-záéíóúñ]{2,})?\b/i) ||
-    t.match(/\bsoy\s+([a-záéíóúñ]{2,})(?:\s+[a-záéíóúñ]{2,})?\b/i) ||
-    t.match(/\bmi nombre es\s+([a-záéíóúñ]{2,})(?:\s+[a-záéíóúñ]{2,})?\b/i)
-
-  if (!m?.[1]) return null
-
-  const first = m[1]
-  // Capitalizar primera letra
-  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()
+function parseHHMM(s: string) {
+  const m = String(s || "").match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return null
+  const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)))
+  const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)))
+  return hh * 60 + mm
 }
 
-function extractSignals(allText: string) {
-  const t = (allText || "").toLowerCase()
+function isWithinWindow(nowMin: number, startMin: number, endMin: number) {
+  // Maneja ventanas que cruzan medianoche (ej 22:00-02:00)
+  if (startMin === endMin) return true
+  if (startMin < endMin) return nowMin >= startMin && nowMin <= endMin
+  return nowMin >= startMin || nowMin <= endMin
+}
 
-  let age: number | null = null
-  const m =
-    t.match(/\btengo\s+(\d{1,3})\b/) ||
-    t.match(/\b(\d{1,3})\s*años\b/) ||
-    t.match(/\bedad\s*[:=]?\s*(\d{1,3})\b/)
-  if (m?.[1]) {
-    const n = parseInt(m[1], 10)
-    if (!Number.isNaN(n) && n >= 0 && n <= 120) age = n
+function getNowParts(tz: string) {
+  const now = new Date()
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(now)
+
+  const weekday = (parts.find((p) => p.type === "weekday")?.value || "").toLowerCase()
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10)
+  const minute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10)
+
+  // Map "mon/tue/..." to JS dayIndex (0=Sun)
+  const map: Record<string, number> = {
+    sun: 0,
+    mon: 1,
+    tue: 2,
+    wed: 3,
+    thu: 4,
+    fri: 5,
+    sat: 6,
+  }
+  const dayIndex = map[weekday.slice(0, 3)] ?? new Date().getDay()
+
+  return { dayIndex, hour, minute, nowMin: hour * 60 + minute }
+}
+
+type SofiaSchedule = {
+  office_enabled: boolean
+  office_tz: string
+  office_days: number[]
+  office_start: string
+  office_end: string
+  is24h: boolean
+  off_hours_message: string
+
+  guard_enabled: boolean
+  guard_days: number[]
+  guard_start: string
+  guard_end: string
+}
+
+async function getScheduleSettings(): Promise<SofiaSchedule> {
+  // Defaults seguros (igual a tu UI)
+  const defaults: SofiaSchedule = {
+    office_enabled: true,
+    office_tz: "America/Argentina/Buenos_Aires",
+    office_days: [1, 2, 3, 4, 5],
+    office_start: "09:30",
+    office_end: "14:30",
+    is24h: false,
+    off_hours_message: "",
+
+    guard_enabled: false,
+    guard_days: [6, 0],
+    guard_start: "10:00",
+    guard_end: "20:00",
   }
 
-  const is60plus = typeof age === "number" && age >= 60
-  const wantsPrice = /\bprecio\b|\bcu[aá]nto sale\b|\bvalor\b|\bcotiz/i.test(t) || /\$\s*\d/.test(t)
-  const hotIntent = /\bquiero (contratar|darme de alta|afiliarme)\b|\bdame de alta\b|\bllamame ya\b|\burgente\b|\bya\b|\bhoy\b/i.test(t)
-  const longOrAudio = /\baudio\b|\bnota de voz\b/i.test(t) || t.length > 450
+  try {
+    const supabase = await createServerClient()
+    const { data, error } = await supabase
+      .from("ai_settings")
+      .select("key,value")
+      .in("key", [
+        "office_enabled",
+        "office_tz",
+        "office_days",
+        "office_start",
+        "office_end",
+        "is24h",
+        "off_hours_message",
+        "guard_enabled",
+        "guard_days",
+        "guard_start",
+        "guard_end",
+      ])
 
-  const medicalOrTurno =
-    /\bturno(s)?\b|\bm[eé]dic(o|a)\b|\bguardia\b|\bcl[ií]nic(a|o)\b|\btraumat[oó]log(o|a)\b|\bcardi[oó]log(o|a)\b|\bdermat[oó]log(o|a)\b|\bpediatr(a|o)\b|\bendocrin[oó]log(o|a)\b|\bdolor\b|\bs[ií]ntoma(s)?\b|\breceta\b/i.test(t)
+    if (error) throw error
+    const map: Record<string, any> = {}
+    for (const row of data || []) map[String((row as any).key)] = (row as any).value
 
-  const urgentSymptom =
-    /\bdolor en el pecho\b|\bme duele el pecho\b|\bfalta de aire\b|\bme cuesta respirar\b|\bdesmayo\b|\bme desmaye\b|\bperd[ií] el conocimiento\b|\bpalpitaciones\b/i.test(t)
+    const office_days = (() => {
+      try {
+        const v = JSON.parse(map.office_days || "[]")
+        return Array.isArray(v) ? v.map((n: any) => parseInt(n, 10)).filter((n: any) => Number.isFinite(n)) : defaults.office_days
+      } catch {
+        return defaults.office_days
+      }
+    })()
 
-  const healthIntent =
-    /\b(prepaga|cobertura|plan(es)?|salud|cartilla|afiliar|alta|aportes|monotributo|recibo)\b/i.test(t)
+    const guard_days = (() => {
+      try {
+        const v = JSON.parse(map.guard_days || "[]")
+        return Array.isArray(v) ? v.map((n: any) => parseInt(n, 10)).filter((n: any) => Number.isFinite(n)) : defaults.guard_days
+      } catch {
+        return defaults.guard_days
+      }
+    })()
 
-  const offTopic = !healthIntent && !wantsPrice && !hotIntent && !medicalOrTurno
+    const toBool = (x: any, fallback: boolean) => {
+      if (typeof x === "boolean") return x
+      if (typeof x === "string") {
+        const t = x.toLowerCase().trim()
+        if (t === "true") return true
+        if (t === "false") return false
+      }
+      return fallback
+    }
 
-  return { age, is60plus, wantsPrice, hotIntent, longOrAudio, medicalOrTurno, urgentSymptom, offTopic }
+    return {
+      office_enabled: toBool(map.office_enabled, defaults.office_enabled),
+      office_tz: typeof map.office_tz === "string" && map.office_tz ? map.office_tz : defaults.office_tz,
+      office_days: office_days.length ? office_days : defaults.office_days,
+      office_start: typeof map.office_start === "string" && map.office_start ? map.office_start : defaults.office_start,
+      office_end: typeof map.office_end === "string" && map.office_end ? map.office_end : defaults.office_end,
+      is24h: toBool(map.is24h, defaults.is24h),
+      off_hours_message: typeof map.off_hours_message === "string" ? map.off_hours_message : defaults.off_hours_message,
+
+      guard_enabled: toBool(map.guard_enabled, defaults.guard_enabled),
+      guard_days: guard_days.length ? guard_days : defaults.guard_days,
+      guard_start: typeof map.guard_start === "string" && map.guard_start ? map.guard_start : defaults.guard_start,
+      guard_end: typeof map.guard_end === "string" && map.guard_end ? map.guard_end : defaults.guard_end,
+    }
+  } catch {
+    return defaults
+  }
+}
+
+async function getSofiaPromptBase(): Promise<string> {
+  try {
+    const supabase = await createServerClient()
+    const { data } = await supabase
+      .from("ai_settings")
+      .select("value")
+      .eq("key", "sofia_system_prompt")
+      .single()
+
+    const v = String((data as any)?.value || "").trim()
+    if (v) return v
+  } catch {
+    // silent fallback
+  }
+  return ""
 }
 
 function enforceNoObraSocial(text: string) {
-  // Nunca decir "obra social" / "obras sociales"
   return text.replace(/\bobras?\s+social(es)?\b/gi, "cobertura de salud")
 }
 
-function enforcePhoneOnly(text: string) {
+function blockTechnicalFailures(text: string) {
   let t = text
-
-  // Nunca prometer contacto "por acá"/WhatsApp/escribir
-  t = t.replace(/\bwhatsapp\b/gi, "teléfono")
-  t = t.replace(/\bpor ac[aá]\b/gi, "por teléfono")
-  t = t.replace(/\bte escrib(o|imos|en)\b/gi, "te va a llamar")
-  t = t.replace(/\bescribime\b/gi, "dejame tu consulta")
-  t = t.replace(/\bmensaje\b/gi, "llamada")
-
-  // Si quedó algo como "te contacto", forzar a llamada
-  t = t.replace(/\bte contact(o|amos|an)\b/gi, "te va a llamar")
-
+  t = t.replace(/se (me )?cort[óo]( la| mi)? (llamada|conversaci[oó]n|conexi[oó]n)/gi, "")
+  t = t.replace(/parece que se cort[óo]/gi, "")
+  t = t.replace(/disculp[aá],?\s*parece que/gi, "")
+  t = t.replace(/llamada anterior/gi, "mensaje anterior")
+  t = t.replace(/\n\s*\n\s*\n/g, "\n\n").trim()
   return t
 }
 
@@ -151,15 +228,28 @@ function limitToMaxLines(text: string, maxLines: number) {
 function limitToMaxChars(text: string, maxChars: number) {
   const t = text.trim()
   if (t.length <= maxChars) return t
-  // intentar cortar en punto o salto
-  const cut = t.lastIndexOf(". ", maxChars)
-  if (cut > 50) return t.slice(0, cut + 1).trim()
-  return t.slice(0, maxChars).trim()
+  const window = Math.max(100, maxChars - 60)
+  const slice = t.slice(0, maxChars)
+
+  const candidates = [
+    slice.lastIndexOf(". "),
+    slice.lastIndexOf("! "),
+    slice.lastIndexOf("? "),
+    slice.lastIndexOf("…"),
+    slice.lastIndexOf("\n"),
+    slice.lastIndexOf("; "),
+  ].filter((i) => i >= window)
+
+  const best = candidates.length ? Math.max(...candidates) : -1
+  if (best >= window) return slice.slice(0, best + 1).trim()
+
+  const lastSpace = slice.lastIndexOf(" ")
+  if (lastSpace >= window) return slice.slice(0, lastSpace).trim()
+  return slice.trim()
 }
 
 function limitToMaxEmojis(text: string, maxEmojis: number) {
   const emojiRegex = /([\u{1F300}-\u{1F6FF}]|[\u{1F900}-\u{1FAFF}]|[\u2600-\u27BF])/gu
-
   const matches = text.match(emojiRegex) || []
   if (matches.length <= maxEmojis) return text
 
@@ -175,30 +265,21 @@ function limitToMaxEmojis(text: string, maxEmojis: number) {
 
 function postProcess(raw: string) {
   let t = normalize(raw)
-
   t = enforceNoObraSocial(t)
-  t = enforcePhoneOnly(t)
-
+  t = blockTechnicalFailures(t)
   t = limitToOneQuestion(t)
-  // Más aire para sonar humano (sin descontrolarse)
   t = limitToMaxLines(t, 4)
   t = limitToMaxEmojis(t, 2)
-  t = limitToMaxChars(t, 360)
-
+  t = limitToMaxChars(t, 1200)
   return t
 }
 
-/**
- * ✅ History correcto usando isMe (no heurísticas).
- * Reglas Gemini:
- * - history debe arrancar con role 'user'
- * - no debe terminar con 'user' si vas a mandar otro 'user' (lo pegamos al lastUserText)
- */
 function buildHistoryFromIsMe(chatHistory: any[]) {
-  const msgs = (chatHistory || [])
+  const recentChat = chatHistory.slice(-20)
+
+  const msgs = recentChat
     .map((m: any) => ({
-      role: m?.isMe ? ("model" as const) : ("user" as const),
-      // 🔥 ACÁ ESTABA EL ERROR: agregamos m?.content para que lea lo que manda el Webhook
+      role: m?.isMe ? ("assistant" as const) : ("user" as const),
       text: normalize(String(m?.content || m?.text || "")),
     }))
     .filter((m: any) => m.text)
@@ -208,20 +289,15 @@ function buildHistoryFromIsMe(chatHistory: any[]) {
   let lastUserText = msgs[msgs.length - 1].text
   const before = msgs.slice(0, -1)
 
-  const history: { role: "user" | "model"; parts: { text: string }[] }[] = []
-
+  const history: { role: "user" | "assistant"; content: string }[] = []
   for (const m of before) {
     const prev = history[history.length - 1]
-    if (prev && prev.role === m.role) prev.parts[0].text += " | " + m.text
-    else history.push({ role: m.role, parts: [{ text: m.text }] })
+    if (prev && prev.role === m.role) prev.content += " | " + m.text
+    else history.push({ role: m.role, content: m.text })
   }
 
-  // Gemini: history debe empezar con user
-  while (history.length > 0 && history[0].role === "model") history.shift()
-
-  // Evitar user,user al enviar lastUserText
   if (history.length > 0 && history[history.length - 1].role === "user") {
-    const dangling = history.pop()!.parts[0].text
+    const dangling = history.pop()!.content
     lastUserText = dangling + " | " + lastUserText
   }
 
@@ -231,199 +307,147 @@ function buildHistoryFromIsMe(chatHistory: any[]) {
 function isRateLimitError(e: any) {
   const msg = String(e?.message || "").toLowerCase()
   const status = e?.status
-  const statusText = String(e?.statusText || "").toLowerCase()
-  const details = JSON.stringify(e?.errorDetails || e?.details || e?.cause || {}).toLowerCase()
-
-  return (
-    status === 429 ||
-    msg.includes("429") ||
-    msg.includes("too many") ||
-    msg.includes("rate limit") ||
-    msg.includes("quota") ||
-    msg.includes("resource exhausted") ||
-    statusText.includes("too many") ||
-    details.includes("quota") ||
-    details.includes("resource_exhausted") ||
-    details.includes("too many")
-  )
+  return status === 429 || msg.includes("rate limit") || msg.includes("quota") || msg.includes("too many")
 }
 
-async function sendWithRetry(chat: any, text: string) {
+async function sendWithRetryOpenAI<T>(fn: () => Promise<T>) {
   const maxRetries = 4
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await chat.sendMessage(text)
+      return await fn()
     } catch (e: any) {
       if (!isRateLimitError(e) || attempt === maxRetries) throw e
       const wait = Math.min(900 * Math.pow(2, attempt) + Math.random() * 400, 6500)
       await new Promise((r) => setTimeout(r, wait))
     }
   }
-  return await chat.sendMessage(text)
+  return await fn()
 }
 
-/**
- * Paquetes de cierres premium (se usan como referencia en prompt y para fallback)
- */
-function buildClosureContext(name: string | null) {
-  const n = name ? `, ${name}` : ""
-  return {
-    online: [
-      `Perfecto${n}. En breve una asesora te va a llamar.`,
-      `Listo${n}. Una asesora te va a llamar en breve.`,
-      `Genial${n}. En un ratito una asesora te llama para seguir.`,
-    ],
-    weekendOrOff: (fallbackLabel: string) => [
-      `Gracias${n} 🙂 derivo tu consulta para ver si hay alguna asesora disponible para llamarte. Si no, ${fallbackLabel}.`,
-      `Perfecto${n} ✨ dejo tu consulta registrada. Si hay una asesora disponible, te llama; si no, ${fallbackLabel}.`,
-      `Dale${n} 🙂 lo dejo derivado. Si alguien está disponible te llaman; caso contrario, ${fallbackLabel}.`,
-    ],
-    evasive: [
-      `No hay problema${n} 🙂 con lo que tenemos, una asesora te puede orientar mejor por teléfono.`,
-      `Perfecto${n} ✨ así lo ve una asesora por llamada y te orienta bien.`,
-      `Dale${n} 🙂 mejor que lo vea una asesora por teléfono.`,
-    ],
-  }
-}
+function extractName(chatHistory: any[]) {
+  const userMessages = (chatHistory || [])
+    .filter((m: any) => m?.role === "user" || m?.isMe === false)
+    .map((m: any) => String(m?.content || m?.text || ""))
+    .join(" ")
 
-/* ✅ NUEVO: leer prompt base desde Supabase, con fallback al hardcodeado */
-async function getSofiaPromptBase(): Promise<string> {
-  try {
-    const supabase = await createServerClient()
-    const { data } = await supabase
-      .from("ai_settings")
-      .select("value")
-      .eq("key", "sofia_system_prompt")
-      .single()
+  const patterns = [
+    /\b(?:me llamo|soy|mi nombre es)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]{2,})\b/i,
+    /\b(?:llámame|decime)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]{2,})\b/i,
+  ]
 
-    const v = String((data as any)?.value || "").trim()
-    if (v) return v
-  } catch {
-    // silent fallback
+  for (const pattern of patterns) {
+    const match = userMessages.match(pattern)
+    if (match?.[1]) {
+      const name = match[1]
+      return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase()
+    }
   }
-  return "" // si vuelve vacío, usamos el hardcodeado más abajo
+  return null
 }
 
 export async function generateAIResponse(chatHistory: any[]): Promise<AIResult> {
   try {
-    const { day, hour, minutes, isWorkHours, isWeekend } = getTimeContext()
-    // Importante: en tu webhook usás "content"; esto asegura que las señales (nombre/edad/etc.) se detecten.
+    const schedule = await getScheduleSettings()
+    const tz = schedule.office_tz || "America/Argentina/Buenos_Aires"
+    const { dayIndex, nowMin } = getNowParts(tz)
+
+    const officeStartMin = parseHHMM(schedule.office_start) ?? 570
+    const officeEndMin = parseHHMM(schedule.office_end) ?? 870
+    const guardStartMin = parseHHMM(schedule.guard_start) ?? 600
+    const guardEndMin = parseHHMM(schedule.guard_end) ?? 1200
+
+    const officeNow =
+      !!schedule.office_enabled &&
+      Array.isArray(schedule.office_days) &&
+      schedule.office_days.includes(dayIndex) &&
+      isWithinWindow(nowMin, officeStartMin, officeEndMin)
+
+    const guardNow =
+      !!schedule.guard_enabled &&
+      Array.isArray(schedule.guard_days) &&
+      schedule.guard_days.includes(dayIndex) &&
+      isWithinWindow(nowMin, guardStartMin, guardEndMin)
+
+    // IA responde siempre si is24h o si es horario de oficina/guardia (si no, igual responde con contención)
+    const aiAlways = !!schedule.is24h
+    const advisorsAvailableNow = officeNow || guardNow
+
     const allText = (chatHistory || []).map((m: any) => String(m?.content || m?.text || "")).join("\n")
-    const signals = extractSignals(allText)
-    const name = extractName(allText)
+    const name = extractName(chatHistory)
 
     const { lastUserText, history } = buildHistoryFromIsMe(chatHistory)
     if (!lastUserText) return { success: false, text: "No hay mensajes." }
 
-    const closures = buildClosureContext(name)
+    const userMsgCount = (chatHistory || []).filter((m: any) => m?.role === "user" || m?.isMe === false).length
+    const isFirstContact = userMsgCount <= 1
 
-    // Contexto de guardia premium (sin promesas)
-    const fallbackLabel =
-      isWeekend ? "el lunes a primera hora te llaman" : nextBusinessDayLabel(day)
+    const fallbackLabel = nextBusinessDayLabel(dayIndex)
+    const offHoursCopy =
+      (schedule.off_hours_message && String(schedule.off_hours_message).trim()) ||
+      `Gracias 🙂 dejo tu consulta registrada. Si hay una asesora disponible te contacta; si no, ${fallbackLabel}.`
 
-    const availability =
-      isWorkHours ? "ONLINE" : isWeekend ? "FINDE/GUARDIA" : "FUERA DE HORARIO"
+    const onlineClosers = [
+      `Perfecto${name ? `, ${name}` : ""}. En breve una asesora te va a llamar.`,
+      `Listo${name ? `, ${name}` : ""}. Una asesora te contacta en el transcurso del día.`,
+      `Genial${name ? `, ${name}` : ""}. En un ratito una asesora te llama para seguir.`,
+    ]
 
-    // ✅ NUEVO: base desde supabase (si existe) y fallback a hardcodeado original
-    const sofiaBaseFromDb = await getSofiaPromptBase()
-    const base = sofiaBaseFromDb ? sofiaBaseFromDb : `
-[[SOFÍA — GML SALUD (PREMIUM)]]
-Sos Sofía, asesora digital de GML Salud.
-Voz: femenina sutil, cálida, segura, con VOSEO (vos/tenés/decime).
-No sos vendedora; preparás al cliente y derivás a una asesora humana para cerrar.
+    const availableNowClosers = guardNow
+      ? [
+          `Gracias${name ? `, ${name}` : ""} ✨ lo dejo derivado. Si hay una asesora disponible, puede que te contacten hoy.`,
+          `Perfecto${name ? `, ${name}` : ""} 🙂 ya lo dejo derivado. Si hay una asesora libre, te contacta en el transcurso del día.`,
+        ]
+      : onlineClosers
 
-[[ESTILO]]
-- WhatsApp real, premium (conciso).
-- Máx 4 renglones.
-- Máx 1 pregunta.
-- Emojis: SELECTIVOS (no siempre). Cuando uses: hasta 2 emojis suaves.
-  Set permitido: 🙂 ✨ 🫶 📍 ✅ 🙌
-- Evitá explicaciones largas. 1 frase + 1 pregunta.
+    const baseFromDb = await getSofiaPromptBase()
+    const base = baseFromDb || ""
 
-[[PROHIBICIONES (DURAS)]]
-- NUNCA digas "obra social" (decí "prepaga" o "cobertura de salud").
-- NUNCA digas "te escribimos / te escriben / por acá / WhatsApp".
-  SIEMPRE derivá a LLAMADA: "una asesora te va a llamar / te contactan por teléfono".
-- No hablar de preexistencias, diagnósticos, tratamientos ni recetas.
-- No recomendar ni comparar prepagas.
-- No inventar precios.
-
-[[OBJETIVO (máx 4 datos)]]
-Edad · Localidad · Situación laboral (aportes/voluntario) · Grupo (solo/familia).
-Si el cliente es evasivo o no quiere pasar datos: DERIVÁ IGUAL por llamada (sin presionar).
-
-[[REGLAS BLINDADAS]]
-1) +60: jamás digas límites/rechazos. Usá “Línea Exclusiva con convenios especiales” y pedí localidad.
-2) Precios: "Depende de edad y zona" y pedí edad.
-3) Audios: "Perdón 🫶 ahora estoy sin audio. ¿Me lo escribís cortito?"
-4) Turnos/médicos: "Te entiendo 🙂 no somos médicos ni damos turnos. En GML ayudamos a ingresar a una cobertura de salud. ¿Te interesa eso?"
-5) Síntomas urgentes (pecho/falta de aire/desmayo): "Si es urgente, consultá guardia/emergencias." Luego reencuadrá a cobertura.
-`
-
-    // ✅ Este systemInstruction mantiene TODO tu "cerebro" dinámico tal cual (cierres/señales/horario)
     const systemInstruction = `
 ${base}
 
-[[NOMBRE]]
-Si detectás el nombre del cliente, usalo para humanizar (sin repetirlo en cada mensaje). Preferir en validaciones/cierres.
+[[CONTEXTO INTERNO (NO MOSTRAR AL CLIENTE)]]
+- Zona horaria: ${tz}
+- DiaIndex: ${dayIndex}
+- Asesoras disponibles ahora: ${advisorsAvailableNow ? "SI" : "NO"}
+- Modo IA 24h: ${aiAlways ? "SI" : "NO"}
+- Primer contacto: ${isFirstContact ? "SI" : "NO"}
+- Nombre detectado: ${name || "Sin detectar"}
 
-[[CIERRES PREMIUM (VARIAR, NO REPETIR)]]
-- ONLINE (L–V 9:30–14:30): elegí una de estas:
-  ${closures.online.map((s) => `- ${s}`).join("\n  ")}
-- FUERA DE HORARIO / FINDE: elegí una de estas (sin prometer hora exacta):
-  ${closures.weekendOrOff(fallbackLabel).map((s) => `- ${s}`).join("\n  ")}
-- EVASIVO (no pasa datos): elegí una de estas:
-  ${closures.evasive.map((s) => `- ${s}`).join("\n  ")}
+[[REGLAS EXTRA (DURAS)]]
+- Nunca uses la palabra "guardia" con el cliente.
+- Si Asesoras disponibles ahora = SI, no digas "mañana a primera hora".
+- Si el cliente ya aceptó que lo contacten (sí/dale/ok), no vuelvas a pedir datos ni a insistir.
 
-[[VARIACIÓN HUMANA (PAQUETES)]]
-Usá estas variantes para no sonar igual (elegí 1 según caso):
-- Validación corta: "Perfecto." / "Genial, gracias." / "Buenísimo." / "Listo."
-- Pedir edad: "¿Qué edad tenés?" / "¿Me decís tu edad?" / "¿Qué edad tenés así lo cotizo bien?"
-- Pedir localidad: "¿De qué localidad sos?" / "¿En qué localidad estás?" / "Para verlo por zona, ¿de dónde sos?"
-- Pedir grupo: "¿Es para vos o para familia?" / "¿Cobertura para vos sola/o o familia?"
-- Pedir laboral: "¿Tenés aportes (sueldo/monotributo) o sería voluntario?"
+[[CIERRES DISPONIBILIDAD]]
+Si Asesoras disponibles ahora = SI: elegí 1 cierre de estos (variar):
+${availableNowClosers.map((s) => `- ${s}`).join("\n")}
 
-[[CONTEXTO OPERATIVO]]
-Día: ${day} | Hora: ${hour}:${pad2(minutes)} | Estado: ${availability}
-Señales internas: ${JSON.stringify(signals)}
-
-[[REGLA FINAL]]
-Si ya tenés lo mínimo (o el cliente está evasivo): cerrá con DERIVACIÓN A LLAMADA usando los cierres premium. No sigas preguntando.
+Si Asesoras disponibles ahora = NO: usá un cierre contenedor (sin prometer hora exacta). Podés usar este:
+- ${offHoursCopy}
 `
 
-    const chat = model.startChat({
-      history: [
-        { role: "user", parts: [{ text: `SYSTEM_INSTRUCTION:\n${systemInstruction}` }] },
-        { role: "model", parts: [{ text: "Entendido. Soy Sofía (premium): breve, cálida, con voseo y derivando por llamada." }] },
-        ...history,
-      ],
-      // Más variedad, manteniendo coherencia.
-      generationConfig: {
-        temperature: 0.7,
-        topP: 0.9,
-        topK: 40,
-        maxOutputTokens: 320,
-      },
-    })
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      { role: "system", content: systemInstruction },
+      ...history,
+      { role: "user", content: normalize(lastUserText) },
+    ]
 
-    const result = await sendWithRetry(chat, lastUserText)
-    const raw = result.response.text()
+    const completion = await sendWithRetryOpenAI(() =>
+      openai.chat.completions.create({
+        model: "gpt-4.1-mini",
+        temperature: 0.8,
+        top_p: 0.9,
+        max_tokens: 420,
+        messages,
+      })
+    )
+
+    const raw = completion?.choices?.[0]?.message?.content || ""
     const response = postProcess(raw)
-
     return { success: true, text: response }
   } catch (error: any) {
     if (isRateLimitError(error)) return { success: false, text: "", silent: true }
-
-    console.error("❌ Error IA:", {
-      message: error?.message,
-      status: error?.status,
-      statusText: error?.statusText,
-      errorDetails: error?.errorDetails,
-      details: error?.details,
-      cause: error?.cause,
-    })
-
-    // Fallback humano premium (sin sonar a error técnico)
+    console.error("❌ Error IA:", { message: error?.message, status: error?.status })
     return { success: false, text: "Perdón 🙂 ¿Tu consulta es por cobertura de salud?" }
   }
 }

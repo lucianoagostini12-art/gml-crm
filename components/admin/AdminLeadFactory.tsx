@@ -28,13 +28,13 @@ import {
 
 // --- CONFIGURACIÓN DE TIEMPOS DE CONGELAMIENTO (DÍAS) ---
 const FREEZE_CONFIG: Record<string, number> = {
-    fantasmas: 30,  // "No contesta"
-    precio: 60,     // "Caro"
-    interes: 45,    // "Lo pienso"
-    quemados: 45,   // "+7 llamados"
-    zombies: 90,     // ✅ AGREGADO: Los Zombies ya vienen "muertos" por tiempo, se pueden reciclar al instante
-    recontactar: 90, // ✅ NUEVO: Competencia / Otros (3 meses)
-    basural: 365    // ✅ NUEVO: Error / Salud (1 año)
+  fantasmas: 30,  // "No contesta"
+  precio: 60,     // "Caro"
+  interes: 45,    // "Lo pienso"
+  quemados: 45,   // "+7 llamados"
+  zombies: 90,     // ✅ AGREGADO: Los Zombies ya vienen "muertos" por tiempo, se pueden reciclar al instante
+  recontactar: 90, // ✅ NUEVO: Competencia / Otros (3 meses)
+  basural: 365    // ✅ NUEVO: Error / Salud (1 año)
 }
 
 type Lead = {
@@ -53,6 +53,8 @@ type Lead = {
   calls?: number
   prepaga?: string | null // ✅ Agregado para detectar colores
   chat?: any[] // ✅ Agregado para el chat
+  chat_source?: 'wati_form' | 'wati_whatsapp' | 'sofia_ai' | null // ✅ NUEVO: Origen del chat
+  ai_labels?: string[] // ✅ NUEVO: Etiquetas automáticas de Sofía
 }
 
 const normPhone = (v?: string | null) => (v || "").replace(/\D/g, "")
@@ -83,32 +85,32 @@ const leadKey = (l: Lead) => {
 
 // --- 1) TUS COLORES DE PREPAGAS ---
 const getPrepagaBadgeColor = (prepaga?: string | null) => {
-    if (!prepaga) return "bg-slate-100 text-slate-600 border-slate-200"
-    
-    const p = prepaga
+  if (!prepaga) return "bg-slate-100 text-slate-600 border-slate-200"
 
-    if (p.includes("Prevención") || p.includes("Prevencion")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
-    if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
-    if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
-    if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
-    if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
-    if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
-    
-    return "bg-slate-100 text-slate-800 border-slate-200"
+  const p = prepaga
+
+  if (p.includes("Prevención") || p.includes("Prevencion")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+  if (p.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+  if (p.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+  if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+  if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+  if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+
+  return "bg-slate-100 text-slate-800 border-slate-200"
 }
 
 // --- 2) CÁLCULO DE TIEMPO TRANSCURRIDO ---
 const formatTimeAgo = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    const diffHrs = Math.floor(diffMins / 60)
-    
-    if (diffMins < 1) return "Ahora"
-    if (diffMins < 60) return `${diffMins} min`
-    if (diffHrs < 24) return `${diffHrs} hs`
-    return `${Math.floor(diffHrs / 24)} d`
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHrs = Math.floor(diffMins / 60)
+
+  if (diffMins < 1) return "Ahora"
+  if (diffMins < 60) return `${diffMins} min`
+  if (diffHrs < 24) return `${diffHrs} hs`
+  return `${Math.floor(diffHrs / 24)} d`
 }
 
 export function AdminLeadFactory() {
@@ -121,14 +123,14 @@ export function AdminLeadFactory() {
   const [drawerLeads, setDrawerLeads] = useState<Lead[]>([])
 
   // ✅ LISTA DE VENDEDORES (Objetos completos para fotos)
-  const [agentsList, setAgentsList] = useState<{name: string, avatar: string}[]>([])
+  const [agentsList, setAgentsList] = useState<{ name: string, avatar: string }[]>([])
   // ✅ ESTADO PARA MONITOR DIARIO
   const [dailyAssignments, setDailyAssignments] = useState<Record<string, number>>({})
 
   // SELECCIÓN
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
   const [targetAgent, setTargetAgent] = useState("")
-  
+
   // AUTOMATIZACIÓN (ROUND ROBIN)
   const [autoAssignEnabled, setAutoAssignEnabled] = useState(false)
   const [nextAgentIdx, setNextAgentIdx] = useState(0)
@@ -166,80 +168,80 @@ export function AdminLeadFactory() {
     // ✅ SUSCRIPCIÓN REALTIME MEJORADA (Escucha TODO cambio en leads y en historial)
     // Escuchamos 'lead_status_history' para actualizar el contador al instante
     const historyChannel = supabase.channel('factory_history_listener')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_status_history' }, () => {
-            fetchDailyStats() 
-        })
-        .subscribe()
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_status_history' }, () => {
+        fetchDailyStats()
+      })
+      .subscribe()
 
     // Escuchamos 'leads' para actualizar la bandeja
     const leadsChannel = supabase.channel('factory_leads_listener')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
-            fetchInbox()
-            fetchGraveyardStats()
-            if (activeDrawer) {
-                // fetchDrawerLeads(activeDrawer) -> Opcional
-            }
-        })
-        .subscribe()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
+        fetchInbox()
+        fetchGraveyardStats()
+        if (activeDrawer) {
+          // fetchDrawerLeads(activeDrawer) -> Opcional
+        }
+      })
+      .subscribe()
 
-    return () => { 
-        supabase.removeChannel(historyChannel) 
-        supabase.removeChannel(leadsChannel) 
+    return () => {
+      supabase.removeChannel(historyChannel)
+      supabase.removeChannel(leadsChannel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ✅ 1. TRAER SOLO SELLERS REALES CON FOTO
   const fetchRealAgents = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('full_name, avatar_url, email, role') 
-        .or('role.eq.seller,role.eq.gestor') // ✅ FILTRO POR ROL
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('full_name, avatar_url, email, role')
+      .or('role.eq.seller,role.eq.gestor') // ✅ FILTRO POR ROL
 
-      if (data && data.length > 0) {
-          const formatted = data.map((p: any) => ({
-              name: p.full_name || p.email,
-              avatar: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
-          })).sort((a,b) => a.name.localeCompare(b.name))
-          
-          setAgentsList(formatted)
-      } else {
-          console.error("No se encontraron sellers en la base.", error)
-          setAgentsList([]) 
-      }
+    if (data && data.length > 0) {
+      const formatted = data.map((p: any) => ({
+        name: p.full_name || p.email,
+        avatar: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
+      })).sort((a, b) => a.name.localeCompare(b.name))
+
+      setAgentsList(formatted)
+    } else {
+      console.error("No se encontraron sellers en la base.", error)
+      setAgentsList([])
+    }
   }
 
   // ✅ 2. CONTADORES DE ASIGNACIÓN DIARIA (LOGICA CRUCE TABLAS)
   const fetchDailyStats = async () => {
-      const startOfDay = new Date()
-      startOfDay.setHours(0,0,0,0)
+    const startOfDay = new Date()
+    startOfDay.setHours(0, 0, 0, 0)
 
-      // ✅ OBJETIVO: “Asignaciones hechas hoy” (no “dueño actual”).
-      // Para que NO baje/oscile cuando un lead se reasigna después,
-      // contamos por el agent_name guardado en lead_status_history en el momento de asignación.
-      // IMPORTANTE: en este archivo, cuando asignamos a alguien, insertamos en history con agent_name = DESTINO.
-      const { data: historyData, error } = await supabase
-        .from('lead_status_history')
-        .select('agent_name')
-        .gte('changed_at', startOfDay.toISOString())
-        .eq('to_status', 'nuevo')
-        .not('agent_name', 'is', null)
-        .neq('agent_name', 'Sin Asignar')
+    // ✅ OBJETIVO: “Asignaciones hechas hoy” (no “dueño actual”).
+    // Para que NO baje/oscile cuando un lead se reasigna después,
+    // contamos por el agent_name guardado en lead_status_history en el momento de asignación.
+    // IMPORTANTE: en este archivo, cuando asignamos a alguien, insertamos en history con agent_name = DESTINO.
+    const { data: historyData, error } = await supabase
+      .from('lead_status_history')
+      .select('agent_name')
+      .gte('changed_at', startOfDay.toISOString())
+      .eq('to_status', 'nuevo')
+      .not('agent_name', 'is', null)
+      .neq('agent_name', 'Sin Asignar')
 
-      if (error) {
-        console.error('Error fetchDailyStats:', error)
-        setDailyAssignments({})
-        return
-      }
+    if (error) {
+      console.error('Error fetchDailyStats:', error)
+      setDailyAssignments({})
+      return
+    }
 
-      const counts: Record<string, number> = {}
-      ;(historyData || []).forEach((h: any) => {
+    const counts: Record<string, number> = {}
+      ; (historyData || []).forEach((h: any) => {
         const name = h?.agent_name
         if (!name) return
         counts[name] = (counts[name] || 0) + 1
       })
 
-      setDailyAssignments(counts)
+    setDailyAssignments(counts)
   }
 
   // --- 🤖 MOTOR DE ASIGNACIÓN AUTOMÁTICA (ROUND ROBIN) ---
@@ -247,36 +249,36 @@ export function AdminLeadFactory() {
     let timeout: NodeJS.Timeout
 
     const processAutoAssign = async () => {
-        if (autoAssignEnabled && unassignedLeads.length > 0 && !loading && agentsList.length > 0) {
-            
-            const leadToAssign = unassignedLeads[0]
-            const agentToAssign = agentsList[nextAgentIdx].name // ✅ Usamos el objeto
+      if (autoAssignEnabled && unassignedLeads.length > 0 && !loading && agentsList.length > 0) {
 
-            // Optimistic Update local
-            const remainingLeads = unassignedLeads.slice(1)
-            setUnassignedLeads(remainingLeads)
-            setNextAgentIdx((prev) => (prev + 1) % agentsList.length)
+        const leadToAssign = unassignedLeads[0]
+        const agentToAssign = agentsList[nextAgentIdx].name // ✅ Usamos el objeto
 
-            await supabase.from('leads').update({
-                agent_name: agentToAssign,
-                status: 'nuevo',
-                last_update: new Date().toISOString()
-            }).eq('id', leadToAssign.id)
-            
-            // Forzamos la creación de historial para que el contador lo detecte
-            await supabase.from('lead_status_history').insert({
-                lead_id: leadToAssign.id,
-                from_status: 'ingresado', // Estado anterior asumido
-                to_status: 'nuevo',
-                // ✅ Guardamos el DESTINO (owner asignado) para que el contador de "hoy" sea estable.
-                agent_name: agentToAssign,
-                changed_at: new Date().toISOString()
-            })
-        }
+        // Optimistic Update local
+        const remainingLeads = unassignedLeads.slice(1)
+        setUnassignedLeads(remainingLeads)
+        setNextAgentIdx((prev) => (prev + 1) % agentsList.length)
+
+        await supabase.from('leads').update({
+          agent_name: agentToAssign,
+          status: 'nuevo',
+          last_update: new Date().toISOString()
+        }).eq('id', leadToAssign.id)
+
+        // Forzamos la creación de historial para que el contador lo detecte
+        await supabase.from('lead_status_history').insert({
+          lead_id: leadToAssign.id,
+          from_status: 'ingresado', // Estado anterior asumido
+          to_status: 'nuevo',
+          // ✅ Guardamos el DESTINO (owner asignado) para que el contador de "hoy" sea estable.
+          agent_name: agentToAssign,
+          changed_at: new Date().toISOString()
+        })
+      }
     }
 
     if (autoAssignEnabled && unassignedLeads.length > 0) {
-        timeout = setTimeout(processAutoAssign, 1500)
+      timeout = setTimeout(processAutoAssign, 1500)
     }
 
     return () => clearTimeout(timeout)
@@ -285,15 +287,15 @@ export function AdminLeadFactory() {
 
   // --- LÓGICA DE CONGELAMIENTO (INTACTA) ---
   const checkFreezeStatus = (lead: Lead, drawerType: string) => {
-      if (!lead.last_update) return { isFrozen: false, remainingDays: 0 }
-      const lostDate = new Date(lead.last_update)
-      const now = new Date()
-      const daysPassed = Math.floor((now.getTime() - lostDate.getTime()) / (1000 * 60 * 60 * 24))
-      const requiredDays = FREEZE_CONFIG[drawerType] || 0
-      if (daysPassed < requiredDays) {
-          return { isFrozen: true, remainingDays: requiredDays - daysPassed }
-      }
-      return { isFrozen: false, remainingDays: 0 }
+    if (!lead.last_update) return { isFrozen: false, remainingDays: 0 }
+    const lostDate = new Date(lead.last_update)
+    const now = new Date()
+    const daysPassed = Math.floor((now.getTime() - lostDate.getTime()) / (1000 * 60 * 60 * 24))
+    const requiredDays = FREEZE_CONFIG[drawerType] || 0
+    if (daysPassed < requiredDays) {
+      return { isFrozen: true, remainingDays: requiredDays - daysPassed }
+    }
+    return { isFrozen: false, remainingDays: 0 }
   }
 
   // --- 1. BANDEJA DE ENTRADA (SIN DUEÑO) ---
@@ -426,60 +428,60 @@ export function AdminLeadFactory() {
 
     if (data) {
       const stats = { fantasmas: 0, precio: 0, interes: 0, quemados: 0, zombies: 0, recontactar: 0, basural: 0 }
-      ;(data as any[]).forEach((l: any) => {
-        const agent = l.agent_name || ""
-        const reason = l.loss_reason?.toLowerCase() || ""
-        
-        if (agent === "Zombie 🧟" || agent === "Recupero") {
+        ; (data as any[]).forEach((l: any) => {
+          const agent = l.agent_name || ""
+          const reason = l.loss_reason?.toLowerCase() || ""
+
+          if (agent === "Zombie 🧟" || agent === "Recupero") {
             stats.zombies++
-        } 
-        else if (reason.includes("quemado") || reason.includes("7 llamados")) stats.quemados++
-        else if (reason.includes("no_contesta") || reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
-        else if (reason.includes("precio") || reason.includes("caro")) stats.precio++
-        else if (reason.includes("interes") || reason.includes("no quiere")) stats.interes++
-        // ✅ CLASIFICACIÓN NUEVA
-        else if (reason.includes("competencia") || reason.includes("otros")) stats.recontactar++
-        else if (reason.includes("error") || reason.includes("requisitos") || reason.includes("salud")) stats.basural++
-        
-        else stats.basural++ // Default a basural por si acaso
-      })
+          }
+          else if (reason.includes("quemado") || reason.includes("7 llamados")) stats.quemados++
+          else if (reason.includes("no_contesta") || reason.includes("no contesta") || reason.includes("fantasma")) stats.fantasmas++
+          else if (reason.includes("precio") || reason.includes("caro")) stats.precio++
+          else if (reason.includes("interes") || reason.includes("no quiere")) stats.interes++
+          // ✅ CLASIFICACIÓN NUEVA
+          else if (reason.includes("competencia") || reason.includes("otros")) stats.recontactar++
+          else if (reason.includes("error") || reason.includes("requisitos") || reason.includes("salud")) stats.basural++
+
+          else stats.basural++ // Default a basural por si acaso
+        })
       setGraveyardStats(stats)
     }
   }
 
   const fetchDrawerLeads = async (category: string) => {
     if (category === "zombies") {
-        const { data, error } = await supabase
-            .from("leads")
-            .select("*")
-            .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
-            .limit(100)
-        
-        if (error) console.error(error)
-        if (data) setDrawerLeads(data as Lead[])
-        return
+      const { data, error } = await supabase
+        .from("leads")
+        .select("*")
+        .or("agent_name.eq.Zombie 🧟,agent_name.eq.Recupero")
+        .limit(100)
+
+      if (error) console.error(error)
+      if (data) setDrawerLeads(data as Lead[])
+      return
     }
 
     let reasonFilter = ""
     let query = supabase.from("leads").select("*").eq("status", "perdido").limit(100)
 
     if (category === "quemados") {
-        query = query.ilike('loss_reason', '%quemado%')
+      query = query.ilike('loss_reason', '%quemado%')
     } else if (category === "fantasmas") {
-        // ✅ Fantasmas: soporta motivo normalizado y legacy
-        query = query.or("loss_reason.ilike.%no_contesta%,loss_reason.ilike.%no contesta%")
+      // ✅ Fantasmas: soporta motivo normalizado y legacy
+      query = query.or("loss_reason.ilike.%no_contesta%,loss_reason.ilike.%no contesta%")
     } else if (category === "precio") {
-        reasonFilter = "precio"
-        query = query.ilike('loss_reason', `%${reasonFilter}%`)
+      reasonFilter = "precio"
+      query = query.ilike('loss_reason', `%${reasonFilter}%`)
     } else if (category === "interes") {
-        reasonFilter = "interes"
-        query = query.ilike('loss_reason', `%${reasonFilter}%`)
-    } 
+      reasonFilter = "interes"
+      query = query.ilike('loss_reason', `%${reasonFilter}%`)
+    }
     // ✅ NUEVOS FILTROS
     else if (category === "recontactar") {
-        query = query.or("loss_reason.ilike.%competencia%,loss_reason.ilike.%otros%")
+      query = query.or("loss_reason.ilike.%competencia%,loss_reason.ilike.%otros%")
     } else if (category === "basural") {
-        query = query.or("loss_reason.ilike.%error%,loss_reason.ilike.%requisitos%,loss_reason.ilike.%salud%")
+      query = query.or("loss_reason.ilike.%error%,loss_reason.ilike.%requisitos%,loss_reason.ilike.%salud%")
     }
 
     const { data, error } = await query
@@ -513,7 +515,7 @@ export function AdminLeadFactory() {
       updates.loss_reason = null
       updates.warning_sent = false
       updates.warning_date = null
-      updates.calls = 0 
+      updates.calls = 0
     }
 
     const { error } = await supabase.from("leads").update(updates).in("id", selectedLeads)
@@ -522,24 +524,24 @@ export function AdminLeadFactory() {
       // ✅ IMPORTANTE: CREAR HISTORIAL MANUALMENTE PARA EL CONTADOR
       // Si el trigger de la base de datos no lo hace, lo hacemos aquí para asegurar que 'fetchDailyStats' lo vea.
       const historyEntries = selectedLeads.map(id => ({
-          lead_id: id,
-          from_status: origin === 'cementerio' ? 'perdido' : 'ingresado', 
-          to_status: 'nuevo',
-          // ✅ Guardamos el DESTINO (owner asignado). Esto hace que el conteo de "Asignaciones de hoy" sea estable.
-          agent_name: targetAgent,
-          changed_at: new Date().toISOString()
+        lead_id: id,
+        from_status: origin === 'cementerio' ? 'perdido' : 'ingresado',
+        to_status: 'nuevo',
+        // ✅ Guardamos el DESTINO (owner asignado). Esto hace que el conteo de "Asignaciones de hoy" sea estable.
+        agent_name: targetAgent,
+        changed_at: new Date().toISOString()
       }))
-      
+
       // Intentamos insertar, si falla no es crítico para la asignación, pero sí para el contador
       await supabase.from('lead_status_history').insert(historyEntries)
       // ✅ Refresco inmediato del semáforo (no dependemos del realtime)
-fetchDailyStats()
+      fetchDailyStats()
 
-// ✅ Opcional: instantáneo (antes de que responda fetchDailyStats)
-setDailyAssignments(prev => ({
-  ...prev,
-  [targetAgent]: (prev[targetAgent] || 0) + selectedLeads.length
-}))
+      // ✅ Opcional: instantáneo (antes de que responda fetchDailyStats)
+      setDailyAssignments(prev => ({
+        ...prev,
+        [targetAgent]: (prev[targetAgent] || 0) + selectedLeads.length
+      }))
 
 
       setSelectedLeads([])
@@ -560,45 +562,45 @@ setDailyAssignments(prev => ({
 
   // --- 🚀 ACCIONES DE TRIAJE (ALINEADAS CON VENDEDORES) ---
   const handleMoveToGraveyard = async (leadId: string, reason: string) => {
-      setLoading(true)
-      let updates: any = { status: 'perdido', last_update: new Date().toISOString(), loss_reason: reason }
-      
-      // Caso especial Zombie
-      if(reason === 'Zombie') {
-          updates.agent_name = 'Zombie 🧟'
-          // No cambiamos loss_reason, queda marcado como zombie por el agente
-      }
+    setLoading(true)
+    let updates: any = { status: 'perdido', last_update: new Date().toISOString(), loss_reason: reason }
 
-      await supabase.from('leads').update(updates).eq('id', leadId)
-      
-      setTriageModalOpen(false)
-      setLoading(false)
-      fetchInbox()
-      fetchGraveyardStats()
+    // Caso especial Zombie
+    if (reason === 'Zombie') {
+      updates.agent_name = 'Zombie 🧟'
+      // No cambiamos loss_reason, queda marcado como zombie por el agente
+    }
+
+    await supabase.from('leads').update(updates).eq('id', leadId)
+
+    setTriageModalOpen(false)
+    setLoading(false)
+    fetchInbox()
+    fetchGraveyardStats()
   }
 
   const handleAssignFromTriage = async (leadId: string) => {
-      if(!targetAgent) return alert("Seleccioná un vendedor primero")
-      setLoading(true)
-      
-      await supabase.from('leads').update({
-          agent_name: targetAgent,
-          status: 'nuevo',
-          last_update: new Date().toISOString()
-      }).eq('id', leadId)
+    if (!targetAgent) return alert("Seleccioná un vendedor primero")
+    setLoading(true)
 
-      // Historial manual para el contador
-      await supabase.from('lead_status_history').insert({
-          lead_id: leadId,
-          from_status: 'ingresado',
-          to_status: 'nuevo',
-          agent_name: targetAgent,
-          changed_at: new Date().toISOString()
-      })
-      
-      setTriageModalOpen(false)
-      setLoading(false)
-      fetchInbox()
+    await supabase.from('leads').update({
+      agent_name: targetAgent,
+      status: 'nuevo',
+      last_update: new Date().toISOString()
+    }).eq('id', leadId)
+
+    // Historial manual para el contador
+    await supabase.from('lead_status_history').insert({
+      lead_id: leadId,
+      from_status: 'ingresado',
+      to_status: 'nuevo',
+      agent_name: targetAgent,
+      changed_at: new Date().toISOString()
+    })
+
+    setTriageModalOpen(false)
+    setLoading(false)
+    fetchInbox()
   }
 
   // --- MODAL DUPLICADOS ---
@@ -621,10 +623,10 @@ setDailyAssignments(prev => ({
 
     setLoading(true)
     await supabase.from("leads").update({ agent_name: targetAgent, last_update: new Date().toISOString() }).eq("id", origLead.id)
-    
+
     // Historial
     await supabase.from('lead_status_history').insert({
-        lead_id: origLead.id, from_status: origLead.status, to_status: 'nuevo', agent_name: targetAgent, changed_at: new Date().toISOString()
+      lead_id: origLead.id, from_status: origLead.status, to_status: 'nuevo', agent_name: targetAgent, changed_at: new Date().toISOString()
     })
 
     setLoading(false)
@@ -638,10 +640,10 @@ setDailyAssignments(prev => ({
 
     setLoading(true)
     await supabase.from("leads").update({ agent_name: targetAgent, last_update: new Date().toISOString() }).eq("id", dupLead.id)
-    
+
     // Historial
     await supabase.from('lead_status_history').insert({
-        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: targetAgent, changed_at: new Date().toISOString()
+      lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: targetAgent, changed_at: new Date().toISOString()
     })
 
     setLoading(false)
@@ -655,10 +657,10 @@ setDailyAssignments(prev => ({
 
     setLoading(true)
     await supabase.from("leads").update({ agent_name: origLead.agent_name, last_update: new Date().toISOString() }).eq("id", dupLead.id)
-    
+
     // Historial
     await supabase.from('lead_status_history').insert({
-        lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: origLead.agent_name, changed_at: new Date().toISOString()
+      lead_id: dupLead.id, from_status: dupLead.status, to_status: 'nuevo', agent_name: origLead.agent_name, changed_at: new Date().toISOString()
     })
 
     setLoading(false)
@@ -668,21 +670,21 @@ setDailyAssignments(prev => ({
 
   // --- HELPERS UI ---
   const handleSelectAll = (list: Lead[], checked: boolean) => {
-    if(activeDrawer) {
-        const available = list.filter(l => !checkFreezeStatus(l, activeDrawer).isFrozen)
-        if (checked) setSelectedLeads(available.map((l) => l.id))
-        else setSelectedLeads([])
+    if (activeDrawer) {
+      const available = list.filter(l => !checkFreezeStatus(l, activeDrawer).isFrozen)
+      if (checked) setSelectedLeads(available.map((l) => l.id))
+      else setSelectedLeads([])
     } else {
-        if (checked) setSelectedLeads(list.map((l) => l.id))
-        else setSelectedLeads([])
+      if (checked) setSelectedLeads(list.map((l) => l.id))
+      else setSelectedLeads([])
     }
   }
-  
+
   const handleSelectOne = (id: string, checked: boolean) => {
     if (checked) setSelectedLeads((prev) => [...prev, id])
     else setSelectedLeads((prev) => prev.filter((l) => l !== id))
   }
-  
+
   const openDrawer = (category: string) => {
     setActiveDrawer(category)
     fetchDrawerLeads(category)
@@ -705,9 +707,8 @@ setDailyAssignments(prev => ({
         </div>
 
         <div
-          className={`flex items-center gap-4 px-6 py-3 rounded-full border-2 transition-colors ${
-            autoAssignEnabled ? "bg-green-50 border-green-500" : "bg-slate-50 border-slate-300"
-          }`}
+          className={`flex items-center gap-4 px-6 py-3 rounded-full border-2 transition-colors ${autoAssignEnabled ? "bg-green-50 border-green-500" : "bg-slate-50 border-slate-300"
+            }`}
         >
           <div className="flex flex-col">
             <Label
@@ -718,8 +719,8 @@ setDailyAssignments(prev => ({
             </Label>
             <span className="text-[10px] text-slate-500">
               {autoAssignEnabled ? (
-                  // ✅ Muestra el usuario REAL
-                  <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500"/> Repartiendo a: {agentsList[nextAgentIdx]?.name}</span>
+                // ✅ Muestra el usuario REAL
+                <span className="flex items-center gap-1"><Zap size={10} className="fill-yellow-500 text-yellow-500" /> Repartiendo a: {agentsList[nextAgentIdx]?.name}</span>
               ) : "Los leads esperan en Bandeja."}
             </span>
           </div>
@@ -751,37 +752,37 @@ setDailyAssignments(prev => ({
 
         {/* --- 1. BANDEJA DE ENTRADA --- */}
         <TabsContent value="inbox">
-          
+
           {/* ✅ NUEVO: MONITOR DE DISTRIBUCIÓN DIARIA (Estilo Semáforo ACUMULATIVO) */}
           {agentsList.length > 0 && (
-              <div className="mb-4 bg-white p-4 rounded-xl border shadow-sm animate-in fade-in slide-in-from-top-4">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <Activity className="h-4 w-4"/> Asignaciones Totales de Hoy
-                  </h4>
-                  <div className="flex flex-wrap gap-4">
-                      {agentsList.map((agent) => (
-                          <div key={agent.name} className="flex flex-col items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 min-w-[80px]">
-                              <div className="relative">
-                                <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                    <AvatarImage src={agent.avatar} />
-                                    <AvatarFallback>{agent.name[0]}</AvatarFallback>
-                                </Avatar>
-                                {/* Fueguito si tiene más de 5 leads asignados hoy */}
-                                {dailyAssignments[agent.name] > 5 && (
-                                    <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold px-1.5 rounded-full border border-white animate-pulse">🔥</div>
-                                )}
-                              </div>
-                              
-                              <div className="text-center">
-                                  <span className="text-[10px] font-bold text-slate-600 block truncate max-w-[80px]">{agent.name.split(' ')[0]}</span>
-                                  <div className={`mt-1 text-xs font-black px-2 py-0.5 rounded-full ${dailyAssignments[agent.name] > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
-                                      {dailyAssignments[agent.name] || 0}
-                                  </div>
-                              </div>
-                          </div>
-                      ))}
+            <div className="mb-4 bg-white p-4 rounded-xl border shadow-sm animate-in fade-in slide-in-from-top-4">
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <Activity className="h-4 w-4" /> Asignaciones Totales de Hoy
+              </h4>
+              <div className="flex flex-wrap gap-4">
+                {agentsList.map((agent) => (
+                  <div key={agent.name} className="flex flex-col items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 min-w-[80px]">
+                    <div className="relative">
+                      <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                        <AvatarImage src={agent.avatar} />
+                        <AvatarFallback>{agent.name[0]}</AvatarFallback>
+                      </Avatar>
+                      {/* Fueguito si tiene más de 5 leads asignados hoy */}
+                      {dailyAssignments[agent.name] > 5 && (
+                        <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold px-1.5 rounded-full border border-white animate-pulse">🔥</div>
+                      )}
+                    </div>
+
+                    <div className="text-center">
+                      <span className="text-[10px] font-bold text-slate-600 block truncate max-w-[80px]">{agent.name.split(' ')[0]}</span>
+                      <div className={`mt-1 text-xs font-black px-2 py-0.5 rounded-full ${dailyAssignments[agent.name] > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
+                        {dailyAssignments[agent.name] || 0}
+                      </div>
+                    </div>
                   </div>
+                ))}
               </div>
+            </div>
           )}
 
           <Card>
@@ -847,33 +848,58 @@ setDailyAssignments(prev => ({
                           {/* ✅ 2) FECHA MEJORADA */}
                           <TableCell>
                             <div className="flex flex-col">
-                                <span className="font-bold text-slate-700">
-                                    {new Date(l.created_at).toLocaleString('es-AR', {
-                                        day: '2-digit', month: '2-digit', year: 'numeric',
-                                        hour: '2-digit', minute: '2-digit'
-                                    })}
-                                </span>
-                                <span className="text-[10px] text-blue-500 font-medium flex items-center gap-1">
-                                    <Clock size={10}/> {formatTimeAgo(l.created_at)}
-                                </span>
+                              <span className="font-bold text-slate-700">
+                                {new Date(l.created_at).toLocaleString('es-AR', {
+                                  day: '2-digit', month: '2-digit', year: 'numeric',
+                                  hour: '2-digit', minute: '2-digit'
+                                })}
+                              </span>
+                              <span className="text-[10px] text-blue-500 font-medium flex items-center gap-1">
+                                <Clock size={10} /> {formatTimeAgo(l.created_at)}
+                              </span>
                             </div>
                           </TableCell>
-                          
-                          <TableCell className="font-bold text-base">{l.name}</TableCell>
-                          
+
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-base">{l.name}</span>
+                                {/* ✅ NUEVO: Badge de Sofía si es chat de IA */}
+                                {l.chat_source === 'sofia_ai' && (
+                                  <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-[10px] px-1.5 py-0">
+                                    🤖 Sofía
+                                  </Badge>
+                                )}
+                              </div>
+                              {/* ✅ NUEVO: Mostrar etiquetas IA si existen */}
+                              {l.ai_labels && l.ai_labels.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {l.ai_labels.slice(0, 3).map((label, idx) => (
+                                    <Badge key={idx} variant="outline" className="text-[9px] px-1 py-0 bg-amber-50 text-amber-700 border-amber-200">
+                                      {label}
+                                    </Badge>
+                                  ))}
+                                  {l.ai_labels.length > 3 && (
+                                    <span className="text-[9px] text-slate-400">+{l.ai_labels.length - 3}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+
                           {/* ✅ 1) COLORES Y FUENTE */}
                           <TableCell>
-                             <div className="flex flex-col gap-1 items-start">
-                                {l.prepaga ? (
-                                    <Badge variant="outline" className={getPrepagaBadgeColor(l.prepaga)}>
-                                        {l.prepaga}
-                                    </Badge>
-                                ) : (
-                                    <span className="text-[10px] text-slate-300">--</span>
-                                )}
-                                <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                                    <Tag size={10}/> {l.source || "N/A"}
-                                </div>
+                            <div className="flex flex-col gap-1 items-start">
+                              {l.prepaga ? (
+                                <Badge variant="outline" className={getPrepagaBadgeColor(l.prepaga)}>
+                                  {l.prepaga}
+                                </Badge>
+                              ) : (
+                                <span className="text-[10px] text-slate-300">--</span>
+                              )}
+                              <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                                <Tag size={10} /> {l.source || "N/A"}
+                              </div>
                             </div>
                           </TableCell>
 
@@ -896,7 +922,7 @@ setDailyAssignments(prev => ({
                               </div>
                             ) : (
                               <Button size="sm" variant="ghost" className="text-blue-600 hover:bg-blue-50">
-                                <Eye className="h-4 w-4 mr-2"/> Analizar
+                                <Eye className="h-4 w-4 mr-2" /> Analizar
                               </Button>
                             )}
                           </TableCell>
@@ -1051,12 +1077,12 @@ setDailyAssignments(prev => ({
         <TabsContent value="graveyard" className="space-y-6">
           {!activeDrawer ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              
+
               {/* ✅ 1. CAJÓN ZOMBIE (NUEVO) */}
               <Card className="hover:border-purple-500 cursor-pointer group border-l-4 border-l-purple-600 shadow-md bg-purple-50/20" onClick={() => { setActiveDrawer("zombies"); fetchDrawerLeads("zombies"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-purple-700 uppercase tracking-widest group-hover:text-purple-800 flex items-center gap-2">
-                    <Skull className="h-4 w-4"/> Fosa Zombie
+                    <Skull className="h-4 w-4" /> Fosa Zombie
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1072,7 +1098,7 @@ setDailyAssignments(prev => ({
               <Card className="hover:border-red-500 cursor-pointer group border-l-4 border-l-red-500 shadow-md bg-red-50/20" onClick={() => { setActiveDrawer("quemados"); fetchDrawerLeads("quemados"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-red-600 uppercase tracking-widest group-hover:text-red-700 flex items-center gap-2">
-                    <Flame className="h-4 w-4 animate-pulse"/> Datos Quemados
+                    <Flame className="h-4 w-4 animate-pulse" /> Datos Quemados
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1133,7 +1159,7 @@ setDailyAssignments(prev => ({
               <Card className="hover:border-slate-400 cursor-pointer group" onClick={() => { setActiveDrawer("recontactar"); fetchDrawerLeads("recontactar"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-700 flex items-center gap-2">
-                    <Archive className="h-4 w-4"/> Recontactar
+                    <Archive className="h-4 w-4" /> Recontactar
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1149,7 +1175,7 @@ setDailyAssignments(prev => ({
               <Card className="hover:border-red-800 cursor-pointer group border-l-4 border-l-slate-800 shadow-md bg-slate-50" onClick={() => { setActiveDrawer("basural"); fetchDrawerLeads("basural"); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                    <Ban className="h-4 w-4 text-red-600"/> Basural
+                    <Ban className="h-4 w-4 text-red-600" /> Basural
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1170,9 +1196,9 @@ setDailyAssignments(prev => ({
                   </Button>
                   <CardTitle className="capitalize flex items-center gap-2">
                     {/* ✅ ÍCONOS DINÁMICOS */}
-                    {activeDrawer === 'zombies' ? <Skull className="h-5 w-5 text-purple-600"/> :
-                     activeDrawer === 'quemados' ? <Flame className="h-5 w-5 text-red-500 animate-pulse"/> : 
-                     <Recycle className="h-5 w-5" />} 
+                    {activeDrawer === 'zombies' ? <Skull className="h-5 w-5 text-purple-600" /> :
+                      activeDrawer === 'quemados' ? <Flame className="h-5 w-5 text-red-500 animate-pulse" /> :
+                        <Recycle className="h-5 w-5" />}
                     Cajón: {activeDrawer}
                   </CardTitle>
                 </div>
@@ -1226,7 +1252,7 @@ setDailyAssignments(prev => ({
                       drawerLeads.map((l) => {
                         // ✅ CHEQUEO DE TIEMPO
                         const { isFrozen, remainingDays } = checkFreezeStatus(l, activeDrawer || "")
-                        
+
                         return (
                           <TableRow key={l.id} className={checkFreezeStatus(l, activeDrawer || "").isFrozen ? "opacity-60" : ""}>
                             <TableCell>
@@ -1241,22 +1267,22 @@ setDailyAssignments(prev => ({
                             </TableCell>
                             <TableCell className="font-bold">{l.name}</TableCell>
                             <TableCell>
-                                {isFrozen ? (
-                                    <Badge variant="outline" className="border-blue-200 text-blue-400 bg-blue-50">
-                                        <Snowflake size={10} className="mr-1"/> Faltan {remainingDays} días
-                                    </Badge>
-                                ) : (
-                                    <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-0">
-                                        Disponible
-                                    </Badge>
-                                )}
+                              {isFrozen ? (
+                                <Badge variant="outline" className="border-blue-200 text-blue-400 bg-blue-50">
+                                  <Snowflake size={10} className="mr-1" /> Faltan {remainingDays} días
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-0">
+                                  Disponible
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={
-                                  activeDrawer === 'quemados' ? 'text-red-600 border-red-200 bg-red-50' : 
+                                activeDrawer === 'quemados' ? 'text-red-600 border-red-200 bg-red-50' :
                                   activeDrawer === 'zombies' ? 'text-purple-600 border-purple-200 bg-purple-50' : ''
                               }>
-                                  {l.loss_reason || (activeDrawer === 'zombies' ? 'Inactividad' : "Desconocido")}
+                                {l.loss_reason || (activeDrawer === 'zombies' ? 'Inactividad' : "Desconocido")}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-xs">{l.agent_name === 'Zombie 🧟' ? 'Sistema' : l.agent_name}</TableCell>
@@ -1277,8 +1303,8 @@ setDailyAssignments(prev => ({
         <DialogContent style={{ maxWidth: '1200px', width: '95%', height: '90vh' }} className="flex flex-col p-0 gap-0 overflow-hidden">
           <DialogHeader className="p-4 border-b bg-slate-50/50">
             <DialogTitle className="flex items-center gap-2">
-                🕵️ Triaje de Lead: <span className="text-blue-600">{leadToTriage?.name}</span>
-                {leadToTriage?.prepaga && <Badge className={getPrepagaBadgeColor(leadToTriage.prepaga)}>{leadToTriage.prepaga}</Badge>}
+              🕵️ Triaje de Lead: <span className="text-blue-600">{leadToTriage?.name}</span>
+              {leadToTriage?.prepaga && <Badge className={getPrepagaBadgeColor(leadToTriage.prepaga)}>{leadToTriage.prepaga}</Badge>}
             </DialogTitle>
             <DialogDescription>Revisá el chat y decidí el destino del lead.</DialogDescription>
           </DialogHeader>
@@ -1286,83 +1312,83 @@ setDailyAssignments(prev => ({
           <div className="grid grid-cols-1 md:grid-cols-3 flex-1 overflow-hidden">
             {/* COLUMNA IZQUIERDA: DATOS */}
             <div className="bg-slate-50 p-6 border-r space-y-6 h-full overflow-y-auto">
-                <div className="space-y-1">
-                    <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Teléfono</Label>
-                    <div className="font-mono text-lg font-black text-slate-700">{leadToTriage?.phone}</div>
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Teléfono</Label>
+                <div className="font-mono text-lg font-black text-slate-700">{leadToTriage?.phone}</div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Origen</Label>
+                <div className="font-bold text-slate-700 flex items-center gap-2"><Tag size={14} /> {leadToTriage?.source}</div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Ingreso</Label>
+                <div className="text-sm font-medium text-slate-600">{leadToTriage?.created_at && new Date(leadToTriage.created_at).toLocaleString()}</div>
+              </div>
+
+              <div className="pt-6 border-t border-slate-200">
+                <Label className="text-xs text-slate-500 uppercase mb-3 block font-bold">Asignar Manualmente</Label>
+                <div className="flex gap-2">
+                  <Select value={targetAgent} onValueChange={setTargetAgent}>
+                    <SelectTrigger className="bg-white"><SelectValue placeholder="Elegir Vendedor..." /></SelectTrigger>
+                    <SelectContent>
+                      {agentsList.map((a) => (<SelectItem key={a.name} value={a.name}>{a.name}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                  <Button size="icon" onClick={() => leadToTriage && handleAssignFromTriage(leadToTriage.id)} disabled={!targetAgent} className="bg-blue-600 hover:bg-blue-700 shadow-md shrink-0"><Zap className="h-4 w-4" /></Button>
                 </div>
-                <div className="space-y-1">
-                    <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Origen</Label>
-                    <div className="font-bold text-slate-700 flex items-center gap-2"><Tag size={14}/> {leadToTriage?.source}</div>
-                </div>
-                <div className="space-y-1">
-                    <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Ingreso</Label>
-                    <div className="text-sm font-medium text-slate-600">{leadToTriage?.created_at && new Date(leadToTriage.created_at).toLocaleString()}</div>
-                </div>
-                
-                <div className="pt-6 border-t border-slate-200">
-                    <Label className="text-xs text-slate-500 uppercase mb-3 block font-bold">Asignar Manualmente</Label>
-                    <div className="flex gap-2">
-                        <Select value={targetAgent} onValueChange={setTargetAgent}>
-                            <SelectTrigger className="bg-white"><SelectValue placeholder="Elegir Vendedor..." /></SelectTrigger>
-                            <SelectContent>
-                                {agentsList.map((a) => (<SelectItem key={a.name} value={a.name}>{a.name}</SelectItem>))}
-                            </SelectContent>
-                        </Select>
-                        <Button size="icon" onClick={() => leadToTriage && handleAssignFromTriage(leadToTriage.id)} disabled={!targetAgent} className="bg-blue-600 hover:bg-blue-700 shadow-md shrink-0"><Zap className="h-4 w-4"/></Button>
-                    </div>
-                </div>
+              </div>
             </div>
 
             {/* COLUMNA CENTRAL: CHAT CON SCROLL INTELIGENTE */}
             <div className="md:col-span-2 bg-white flex flex-col h-full overflow-hidden">
-                <div className="bg-slate-50 p-3 border-b flex items-center gap-2 shrink-0">
-                    <MessageCircle className="h-4 w-4 text-slate-500"/> <span className="font-bold text-sm text-slate-700">Historial de Chat</span>
-                </div>
-                
-                <div className="flex-1 overflow-hidden relative bg-slate-50/30">
-                    <ScrollArea className="h-full w-full p-6">
-                        <div className="space-y-4 pb-4">
-                            {leadToTriage?.chat && Array.isArray(leadToTriage.chat) && leadToTriage.chat.length > 0 ? (
-                                leadToTriage.chat.map((msg: any, i: number) => (
-                                    <div key={i} className={`flex ${msg.isMe || msg.user === 'Bot' ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${msg.isMe || msg.user === 'Bot' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
-                                            <p>{msg.text}</p>
-                                            <span className={`text-[10px] block text-right mt-1 font-medium ${msg.isMe ? 'text-blue-200' : 'text-slate-400'}`}>{msg.time}</span>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="text-center py-20 text-slate-400 italic">
-                                    <MessageCircle className="h-10 w-10 mx-auto mb-2 opacity-20"/>
-                                    No hay historial de chat disponible.
-                                    <br/><span className="text-xs">Este lead entró sin conversación previa o antes de la integración.</span>
-                                </div>
-                            )}
+              <div className="bg-slate-50 p-3 border-b flex items-center gap-2 shrink-0">
+                <MessageCircle className="h-4 w-4 text-slate-500" /> <span className="font-bold text-sm text-slate-700">Historial de Chat</span>
+              </div>
+
+              <div className="flex-1 overflow-hidden relative bg-slate-50/30">
+                <ScrollArea className="h-full w-full p-6">
+                  <div className="space-y-4 pb-4">
+                    {leadToTriage?.chat && Array.isArray(leadToTriage.chat) && leadToTriage.chat.length > 0 ? (
+                      leadToTriage.chat.map((msg: any, i: number) => (
+                        <div key={i} className={`flex ${msg.isMe || msg.user === 'Bot' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${msg.isMe || msg.user === 'Bot' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
+                            <p>{msg.text}</p>
+                            <span className={`text-[10px] block text-right mt-1 font-medium ${msg.isMe ? 'text-blue-200' : 'text-slate-400'}`}>{msg.time}</span>
+                          </div>
                         </div>
-                    </ScrollArea>
-                </div>
-                
-                {/* BOTONERA DE CEMENTERIO */}
-                <div className="p-4 bg-white border-t grid grid-cols-3 gap-3 shrink-0 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)] z-10">
-                    <Button variant="outline" className="text-xs border-green-200 hover:bg-green-50 text-green-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'precio')}>
-                        <DollarSign className="h-4 w-4 mb-1"/> Precio / Muy caro
-                    </Button>
-                    <Button variant="outline" className="text-xs border-blue-200 hover:bg-blue-50 text-blue-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'no_contesta')}>
-                        <XCircle className="h-4 w-4 mb-1"/> No contesta
-                    </Button>
-                    <Button variant="outline" className="text-xs border-orange-200 hover:bg-orange-50 text-orange-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'competencia')}>
-                        <ShieldAlert className="h-4 w-4 mb-1"/> Competencia
-                    </Button>
-                    <Button variant="outline" className="text-xs border-purple-200 hover:bg-purple-50 text-purple-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'requisitos')}>
-                        <Activity className="h-4 w-4 mb-1"/> Requisitos / Salud
-                    </Button>
-                    <Button variant="outline" className="text-xs border-red-200 hover:bg-red-50 text-red-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'error')}>
-                        <Trash2 className="h-4 w-4 mb-1"/> Error / No solicitó
-                    </Button>
-                    <Button variant="outline" className="text-xs border-slate-200 hover:bg-slate-50 text-slate-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'otros')}>
-                        <HelpCircle className="h-4 w-4 mb-1"/> Otros
-                    </Button>
-                </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-20 text-slate-400 italic">
+                        <MessageCircle className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        No hay historial de chat disponible.
+                        <br /><span className="text-xs">Este lead entró sin conversación previa o antes de la integración.</span>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
+
+              {/* BOTONERA DE CEMENTERIO */}
+              <div className="p-4 bg-white border-t grid grid-cols-3 gap-3 shrink-0 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)] z-10">
+                <Button variant="outline" className="text-xs border-green-200 hover:bg-green-50 text-green-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'precio')}>
+                  <DollarSign className="h-4 w-4 mb-1" /> Precio / Muy caro
+                </Button>
+                <Button variant="outline" className="text-xs border-blue-200 hover:bg-blue-50 text-blue-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'no_contesta')}>
+                  <XCircle className="h-4 w-4 mb-1" /> No contesta
+                </Button>
+                <Button variant="outline" className="text-xs border-orange-200 hover:bg-orange-50 text-orange-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'competencia')}>
+                  <ShieldAlert className="h-4 w-4 mb-1" /> Competencia
+                </Button>
+                <Button variant="outline" className="text-xs border-purple-200 hover:bg-purple-50 text-purple-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'requisitos')}>
+                  <Activity className="h-4 w-4 mb-1" /> Requisitos / Salud
+                </Button>
+                <Button variant="outline" className="text-xs border-red-200 hover:bg-red-50 text-red-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'error')}>
+                  <Trash2 className="h-4 w-4 mb-1" /> Error / No solicitó
+                </Button>
+                <Button variant="outline" className="text-xs border-slate-200 hover:bg-slate-50 text-slate-700 flex flex-col h-auto py-3 font-bold" onClick={() => leadToTriage && handleMoveToGraveyard(leadToTriage.id, 'otros')}>
+                  <HelpCircle className="h-4 w-4 mb-1" /> Otros
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

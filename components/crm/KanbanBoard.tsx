@@ -11,7 +11,7 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 // ✅ Íconos seguros
-import { ArchiveX, Trophy, BellRing, AlertOctagon, Skull, MessageCircle, Phone, CheckCircle2, Clock, AlertTriangle } from "lucide-react" 
+import { ArchiveX, Trophy, BellRing, AlertOctagon, Skull, MessageCircle, Phone, CheckCircle2, Clock, AlertTriangle } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -24,7 +24,7 @@ import { sendNativeNotification, requestNotificationPermission } from "@/utils/n
 import { Lead, LeadCard } from "./LeadCard"
 import { DocConfirmDialog } from "./DocConfirmDialog"
 import { LostLeadDialog } from "@/components/seller/LostLeadDialog"
-import { WonLeadDialog } from "@/components/seller/WonLeadDialog" 
+import { WonLeadDialog } from "@/components/seller/WonLeadDialog"
 import { QuotationDialog } from "@/components/seller/QuotationDialog"
 
 // ✅ SONIDO PROFESIONAL
@@ -87,14 +87,14 @@ const isLeadOverdue = (lead: any) => {
 
 function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAgenda }: any) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
-    
-    const style: React.CSSProperties = { 
-        transform: CSS.Transform.toString(transform), 
-        transition, 
+
+    const style: React.CSSProperties = {
+        transform: CSS.Transform.toString(transform),
+        transition,
         opacity: isDragging ? 0.3 : 1,
         touchAction: 'none'
     }
-    
+
     if (isDragging && style.transform) {
         style.transform += " scale(1.05)";
     }
@@ -104,38 +104,38 @@ function SortableItem({ lead, onClick, onCallIncrement, onOmniClick, onResolveAg
     const isZombie = (lead as any).warning_sent === true
 
     return (
-        <div id={`lead-${lead.id}`} ref={setNodeRef} style={style} {...attributes} {...listeners} 
-            onClick={() => onClick(lead)} 
+        <div id={`lead-${lead.id}`} ref={setNodeRef} style={style} {...attributes} {...listeners}
+            onClick={() => onClick(lead)}
             className={`rounded-xl relative transition-all duration-500 ease-in-out 
             ${isUrgent ? "ring-4 ring-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse border-red-500 bg-red-50/10" : ""}
             ${isOverdue ? "ring-4 ring-yellow-400 border-yellow-300 shadow-[0_0_15px_rgba(250,204,21,0.5)] animate-pulse" : ""}
             ${isZombie ? "ring-4 ring-red-600 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.6)] animate-pulse bg-red-50" : ""}`}>
-            
+
             {isUrgent && (
-                <div 
-                    onClick={(e) => { 
-                        e.stopPropagation(); 
-                        onResolveAgenda(lead); 
-                    }} 
+                <div
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onResolveAgenda(lead);
+                    }}
                     className="absolute -top-3 -left-3 bg-red-600 hover:bg-red-500 text-white p-2 rounded-full z-50 shadow-xl border-2 border-white animate-bounce cursor-pointer hover:scale-110 transition-transform group"
                     title="Click para desactivar alarma"
                 >
                     <BellRing className="h-5 w-5 fill-white" />
                 </div>
             )}
-            
+
             {isOverdue && !isZombie && (
                 <div className="absolute -top-3 -right-3 bg-yellow-500 text-white p-1.5 rounded-full z-50 shadow-lg border-2 border-white animate-bounce">
                     <AlertOctagon className="h-4 w-4" />
                 </div>
             )}
-            
+
             {isZombie && (
                 <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-3 py-1 rounded-full z-50 shadow-2xl border-2 border-white animate-bounce flex items-center gap-2">
                     <Skull className="h-4 w-4" /> <span className="text-[10px] font-black uppercase">Recupero</span>
                 </div>
             )}
-            
+
             <LeadCard lead={lead} onCallIncrement={() => onCallIncrement(lead.id)} onOmniClick={() => onOmniClick(lead.id)} />
         </div>
     )
@@ -180,17 +180,17 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const [ackOverdue, setAckOverdue] = useState<Record<string, string>>({})
 
     // Dialogs
-    const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null) 
+    const [showConfirmCall, setShowConfirmCall] = useState<Lead | null>(null)
     const [isLostDialogOpen, setIsLostDialogOpen] = useState(false)
     const [isWonDialogOpen, setIsWonDialogOpen] = useState(false)
     const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false)
     const [isDocConfirmOpen, setIsDocConfirmOpen] = useState(false)
     const [overdueLead, setOverdueLead] = useState<Lead | null>(null)
     const [zombieLead, setZombieLead] = useState<Lead | null>(null)
-    
+
     // Comunicado Urgente
     const [urgentMessage, setUrgentMessage] = useState<string | null>(null)
-    const [announcementId, setAnnouncementId] = useState<number | null>(null) 
+    const [announcementId, setAnnouncementId] = useState<number | null>(null)
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const CURRENT_USER = userName || "Maca"
@@ -203,17 +203,17 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     // --- USER ID (para announcement_reads, que usa auth.users) ---
     useEffect(() => {
         let alive = true
-        ;(async () => {
-            const { data, error } = await supabase.auth.getUser()
-            if (!alive) return
-            if (error) {
-                console.warn('[KanbanBoard] supabase.auth.getUser error', error)
-                return
-            }
-            setCurrentUserId(data?.user?.id ?? null)
-        })()
+            ; (async () => {
+                const { data, error } = await supabase.auth.getUser()
+                if (!alive) return
+                if (error) {
+                    console.warn('[KanbanBoard] supabase.auth.getUser error', error)
+                    return
+                }
+                setCurrentUserId(data?.user?.id ?? null)
+            })()
         return () => { alive = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     useEffect(() => {
@@ -245,7 +245,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (typeof window === 'undefined') return
         try {
             localStorage.setItem(OVERDUE_ACK_STORAGE_KEY, JSON.stringify(ackOverdue))
-        } catch {}
+        } catch { }
     }, [ackOverdue, OVERDUE_ACK_STORAGE_KEY])
 
 
@@ -253,7 +253,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         if (typeof window === 'undefined') return
         try {
             localStorage.setItem(ZOMBIE_ACK_STORAGE_KEY, JSON.stringify(ackZombieIds))
-        } catch {}
+        } catch { }
     }, [ackZombieIds, ZOMBIE_ACK_STORAGE_KEY])
 
     const acknowledgeZombie = (leadId?: string | null) => {
@@ -274,7 +274,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         const key = getLeadActivityKey(lead)
         setAckOverdue(prev => ({ ...prev, [id]: key }))
     }
-const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
 
     const mapLeads = (data: any[]) => data.map((item: any) => ({
         id: item.id, name: item.name, phone: item.phone, source: item.source, status: item.status.toLowerCase(),
@@ -282,6 +282,9 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
         calls: item.calls || 0, quoted_prepaga: item.quoted_prepaga, quoted_plan: item.quoted_plan, quoted_price: item.quoted_price, notes: item.notes || '',
         scheduled_for: item.scheduled_for, intent: item.intent || 'medium', prepaga: item.prepaga, observations: item.observations, capitas: item.capitas,
         warning_sent: item.warning_sent,
+        // ✅ NUEVO: Campos de Sofía IA
+        chat_source: item.chat_source,
+        ai_labels: item.ai_labels || [],
         // Campos extra (no rompen LeadCard):
         lastActivityAt: item.last_activity_at || item.lastActivityAt,
         has_future_touch: item.has_future_touch,
@@ -408,13 +411,13 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `agent_name=eq.${CURRENT_USER}` }, async (payload) => {
                 const newData = payload.new as any;
                 const oldData = payload.old as any;
-                
+
                 // A) NUEVO DATO EN 'SIN TRABAJAR' (Req #1)
                 if (payload.eventType === 'INSERT' && newData.status === 'nuevo') {
                     let newLead = mapLeads([newData])[0]
-                    try { newLead = (await enrichLeads([newLead]))[0] } catch {}
+                    try { newLead = (await enrichLeads([newLead]))[0] } catch { }
                     setLeads(prev => [newLead, ...prev])
-                    
+
                     const title = "¡Nuevo Lead! 📥";
                     const body = `Te asignaron a ${newData.name}.`;
 
@@ -431,13 +434,13 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                         lead_id: newData.id,
                         read: false
                     });
-                } 
-                
+                }
+
                 // B) CAMBIO DE ESTADO EN MYSALESVIEW (Req #4)
                 if (payload.eventType === 'UPDATE' && newData) {
                     let updated = mapLeads([newData])[0]
-                    try { updated = (await enrichLeads([updated]))[0] } catch {}
-                    
+                    try { updated = (await enrichLeads([updated]))[0] } catch { }
+
                     // Si sigue en el tablero, actualizarlo
                     if (['nuevo', 'contactado', 'cotizacion', 'documentacion'].includes(updated.status)) {
                         setLeads(prev => {
@@ -451,7 +454,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
 
                     // DETECTOR DE CAMBIO DE ESTADO (De Legajo a Medicas, etc)
                     const opsStages = ['precarga', 'medicas', 'legajo', 'demoras', 'cumplidas', 'rechazado', 'vendido'];
-                    
+
                     if (oldData && newData.status !== oldData.status && opsStages.includes(newData.status)) {
                         const title = "Movimiento en Venta 🔄";
                         const body = `${newData.name} pasó a: ${newData.status.toUpperCase()}`;
@@ -472,17 +475,17 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                 }
             })
             .subscribe()
-        
+
         // --- 2. CANAL DE CHATS (Req #2) ---
         const chatChannel = supabase.channel('kanban_messages')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lead_messages' }, async (payload) => {
                 const msg = payload.new as any
-                
+
                 // Solo si NO soy yo quien mandó el mensaje
                 if (msg.sender !== CURRENT_USER) {
                     // Verificar si el lead es mío (Doble chequeo)
                     const { data: leadData } = await supabase.from('leads').select('agent_name, name').eq('id', msg.lead_id).single()
-                    
+
                     if (leadData && leadData.agent_name === CURRENT_USER) {
                         const title = `Mensaje de ${msg.sender} 💬`;
                         const body = `${leadData.name}: ${msg.text}`;
@@ -509,7 +512,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_name=eq.${CURRENT_USER}` }, (payload) => {
                 const n = payload.new as any;
                 const autoTypes = ['lead_assigned', 'lead_stage_change', 'chat_message'];
-                
+
                 if (!autoTypes.includes(n.type)) {
                     sendNativeNotification(n.title, n.body);
                     toast.info(n.title, { description: n.body });
@@ -521,7 +524,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
         const announcementsChannel = supabase.channel('kanban_announcements')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, (payload) => {
                 const newData = payload.new as any
-                if(newData.is_blocking) {
+                if (newData.is_blocking) {
                     setUrgentMessage(newData.message)
                     setAnnouncementId(newData.id)
                     sendNativeNotification("⚠️ Comunicado Urgente", newData.message);
@@ -529,12 +532,12 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
             })
             .subscribe()
 
-        if (typeof window !== 'undefined') { 
-            audioRef.current = new Audio(ALARM_SOUND); 
-            audioRef.current.loop = true; 
+        if (typeof window !== 'undefined') {
+            audioRef.current = new Audio(ALARM_SOUND);
+            audioRef.current.loop = true;
         }
-        
-        return () => { 
+
+        return () => {
             supabase.removeChannel(leadsChannel);
             supabase.removeChannel(chatChannel);
             supabase.removeChannel(notifChannel);
@@ -559,8 +562,8 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                 sendNativeNotification("⏰ ¡Llamada Programada!", `Tenés que llamar a ${urgentLead.name} ahora.`);
             }
         };
-        const intervalId = setInterval(checkAgendas, 15000); 
-        checkAgendas(); 
+        const intervalId = setInterval(checkAgendas, 15000);
+        checkAgendas();
         return () => clearInterval(intervalId);
     }, [leads, alarmLead, showConfirmCall, ignoredAlarmIds]);
 
@@ -569,7 +572,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
         const shouldPlay = !!zombieLead || !!alarmLead || !!overdueLead;
         if (shouldPlay && audioRef.current) {
             audioRef.current.volume = 0.5;
-            audioRef.current.play().catch(() => {});
+            audioRef.current.play().catch(() => { });
         } else {
             stopAudio();
         }
@@ -621,16 +624,16 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
     const handleCompleteAgenda = async () => {
         if (!showConfirmCall) return;
         const leadId = showConfirmCall.id;
-        stopAudio(); 
+        stopAudio();
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: undefined } : l))
         setShowConfirmCall(null);
-        setAlarmLead(null); 
+        setAlarmLead(null);
         await supabase.from('leads').update({ scheduled_for: null, last_update: new Date().toISOString() }).eq('id', leadId)
     }
 
     const handleManageNow = () => {
         if (!alarmLead) return;
-        stopAudio(); 
+        stopAudio();
         setIgnoredAlarmIds(prev => [...prev, alarmLead.id])
         if (onLeadClick) onLeadClick(alarmLead.id);
         setAlarmLead(null);
@@ -642,14 +645,14 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
         const leadId = alarmLead.id;
         const newTime = new Date(new Date().getTime() + 10 * 60000).toISOString();
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, scheduled_for: newTime } : l));
-        setAlarmLead(null); 
+        setAlarmLead(null);
         await supabase.from('leads').update({ scheduled_for: newTime, last_update: new Date().toISOString() }).eq('id', leadId);
         toast.success("Alarma aplazada 10 minutos 💤");
     }
 
     const handleDragEnd = async (event: DragEndEvent) => {
-        const { active, over } = event; 
-        setActiveId(null); 
+        const { active, over } = event;
+        setActiveId(null);
         if (!over) return
         const activeLead = leads.find(l => l.id === active.id); if (!activeLead) return
         if (over.id === 'zone-perdido') { setLeadProcessingId(active.id as string); setIsLostDialogOpen(true); return }
@@ -660,17 +663,17 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
         const isTryingToGoBack = colIdx(overCol) < colIdx(activeLead.status);
         if (['cotizacion', 'documentacion'].includes(activeLead.status) && isTryingToGoBack) return;
         if (overCol && overCol !== activeLead.status && ACTIVE_COLUMNS.some(c => c.id === overCol)) {
-            if (overCol === 'cotizacion') { 
+            if (overCol === 'cotizacion') {
                 const hasQuote = (activeLead.quoted_price && activeLead.quoted_price > 0) || activeLead.quoted_plan
                 if (!hasQuote) {
-                    setLeadProcessingId(active.id as string); 
-                    setIsQuoteDialogOpen(true); 
-                    return 
+                    setLeadProcessingId(active.id as string);
+                    setIsQuoteDialogOpen(true);
+                    return
                 }
             }
 
             if (overCol === 'documentacion') { setLeadProcessingId(active.id as string); setIsDocConfirmOpen(true); return }
-            
+
             setLeads(prev => prev.map(l => l.id === active.id ? { ...l, status: overCol } : l))
             await supabase.from('leads').update({ status: overCol.toLowerCase(), last_update: new Date().toISOString() }).eq('id', active.id)
             logHistory(active.id as string, activeLead.status, overCol)
@@ -685,22 +688,22 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
             <DndContext sensors={sensors} collisionDetection={customCollisionDetection} onDragStart={(e) => setActiveId(e.active.id as string)} onDragEnd={handleDragEnd}>
                 <div className="flex-1 flex gap-6 overflow-x-auto p-8 h-full items-start">
                     {ACTIVE_COLUMNS.map((col) => (
-                        <KanbanColumn 
-                            key={col.id} 
-                            col={col} 
-                            leads={sortLeads(col.id)} 
-                            onClickLead={(l: any) => { if (onLeadClick) onLeadClick(l.id); }} 
-                            onCallIncrement={handleCallIncrement} 
-                            onOmniClick={handleOmniClick} 
-                            onResolveAgenda={(l: Lead) => { 
+                        <KanbanColumn
+                            key={col.id}
+                            col={col}
+                            leads={sortLeads(col.id)}
+                            onClickLead={(l: any) => { if (onLeadClick) onLeadClick(l.id); }}
+                            onCallIncrement={handleCallIncrement}
+                            onOmniClick={handleOmniClick}
+                            onResolveAgenda={(l: Lead) => {
                                 stopAudio();
                                 setShowConfirmCall(l);
-                            }} 
+                            }}
                         />
                     ))}
                 </div>
                 {activeId && (<div className="fixed bottom-10 left-0 right-0 flex justify-center gap-12 z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-10 px-4"><DropZone id="zone-perdido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-red-200 shadow-2xl"><ArchiveX className="h-10 w-10 text-red-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-red-600">Perdido</span></DropZone><DropZone id="zone-vendido" className="pointer-events-auto flex flex-col items-center justify-center w-64 h-32 rounded-3xl bg-white/90 backdrop-blur-md border-4 border-emerald-200 shadow-2xl"><Trophy className="h-10 w-10 text-emerald-600 mb-2" /> <span className="font-black uppercase tracking-tighter text-emerald-600">¡Venta Lograda! 🚀</span></DropZone></div>)}
-                
+
                 <DragOverlay>
                     {activeId && activeLeadForOverlay ? (
                         <div className="cursor-grabbing rotate-3 scale-105 transition-transform duration-200 shadow-2xl opacity-90">
@@ -709,19 +712,19 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                     ) : null}
                 </DragOverlay>
             </DndContext>
-            
+
             {/* ... DIALOGS ... */}
-            <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if(leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
-            
+            <LostLeadDialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen} onConfirm={async (reason, notes) => { const leadId = leadProcessingId; setLeads(prev => prev.filter(l => l.id !== leadId)); setIsLostDialogOpen(false); if (leadId) { const oldLead = leads.find(l => l.id === leadId); await supabase.from('leads').update({ status: 'perdido', loss_reason: reason, notes: (oldLead?.notes || "") + `\n[PERDIDO]: ${notes}`, last_update: new Date().toISOString() }).eq('id', leadId); if (oldLead) logHistory(leadId, oldLead.status, 'perdido') } }} />
+
             {/* ✅ FIX REAL (restaurado): guardamos EXACTO lo que manda WonLeadDialog */}
-            <WonLeadDialog 
-                open={isWonDialogOpen} 
+            <WonLeadDialog
+                open={isWonDialogOpen}
                 onOpenChange={setIsWonDialogOpen}
-                leadId={leadProcessingId || ""} 
-                onConfirm={async (data: any) => { 
+                leadId={leadProcessingId || ""}
+                onConfirm={async (data: any) => {
                     const leadId = leadProcessingId
                     if (!leadId) return
-                    
+
                     const nowIso = new Date().toISOString()
 
                     // Helpers seguros
@@ -730,7 +733,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                         const n = Number(v)
                         return Number.isFinite(n) ? n : 0
                     }
-                    const stripUndef = (obj: any) => Object.fromEntries(Object.entries(obj).filter(([,v]) => v !== undefined))
+                    const stripUndef = (obj: any) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined))
 
                     const { files, source, origen_dato, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ...leadData } = (data || {})
                     const oldLead = leads.find(l => l.id === leadId)
@@ -774,18 +777,18 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
 
                     const { error } = await supabase.from('leads').update(finalPayload).eq('id', leadId)
 
-                    if (error) { 
+                    if (error) {
                         console.error("Error confirmando venta:", error)
                         // ✅ MOSTRAR EL ERROR REAL (así dejamos de adivinar)
                         alert(`Hubo un error al guardar: ${error.message}`)
-                    } else if (oldLead) { 
+                    } else if (oldLead) {
                         const toStatus = (finalPayload.status || 'ingresado').toString()
                         logHistory(leadId, oldLead.status, toStatus)
                     }
-                }} 
+                }}
             />
 
-            
+
             <QuotationDialog
                 open={isQuoteDialogOpen}
                 onOpenChange={setIsQuoteDialogOpen}
@@ -835,12 +838,12 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                         prev.map(l =>
                             l.id === leadId
                                 ? {
-                                      ...l,
-                                      status: "cotizacion",
-                                      ...(shouldBeMain
-                                          ? { quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: price }
-                                          : {}),
-                                  }
+                                    ...l,
+                                    status: "cotizacion",
+                                    ...(shouldBeMain
+                                        ? { quoted_prepaga: data.prepaga, quoted_plan: data.plan, quoted_price: price }
+                                        : {}),
+                                }
                                 : l
                         )
                     )
@@ -859,7 +862,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                 }}
                 onCancel={() => setIsQuoteDialogOpen(false)}
             />
-            <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if(!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if(oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
+            <DocConfirmDialog open={isDocConfirmOpen} onOpenChange={setIsDocConfirmOpen} onConfirm={async () => { const leadId = leadProcessingId; if (!leadId) return; const oldLead = leads.find(l => l.id === leadId); setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'documentacion' } : l)); setIsDocConfirmOpen(false); await supabase.from('leads').update({ status: 'documentacion' }).eq('id', leadId); if (oldLead) logHistory(leadId, oldLead.status, 'documentacion') }} onCancel={() => setIsDocConfirmOpen(false)} />
 
             {/* ALERTA ZOMBIE */}
             <Dialog open={!!zombieLead} onOpenChange={() => { acknowledgeZombie(zombieLead?.id); setZombieLead(null); stopAudio(); }}>
@@ -868,7 +871,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                     <div className="flex flex-col gap-3 mt-4"><Button className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black text-lg gap-2 shadow-lg" onClick={() => { acknowledgeZombie(zombieLead?.id); window.open(`https://wa.me/${zombieLead?.phone}?text=Hola! Te escribo para retomar tu consulta.`, '_blank'); }}><MessageCircle size={24} fill="currentColor" /> RECUPERAR AHORA</Button><Button variant="outline" className="w-full h-10 text-slate-400" onClick={() => { acknowledgeZombie(zombieLead?.id); setZombieLead(null); stopAudio(); }}>Entendido, lo gestionaré.</Button></div>
                 </DialogContent>
             </Dialog>
-            
+
             {/* ALERTA VENCIDO */}
             <Dialog open={!!overdueLead && !zombieLead} onOpenChange={() => { acknowledgeOverdue(overdueLead); setOverdueLead(null); stopAudio(); }}>
                 <DialogContent className="border-4 border-yellow-400 max-w-md shadow-2xl animate-in zoom-in duration-300" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} aria-describedby="overdue-desc">
@@ -894,25 +897,25 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                             <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${alarmLead?.name}`} />
                             <AvatarFallback className="bg-blue-100 text-blue-700 font-bold text-2xl">{alarmLead?.name?.[0]}</AvatarFallback>
                         </Avatar>
-                        
+
                         <h2 className="text-2xl font-black text-slate-800 mb-1">{alarmLead?.name}</h2>
                         <div className="flex items-center justify-center gap-2 text-slate-500 text-sm mb-6 bg-slate-50 py-1 px-3 rounded-full w-fit mx-auto">
                             <Phone size={14} /> {alarmLead?.phone}
                         </div>
 
                         <div className="flex flex-col gap-3">
-                            <Button 
-                                onClick={handleManageNow} 
+                            <Button
+                                onClick={handleManageNow}
                                 className="w-full h-12 text-md font-bold bg-[#1e3a8a] hover:bg-blue-900 text-white rounded-xl shadow-lg transition-all active:scale-[0.98]"
                             >
                                 GESTIONAR AHORA
                             </Button>
-                            <Button 
+                            <Button
                                 onClick={handleSnooze}
                                 variant="outline"
                                 className="w-full h-10 border-slate-200 text-slate-500 hover:text-blue-600 gap-2"
                             >
-                                <Clock size={16}/> Aplazar 10 minutos
+                                <Clock size={16} /> Aplazar 10 minutos
                             </Button>
                         </div>
                     </div>
@@ -931,7 +934,7 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
                             Si ya llamaste a <span className="text-slate-900 font-bold">{showConfirmCall?.name}</span>, confirmalo para limpiar la alerta.
                         </DialogDescription>
                     </DialogHeader>
-                    
+
                     <div className="grid grid-cols-1 gap-3 p-4">
                         <Button onClick={handleCompleteAgenda} className="w-full h-14 bg-green-600 hover:bg-green-700 text-white font-bold text-lg rounded-xl shadow-md transition-all active:scale-[0.98]">
                             ✅ SÍ, YA LLAMÉ
@@ -944,11 +947,11 @@ const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { di
             </Dialog>
 
             {/* ✅ 3. COMUNICADO URGENTE */}
-            <Dialog open={!!urgentMessage} onOpenChange={() => {}}>
+            <Dialog open={!!urgentMessage} onOpenChange={() => { }}>
                 <DialogContent className="bg-red-600 border-none text-white max-w-lg shadow-[0_0_100px_rgba(220,38,38,0.5)]" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
                     <div className="flex flex-col items-center text-center p-6 gap-4">
                         <div className="bg-white/20 p-4 rounded-full animate-bounce">
-                            <AlertTriangle size={48} className="text-white"/>
+                            <AlertTriangle size={48} className="text-white" />
                         </div>
                         <DialogTitle className="text-3xl font-black uppercase tracking-widest">Comunicado Urgente</DialogTitle>
                         <p className="text-lg font-medium leading-relaxed bg-white/10 p-6 rounded-xl w-full border border-white/20">

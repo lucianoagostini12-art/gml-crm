@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator"
 
 // --- COLUMNAS DEL VENDEDOR (IGUAL QUE EN KANBANBOARD) ---
 const SELLER_COLUMNS = [
-  { id: "nuevo", title: "Sin Trabajar 📥", color: "border-t-slate-400" }, 
+  { id: "nuevo", title: "Sin Trabajar 📥", color: "border-t-slate-400" },
   { id: "contactado", title: "En Contacto 📞", color: "border-t-blue-500" },
   { id: "cotizacion", title: "Cotizando 💲", color: "border-t-yellow-500" },
   { id: "documentacion", title: "Documentación 📂", color: "border-t-purple-500" },
@@ -84,7 +84,6 @@ export function AdminTeam() {
 
   // Estados Principales
   const [salesAgents, setSalesAgents] = useState<any[]>([])
-  const [staffMembers, setStaffMembers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   // Estados de Modales y Espionaje
@@ -108,21 +107,29 @@ export function AdminTeam() {
   const fetchTeam = async () => {
     setLoading(true)
     const { data: profiles } = await supabase.from('profiles').select('*')
-    // Solo para estadísticas iniciales
-    const { data: leads } = await supabase.from('leads').select('id, agent_name, status, created_at, last_update')
+    // Traemos todos los leads activos para métricas en vivo
+    const { data: leads } = await supabase
+      .from('leads')
+      .select('id, agent_name, status, created_at, last_update')
+      .not('status', 'in', '("vendido","perdido","rechazado","baja")')
 
     if (profiles && leads) {
       const now = new Date()
 
-      // Mapeo Vendedores
+      // Mapeo Vendedores con métricas del Kanban actual
       const sellers = profiles
-        .filter((u:any) => u.role === 'seller' || u.role === 'gestor')
-        .map((u:any) => {
-          const myLeads = leads.filter((l:any) => l.agent_name === u.full_name)
-          const sales = myLeads.filter((l:any) => ['vendido', 'cumplidas'].includes(l.status?.toLowerCase())).length
-          const active = myLeads.filter((l:any) => !['vendido', 'cumplidas', 'perdido', 'rechazado'].includes(l.status?.toLowerCase())).length
+        .filter((u: any) => u.role === 'seller' || u.role === 'gestor')
+        .map((u: any) => {
+          const myLeads = leads.filter((l: any) => l.agent_name === u.full_name)
 
-          const lastActionTime = myLeads.length > 0 ? Math.max(...myLeads.map((l:any) => new Date(l.last_update).getTime())) : 0
+          // ✅ Métricas por columna del Kanban (tiempo real)
+          const sinTrabajar = myLeads.filter((l: any) => l.status?.toLowerCase() === 'nuevo').length
+          const enContacto = myLeads.filter((l: any) => l.status?.toLowerCase() === 'contactado').length
+          const cotizando = myLeads.filter((l: any) => l.status?.toLowerCase() === 'cotizacion').length
+          const documentacion = myLeads.filter((l: any) => l.status?.toLowerCase() === 'documentacion').length
+          const totalActivos = myLeads.length
+
+          const lastActionTime = myLeads.length > 0 ? Math.max(...myLeads.map((l: any) => new Date(l.last_update).getTime())) : 0
           const isOnline = lastActionTime > 0 && (now.getTime() - lastActionTime) < 15 * 60 * 1000
 
           return {
@@ -130,25 +137,16 @@ export function AdminTeam() {
             name: u.full_name || u.email,
             role: u.role === 'seller' ? 'Vendedora' : 'Gestora',
             status: isOnline ? 'online' : 'offline',
-            salesMonth: sales,
-            leadsActive: active,
-            conversion: active > 0 ? Math.round((sales / (sales + active)) * 100) + '%' : '0%',
+            // Métricas del tablero actual
+            sinTrabajar,
+            enContacto,
+            cotizando,
+            documentacion,
+            totalActivos,
             avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`
           }
         })
       setSalesAgents(sellers)
-
-      // Mapeo Staff
-      const staff = profiles
-        .filter((u:any) => u.role !== 'seller' && u.role !== 'gestor')
-        .map((u:any) => ({
-          id: u.id,
-          name: u.full_name || 'Admin',
-          role: u.role,
-          email: u.email,
-          avatar: u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email}`
-        }))
-      setStaffMembers(staff)
     }
     setLoading(false)
   }
@@ -282,75 +280,62 @@ export function AdminTeam() {
         </div>
       </div>
 
-      <Tabs defaultValue="sales" className="w-full">
-        <TabsList className="grid w-full md:w-[400px] grid-cols-2 mb-6">
-          <TabsTrigger value="sales">💼 Fuerza de Ventas ({salesAgents.length})</TabsTrigger>
-          <TabsTrigger value="staff">🛡️ Staff ({staffMembers.length})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="sales">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {salesAgents.map((agent, i) => (
-              <Card key={i} className="overflow-hidden hover:shadow-lg transition-all border-t-4 border-t-transparent hover:border-t-blue-600 group">
-                <div className="p-6">
-                  <div className="flex justify-between items-start mb-6">
-                    <div className="flex items-center gap-4">
-                      <div className="relative">
-                        <Avatar className="h-16 w-16 border-4 border-white shadow-sm">
-                          <AvatarImage src={agent.avatar} className="object-cover" />
-                          <AvatarFallback>{agent.name[0]}</AvatarFallback>
-                        </Avatar>
-                        <span className={`absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-white ${agent.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold">{agent.name}</h3>
-                        <Badge variant="secondary" className="mt-1">{agent.role}</Badge>
-                      </div>
-                    </div>
-                    <Button size="icon" variant="outline" className="rounded-full" onClick={() => handleSpy(agent)}>
-                      <Eye className="h-5 w-5 text-slate-600" />
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 py-4 border-t border-b border-slate-100">
-                    <div className="text-center"><span className="block text-2xl font-black">{agent.salesMonth}</span><span className="text-[10px] uppercase font-bold text-slate-400">Ventas</span></div>
-                    <div className="text-center border-l"><span className="block text-2xl font-black">{agent.leadsActive}</span><span className="text-[10px] uppercase font-bold text-slate-400">Activos</span></div>
-                    <div className="text-center border-l"><span className="block text-2xl font-black text-green-600">{agent.conversion}</span><span className="text-[10px] uppercase font-bold text-slate-400">Conv.</span></div>
-                  </div>
-                  <div className="mt-4 flex items-center gap-2 text-xs text-slate-500 bg-slate-50 p-2 rounded-lg">
-                    <Activity className={`h-4 w-4 ${agent.status === 'online' ? 'text-green-500' : 'text-slate-300'}`} />
-                    <span>{agent.status === 'online' ? 'Trabajando ahora' : 'Desconectada'}</span>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="staff">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {staffMembers.map((member, i) => (
-              <Card key={i} className="border-l-4 border-l-slate-500 p-6 flex items-start justify-between">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {salesAgents.map((agent, i) => (
+          <Card key={i} className="overflow-hidden hover:shadow-lg transition-all border-t-4 border-t-transparent hover:border-t-blue-600 group">
+            <div className="p-6">
+              <div className="flex justify-between items-start mb-6">
                 <div className="flex items-center gap-4">
-                  <Avatar className="h-12 w-12 border">
-                    <AvatarImage src={member.avatar} className="object-cover" />
-                    <AvatarFallback>{member.name[0]}</AvatarFallback>
-                  </Avatar>
+                  <div className="relative">
+                    <Avatar className="h-16 w-16 border-4 border-white shadow-sm">
+                      <AvatarImage src={agent.avatar} className="object-cover" />
+                      <AvatarFallback>{agent.name[0]}</AvatarFallback>
+                    </Avatar>
+                    <span className={`absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-white ${agent.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
+                  </div>
                   <div>
-                    <h3 className="font-bold">{member.name}</h3>
-                    <div className="flex gap-2 items-center">
-                      <Badge variant="outline" className="text-[10px]">{member.role}</Badge>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">{member.email}</p>
+                    <h3 className="text-xl font-bold">{agent.name}</h3>
+                    <Badge variant="secondary" className="mt-1">{agent.role}</Badge>
                   </div>
                 </div>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-blue-600" onClick={() => openEditStaff(member)}>
-                  <Pencil className="h-4 w-4" />
+                <Button size="icon" variant="outline" className="rounded-full" onClick={() => handleSpy(agent)}>
+                  <Eye className="h-5 w-5 text-slate-600" />
                 </Button>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-      </Tabs>
+              </div>
+
+              {/* ✅ MÉTRICAS DEL KANBAN EN TIEMPO REAL */}
+              <div className="grid grid-cols-4 gap-2 py-4 border-t border-b border-slate-100">
+                <div className="text-center">
+                  <span className="block text-xl font-black text-slate-600">{agent.sinTrabajar}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400">Nuevos</span>
+                </div>
+                <div className="text-center border-l">
+                  <span className="block text-xl font-black text-blue-600">{agent.enContacto}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400">Contacto</span>
+                </div>
+                <div className="text-center border-l">
+                  <span className="block text-xl font-black text-yellow-600">{agent.cotizando}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400">Cotización</span>
+                </div>
+                <div className="text-center border-l">
+                  <span className="block text-xl font-black text-purple-600">{agent.documentacion}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400">Docs</span>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 p-2 rounded-lg">
+                  <Activity className={`h-4 w-4 ${agent.status === 'online' ? 'text-green-500' : 'text-slate-300'}`} />
+                  <span>{agent.status === 'online' ? 'Trabajando ahora' : 'Desconectada'}</span>
+                </div>
+                <Badge variant="outline" className="font-bold">
+                  {agent.totalActivos} activos
+                </Badge>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
 
       {/* --- MODAL EDITAR STAFF --- */}
       <Dialog open={!!editingMember} onOpenChange={() => setEditingMember(null)}>

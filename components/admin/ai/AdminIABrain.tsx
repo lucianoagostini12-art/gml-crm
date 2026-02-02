@@ -1554,6 +1554,20 @@ export default function AdminIABrain() {
                 </SelectContent>
               </Select>
 
+              {/* ✅ NUEVO: Filtro por estado de chat */}
+              <Select value={filterChatStatus} onValueChange={(v: any) => setFilterChatStatus(v)}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Estado chat" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los chats</SelectItem>
+                  <SelectItem value="abierto">🟢 Abiertos</SelectItem>
+                  <SelectItem value="cerrado">🔴 Cerrados</SelectItem>
+                  <SelectItem value="pendiente">🟡 Pendientes</SelectItem>
+                  <SelectItem value="derivado">🔵 Derivados</SelectItem>
+                </SelectContent>
+              </Select>
+
 
               {allTags.length > 0 && (
                 <div className="flex flex-wrap gap-1">

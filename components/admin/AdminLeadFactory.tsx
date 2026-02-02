@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
+import { sendManualWhatsAppMessage } from "@/app/actions/send-whatsapp"
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -543,6 +544,26 @@ export function AdminLeadFactory() {
         [targetAgent]: (prev[targetAgent] || 0) + selectedLeads.length
       }))
 
+      // ✅ NUEVO: Enviar mensaje automático a leads de Sofía IA cuando se asignan
+      if (origin === "inbox") {
+        // Obtener los leads seleccionados con sus datos
+        const leadsToNotify = unassignedLeads.filter(l =>
+          selectedLeads.includes(l.id) && l.chat_source === 'sofia_ai'
+        )
+
+        for (const lead of leadsToNotify) {
+          if (lead.phone) {
+            const mensaje = `¡Hola! 👋 Tu consulta fue derivada a nuestra asesora *${targetAgent}*. Te va a estar llamando y en caso de no comunicarse te envía un mensaje de WhatsApp. ¡Gracias por tu paciencia!`
+
+            try {
+              await sendManualWhatsAppMessage(lead.phone, mensaje)
+              console.log(`✅ Mensaje de asignación enviado a ${lead.name}`)
+            } catch (err) {
+              console.error(`❌ Error enviando mensaje de asignación a ${lead.name}:`, err)
+            }
+          }
+        }
+      }
 
       setSelectedLeads([])
 
@@ -1305,6 +1326,7 @@ export function AdminLeadFactory() {
             <DialogTitle className="flex items-center gap-2">
               🕵️ Triaje de Lead: <span className="text-blue-600">{leadToTriage?.name}</span>
               {leadToTriage?.prepaga && <Badge className={getPrepagaBadgeColor(leadToTriage.prepaga)}>{leadToTriage.prepaga}</Badge>}
+              {leadToTriage?.chat_source === 'sofia_ai' && <Badge className="bg-violet-100 text-violet-700 border-violet-200">🤖 Sofía IA</Badge>}
             </DialogTitle>
             <DialogDescription>Revisá el chat y decidí el destino del lead.</DialogDescription>
           </DialogHeader>
@@ -1318,7 +1340,10 @@ export function AdminLeadFactory() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Origen</Label>
-                <div className="font-bold text-slate-700 flex items-center gap-2"><Tag size={14} /> {leadToTriage?.source}</div>
+                <div className="font-bold text-slate-700 flex items-center gap-2">
+                  <Tag size={14} />
+                  {leadToTriage?.source || 'Sin origen'}
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 uppercase font-bold tracking-wider">Ingreso</Label>
@@ -1349,14 +1374,26 @@ export function AdminLeadFactory() {
                 <ScrollArea className="h-full w-full p-6">
                   <div className="space-y-4 pb-4">
                     {leadToTriage?.chat && Array.isArray(leadToTriage.chat) && leadToTriage.chat.length > 0 ? (
-                      leadToTriage.chat.map((msg: any, i: number) => (
-                        <div key={i} className={`flex ${msg.isMe || msg.user === 'Bot' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${msg.isMe || msg.user === 'Bot' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
-                            <p>{msg.text}</p>
-                            <span className={`text-[10px] block text-right mt-1 font-medium ${msg.isMe ? 'text-blue-200' : 'text-slate-400'}`}>{msg.time}</span>
+                      leadToTriage.chat.map((msg: any, i: number) => {
+                        // DEBUG: Ver formato del mensaje
+                        if (i === 0 && leadToTriage.chat) console.log('🔍 [Debug] Formato del chat:', JSON.stringify(leadToTriage.chat.slice(0, 3), null, 2));
+                        // Compatibilidad con formato WATI (text/isMe) y Sofía (content/role)
+                        const isOutgoing = msg.isMe || msg.role === 'assistant' || msg.user === 'Bot'
+                        const messageText = msg.text || msg.content || ''
+                        const timestamp = msg.time || msg.timestamp || ''
+                        const senderName = msg.sender || (isOutgoing ? 'Sofía IA' : 'Cliente')
+
+                        return (
+                          <div key={i} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${isOutgoing ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
+                              {!isOutgoing && <span className="text-[10px] font-bold text-slate-500 block mb-1">{senderName}</span>}
+                              {isOutgoing && msg.role === 'assistant' && <span className="text-[10px] font-bold text-blue-200 block mb-1">🤖 {senderName}</span>}
+                              <p className="whitespace-pre-wrap">{messageText}</p>
+                              {timestamp && <span className={`text-[10px] block text-right mt-1 font-medium ${isOutgoing ? 'text-blue-200' : 'text-slate-400'}`}>{typeof timestamp === 'string' && timestamp.includes('T') ? new Date(timestamp).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : timestamp}</span>}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     ) : (
                       <div className="text-center py-20 text-slate-400 italic">
                         <MessageCircle className="h-10 w-10 mx-auto mb-2 opacity-20" />

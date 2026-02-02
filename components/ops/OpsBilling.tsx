@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle } from "lucide-react"
+import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle, Copy, Check } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
@@ -57,14 +57,14 @@ type Operation = {
     cbu_tarjeta?: string
     metodoPago?: string
     cuitEmpleador?: string
-    capitas?: number 
+    capitas?: number
 }
 
 // --- REGLAS INICIALES ---
 const INITIAL_COMMISSION_RULES = {
-    special: { 
-        plans: ['A1', '500', 'AMPF'], 
-        percentage: 0.10 
+    special: {
+        plans: ['A1', '500', 'AMPF'],
+        percentage: 0.10
     },
     scales: {
         '5hs': { absorbable: 8, tiers: [{ min: 9, max: 14, pct: 0.15 }, { min: 15, max: 20, pct: 0.20 }, { min: 21, max: 24, pct: 0.25 }, { min: 25, max: 999, pct: 0.30 }] },
@@ -73,13 +73,13 @@ const INITIAL_COMMISSION_RULES = {
 }
 
 const INITIAL_CALC_RULES = {
-    taxRate: 0.105, 
+    taxRate: 0.105,
     prevencionVat: 0.21,
     doctoRed: { base: 1.80, specialPlan: '500' },
     ampf: { multiplier: 2.0 },
     prevencion: { 'A1': 0.90, 'A1 CP': 0.90, 'A2': 1.30, 'A2 CP': 1.30, 'A4': 1.50, 'A5': 1.50, default: 1.30 },
-    generalGroup: { multiplier: 1.80 }, 
-    portfolioRate: 0.05 
+    generalGroup: { multiplier: 1.80 },
+    portfolioRate: 0.05
 }
 
 // --- HELPERS VISUALES (COLORES) ---
@@ -91,16 +91,49 @@ const getPrepagaBadgeColor = (prepaga: string) => {
     if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
     if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
     if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
-    
+
     return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
 const getSourceIcon = (source: string) => {
     const s = source?.toLowerCase() || ""
-    if (s.includes('google')) return <Globe size={10} className="mr-1 text-blue-500"/>
-    if (s.includes('meta') || s.includes('face') || s.includes('insta')) return <Globe size={10} className="mr-1 text-pink-500"/>
-    if (s.includes('referido')) return <User size={10} className="mr-1 text-green-500"/>
-    return <Phone size={10} className="mr-1"/>
+    if (s.includes('google')) return <Globe size={10} className="mr-1 text-blue-500" />
+    if (s.includes('meta') || s.includes('face') || s.includes('insta')) return <Globe size={10} className="mr-1 text-pink-500" />
+    if (s.includes('referido')) return <User size={10} className="mr-1 text-green-500" />
+    return <Phone size={10} className="mr-1" />
+}
+
+// --- HELPER DE COPIA INTELIGENTE (CUIT -> DNI) ---
+function CopyDniButton({ cuit, dni }: { cuit?: string, dni: string }) {
+    const [copied, setCopied] = useState(false)
+
+    const handleCopy = (e: React.MouseEvent) => {
+        e.stopPropagation()
+        let textToCopy = dni
+
+        if (cuit) {
+            const digits = String(cuit).replace(/\D/g, "")
+            if (digits.length === 11) textToCopy = digits.substring(2, 10)
+            else if (digits.length === 10) textToCopy = digits.substring(2)
+            else textToCopy = digits || dni
+        }
+
+        navigator.clipboard.writeText(textToCopy)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
+
+    return (
+        <Button
+            variant="ghost"
+            size="icon"
+            className="h-4 w-4 ml-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50"
+            onClick={handleCopy}
+            title="Copiar DNI (Extraído del CUIT)"
+        >
+            {copied ? <Check size={10} className="text-green-600" /> : <Copy size={10} />}
+        </Button>
+    )
 }
 
 const getCurrentMonth = () => {
@@ -110,14 +143,14 @@ const getCurrentMonth = () => {
 
 export function OpsBilling() {
     const supabase = createClient()
-    
+
     // --- ESTADO ---
     const [operations, setOperations] = useState<Operation[]>([])
     const [loading, setLoading] = useState(true)
-    const [activeTab, setActiveTab] = useState("audit") 
+    const [activeTab, setActiveTab] = useState("audit")
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
     const [isLocked, setIsLocked] = useState(false)
-    
+
     // ESTADO PARA EL OJO DE PRIVACIDAD
     const [showValues, setShowValues] = useState(true)
 
@@ -126,24 +159,24 @@ export function OpsBilling() {
     const [commissionRules, setCommissionRules] = useState(INITIAL_COMMISSION_RULES)
     const [showConfig, setShowConfig] = useState(false)
     const [showHistory, setShowHistory] = useState(false)
-    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any}>({prepagas: [], subStates: {}})
-    
+    const [globalConfig, setGlobalConfig] = useState<{ prepagas: any[], subStates: any }>({ prepagas: [], subStates: {} })
+
     // Modals
     const [selectedOp, setSelectedOp] = useState<any>(null) // Para OpsModal
     const [deferOpId, setDeferOpId] = useState<string | null>(null) // ID para mover al PROXIMO mes
     const [retroOpId, setRetroOpId] = useState<string | null>(null) // ID para mover al ANTERIOR mes
-    const [manualPortfolio, setManualPortfolio] = useState<any[]>([]) 
-    
+    const [manualPortfolio, setManualPortfolio] = useState<any[]>([])
+
     const [isAddingClient, setIsAddingClient] = useState(false)
-    const [newClient, setNewClient] = useState({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] as {name: string, dni: string}[] })
-    
+    const [newClient, setNewClient] = useState({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] as { name: string, dni: string }[] })
+
     const [filters, setFilters] = useState({ seller: 'all', prepaga: 'all' })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
 
     // MAPA DE VENDEDORES (Para horas y fotos)
     const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
-    
+
     // --- FETCH ---
     const fetchSellers = async () => {
         const { data: profiles } = await supabase.from('profiles').select('full_name, work_hours, avatar_url, email').eq('role', 'seller')
@@ -153,7 +186,7 @@ export function OpsBilling() {
                 if (!p.full_name) return
                 const hStr = String(p.work_hours || "5")
                 const shift = hStr.includes("8") ? '8hs' : '5hs'
-                
+
                 map[p.full_name] = {
                     shift,
                     photo: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
@@ -166,29 +199,29 @@ export function OpsBilling() {
     const fetchData = async () => {
         setLoading(true)
         const { data: opsData } = await supabase.from('leads').select('*').eq('status', 'cumplidas').order('last_update', { ascending: false })
-        
+
         if (opsData) {
             const mapped: Operation[] = opsData.map((d: any) => ({
-                id: d.id, 
-                entryDate: d.created_at, 
-                clientName: d.name || "Sin Nombre", 
-                dni: d.dni || "", 
-                origen: d.source || "Dato", 
+                id: d.id,
+                entryDate: d.created_at,
+                clientName: d.name || "Sin Nombre",
+                dni: d.dni || "",
+                origen: d.source || "Dato",
                 seller: d.agent_name || "Desconocido",
-                prepaga: d.prepaga || d.quoted_prepaga, 
+                prepaga: d.prepaga || d.quoted_prepaga,
                 plan: d.plan || d.quoted_plan,
-                fullPrice: d.full_price || d.price || "0", 
-                aportes: d.aportes || "0", 
+                fullPrice: d.full_price || d.price || "0",
+                aportes: d.aportes || "0",
                 descuento: d.descuento || "0",
-                status: d.status, 
+                status: d.status,
                 subState: d.sub_state,
-                condicionLaboral: d.labor_condition, 
+                condicionLaboral: d.labor_condition,
                 hijos: d.family_members || d.hijos || [],
-                billing_approved: d.billing_approved, 
+                billing_approved: d.billing_approved,
                 billing_period: d.billing_period,
-                billing_price_override: d.billing_price_override, 
+                billing_price_override: d.billing_price_override,
                 billing_portfolio_override: d.billing_portfolio_override,
-                
+
                 // Mapeo completo para OpsModal
                 phone: d.phone,
                 email: d.email,
@@ -208,10 +241,10 @@ export function OpsBilling() {
             }))
             setOperations(mapped)
         }
-        
+
         const { data: manualData } = await supabase.from('billing_manual_clients').select('*').order('created_at', { ascending: false })
         if (manualData) setManualPortfolio(manualData)
-        
+
         const { data: config } = await supabase.from('system_config').select('*')
         if (config) {
             const p = config.find(c => c.key === 'prepagas_plans')?.value || []
@@ -224,11 +257,11 @@ export function OpsBilling() {
 
     useEffect(() => {
         fetchData()
-        fetchSellers() 
+        fetchSellers()
         const channel = supabase.channel('billing_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: 'status=eq.cumplidas' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_manual_clients' }, () => fetchData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchSellers()) 
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchSellers())
             .subscribe()
         return () => { supabase.removeChannel(channel) }
     }, [])
@@ -273,16 +306,16 @@ export function OpsBilling() {
             }
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
-        
+
         let portfolioVal = 0
         if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
-             portfolioVal = parseFloat(op.billing_portfolio_override.toString())
+            portfolioVal = parseFloat(op.billing_portfolio_override.toString())
         } else {
-             const full = parseFloat(op.fullPrice || "0"); const aportes = parseFloat(op.aportes || "0"); const desc = parseFloat(op.descuento || "0")
-             const netPayable = Math.max(0, full - desc - aportes)
-             portfolioVal = Number((netPayable * calcRules.portfolioRate).toFixed(2))
+            const full = parseFloat(op.fullPrice || "0"); const aportes = parseFloat(op.aportes || "0"); const desc = parseFloat(op.descuento || "0")
+            const netPayable = Math.max(0, full - desc - aportes)
+            portfolioVal = Number((netPayable * calcRules.portfolioRate).toFixed(2))
         }
-        
+
         return { val: Number(val.toFixed(2)), formula, portfolio: Number(portfolioVal.toFixed(2)) }
     }
 
@@ -299,9 +332,9 @@ export function OpsBilling() {
     const opsInPeriod = useMemo(() => {
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
-            const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
+            const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
             const targetMonth = op.billing_period || defaultMonth
-            
+
             if (targetMonth !== selectedMonth) return false
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
@@ -316,9 +349,9 @@ export function OpsBilling() {
 
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
-            const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
+            const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
             const targetMonth = op.billing_period || defaultMonth
-            
+
             if (op.billing_approved !== true) return false
             if (targetMonth !== prevIso) return false
             return true
@@ -333,13 +366,13 @@ export function OpsBilling() {
         operations.forEach(op => {
             if (op.billing_approved === true) {
                 const opDate = new Date(op.entryDate)
-                const month = op.billing_period || `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}`
+                const month = op.billing_period || `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
                 const val = calculate(op).val
                 aggregated[month] = (aggregated[month] || 0) + val
             }
         })
         return Object.entries(aggregated).sort((a, b) => a[0].localeCompare(b[0])).map(([month, total]) => ({ month, total })).slice(-12)
-    }, [operations, calcRules]) 
+    }, [operations, calcRules])
 
     const { totalNeto, totalIVA, breakdown } = useMemo(() => {
         let neto = 0, preve = 0, sumPreve = 0, sumXP = 0, sumAMPF = 0
@@ -363,18 +396,18 @@ export function OpsBilling() {
     const sellersCommissions = useMemo(() => {
         const result: any[] = []
         const grouped: Record<string, Operation[]> = {}
-        approvedOps.forEach(op => { if(!grouped[op.seller]) grouped[op.seller] = []; grouped[op.seller].push(op) })
+        approvedOps.forEach(op => { if (!grouped[op.seller]) grouped[op.seller] = []; grouped[op.seller].push(op) })
 
         Object.keys(grouped).forEach(sellerName => {
             const ops = grouped[sellerName]
             const sellerInfo = sellersMap[sellerName] || { shift: '5hs', photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${sellerName}` }
-            const shiftRules = commissionRules.scales[sellerInfo.shift] 
-            
+            const shiftRules = commissionRules.scales[sellerInfo.shift]
+
             let specialCommission = 0
             let variableCommission = 0
             const standardOps: Operation[] = []
             const specialOps: Operation[] = []
-            
+
             ops.forEach(op => {
                 const plan = op.plan?.toUpperCase() || ""
                 const prepaga = op.prepaga?.toUpperCase() || ""
@@ -393,17 +426,17 @@ export function OpsBilling() {
             const isThresholdMet = totalStandardCount > absorbableLimit
             let scalePercentage = 0
             let payableCount = 0
-            
+
             if (isThresholdMet) {
                 const tier = shiftRules.tiers.find(t => totalStandardCount >= t.min && totalStandardCount <= t.max)
                 const finalTier = tier || shiftRules.tiers[shiftRules.tiers.length - 1]
                 scalePercentage = finalTier.pct
-                payableCount = standardOps.slice(absorbableLimit).length 
+                payableCount = standardOps.slice(absorbableLimit).length
                 const totalLiquidatedStandard = standardOps.slice(absorbableLimit).reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedStandard * scalePercentage
                 const totalLiquidatedSpecial = specialOps.reduce((acc, op) => acc + calculate(op).val, 0)
                 specialCommission = totalLiquidatedSpecial * commissionRules.special.percentage
-            } 
+            }
 
             result.push({
                 name: sellerName, info: sellerInfo, totalCount: ops.length, specialCount: specialOps.length, variableCount: totalStandardCount, absorbableCount: absorbableLimit,
@@ -415,38 +448,38 @@ export function OpsBilling() {
 
     const handlePriceChange = (id: string, v: string) => updateOpBilling(id, { billing_price_override: parseFloat(v) })
     const handlePortfolioChange = (id: string, v: string) => updateOpBilling(id, { billing_portfolio_override: parseFloat(v) })
-    
-    const confirmDefer = () => { 
-        if(deferOpId){ 
-            const [y,m]=selectedMonth.split('-').map(Number); 
-            const nextM=m===12?1:m+1; 
-            const nextY=m===12?y+1:y; 
-            updateOpBilling(deferOpId, { billing_period: `${nextY}-${String(nextM).padStart(2,'0')}` }); 
-            setDeferOpId(null) 
-        } 
+
+    const confirmDefer = () => {
+        if (deferOpId) {
+            const [y, m] = selectedMonth.split('-').map(Number);
+            const nextM = m === 12 ? 1 : m + 1;
+            const nextY = m === 12 ? y + 1 : y;
+            updateOpBilling(deferOpId, { billing_period: `${nextY}-${String(nextM).padStart(2, '0')}` });
+            setDeferOpId(null)
+        }
     }
-    
-    const confirmRetro = () => { 
-        if(retroOpId){ 
-            const [y,m]=selectedMonth.split('-').map(Number); 
-            const prevM=m===1?12:m-1; 
-            const prevY=m===1?y-1:y; 
-            updateOpBilling(retroOpId, { billing_period: `${prevY}-${String(prevM).padStart(2,'0')}` }); 
-            setRetroOpId(null) 
-        } 
+
+    const confirmRetro = () => {
+        if (retroOpId) {
+            const [y, m] = selectedMonth.split('-').map(Number);
+            const prevM = m === 1 ? 12 : m - 1;
+            const prevY = m === 1 ? y - 1 : y;
+            updateOpBilling(retroOpId, { billing_period: `${prevY}-${String(prevM).padStart(2, '0')}` });
+            setRetroOpId(null)
+        }
     }
 
     const approveOp = (id: string) => updateOpBilling(id, { billing_approved: true })
     const unapproveOp = (id: string) => updateOpBilling(id, { billing_approved: false })
-    
+
     const calculateManualLiquidation = () => {
         const full = parseFloat(newClient.fullPrice || "0")
         const desc = parseFloat(newClient.descuento || "0")
-        return newClient.prepaga.toLowerCase().includes('preven') ? (full - desc) * calcRules.prevencion.default : full 
+        return newClient.prepaga.toLowerCase().includes('preven') ? (full - desc) * calcRules.prevencion.default : full
     }
 
     const handleAddClient = async () => {
-        if(!newClient.name) return
+        if (!newClient.name) return
         const val = calculateManualLiquidation()
         await supabase.from('billing_manual_clients').insert({
             name: newClient.name, dni: newClient.dni, prepaga: newClient.prepaga, plan: newClient.plan, full_price: parseFloat(newClient.fullPrice), aportes: parseFloat(newClient.aportes), descuento: parseFloat(newClient.descuento), calculated_liquidation: val, hijos: newClient.hijos
@@ -465,7 +498,7 @@ export function OpsBilling() {
         const standardOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""
             return !commissionRules.special.plans.some(k => plan.includes(k) || prepaga.includes(k))
-        }).sort((a,b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
+        }).sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
         const isThresholdMet = standardOps.length > threshold
         const statusMap: Record<string, string> = {}
         ops.forEach(op => {
@@ -477,14 +510,14 @@ export function OpsBilling() {
         return ops.map((op: any) => ({ ...op, payStatus: statusMap[op.id] }))
     }
 
-    if (loading && operations.length === 0) return <div className="h-screen flex items-center justify-center text-slate-400 gap-2"><Loader2 className="animate-spin"/> Cargando...</div>
+    if (loading && operations.length === 0) return <div className="h-screen flex items-center justify-center text-slate-400 gap-2"><Loader2 className="animate-spin" /> Cargando...</div>
 
     return (
         <div className="p-6 h-full flex flex-col gap-6 overflow-hidden max-w-[1900px] mx-auto pb-20">
             {/* HEADER */}
             <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200 shadow-sm shrink-0">
                 <div className="flex items-center gap-4 px-2">
-                    <div className="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white"><DollarSign/></div>
+                    <div className="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white"><DollarSign /></div>
                     <div>
                         <h2 className="text-lg font-black text-slate-800 leading-none">Centro Financiero</h2>
                         <div className="flex items-center gap-2 mt-1">
@@ -493,24 +526,24 @@ export function OpsBilling() {
                         </div>
                     </div>
                 </div>
-                
+
                 <div className="flex items-center gap-4 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" onClick={() => changeMonth(-1)}><ChevronLeft size={16}/></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" onClick={() => changeMonth(-1)}><ChevronLeft size={16} /></Button>
                     <div className="flex flex-col items-center w-36">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Período</span>
                         <span className="text-sm font-black text-slate-800 capitalize leading-tight">{formatMonth(selectedMonth)}</span>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" onClick={() => changeMonth(1)}><ChevronRight size={16}/></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" onClick={() => changeMonth(1)}><ChevronRight size={16} /></Button>
                 </div>
 
                 <div className="flex items-center gap-2">
                     {/* BOTÓN DE PRIVACIDAD */}
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setShowValues(!showValues)} title={showValues ? "Ocultar Valores" : "Mostrar Valores"}>
-                        {showValues ? <Eye size={16}/> : <EyeOff size={16}/>}
+                        {showValues ? <Eye size={16} /> : <EyeOff size={16} />}
                     </Button>
                     <div className="h-4 w-px bg-slate-200 mx-1"></div>
-                    <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}><Settings2 size={14} className="mr-2"/> Reglas</Button>
-                    <Button size="sm" variant={isLocked ? "secondary" : "default"} onClick={() => setIsLocked(!isLocked)} className="gap-2 font-bold min-w-[130px]">{isLocked ? <><Lock size={14}/> Reabrir Mes</> : <><Save size={14}/> Cerrar Mes</>}</Button>
+                    <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}><Settings2 size={14} className="mr-2" /> Reglas</Button>
+                    <Button size="sm" variant={isLocked ? "secondary" : "default"} onClick={() => setIsLocked(!isLocked)} className="gap-2 font-bold min-w-[130px]">{isLocked ? <><Lock size={14} /> Reabrir Mes</> : <><Save size={14} /> Cerrar Mes</>}</Button>
                 </div>
             </div>
 
@@ -544,7 +577,7 @@ export function OpsBilling() {
                 </Card>
                 <Card onClick={() => setShowHistory(true)} className="bg-slate-50 border-dashed border-2 border-slate-200 shadow-none hover:bg-slate-100 transition-colors cursor-pointer flex items-center justify-center group">
                     <div className="text-center">
-                        <div className="h-10 w-10 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-2 text-slate-500 group-hover:bg-slate-300 group-hover:text-slate-700"><LayoutGrid size={20}/></div>
+                        <div className="h-10 w-10 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-2 text-slate-500 group-hover:bg-slate-300 group-hover:text-slate-700"><LayoutGrid size={20} /></div>
                         <p className="text-xs font-bold text-slate-500 group-hover:text-slate-700">Ver Historial Anual</p>
                     </div>
                 </Card>
@@ -560,12 +593,12 @@ export function OpsBilling() {
                     </TabsList>
                     <div className="flex gap-2 mb-2 items-center">
                         <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-                            <PopoverTrigger asChild><Button variant={filters.seller!=='all'||filters.prepaga!=='all'?"secondary":"outline"} size="sm" className="h-9 gap-2"><Filter size={14}/> {filters.seller!=='all'||filters.prepaga!=='all'?"Filtros Activos":"Filtrar"}</Button></PopoverTrigger>
+                            <PopoverTrigger asChild><Button variant={filters.seller !== 'all' || filters.prepaga !== 'all' ? "secondary" : "outline"} size="sm" className="h-9 gap-2"><Filter size={14} /> {filters.seller !== 'all' || filters.prepaga !== 'all' ? "Filtros Activos" : "Filtrar"}</Button></PopoverTrigger>
                             <PopoverContent className="w-64 p-4 shadow-xl border-slate-200" align="end">
                                 <div className="space-y-4">
-                                    <div className="space-y-2"><h4 className="font-bold text-xs uppercase text-slate-500">Vendedor</h4><Select value={filters.seller} onValueChange={v => setFilters({...filters, seller: v})}><SelectTrigger><SelectValue placeholder="Todos"/></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem>{uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
-                                    <div className="space-y-2"><h4 className="font-bold text-xs uppercase text-slate-500">Prepaga</h4><Select value={filters.prepaga} onValueChange={v => setFilters({...filters, prepaga: v})}><SelectTrigger><SelectValue placeholder="Todas"/></SelectTrigger><SelectContent><SelectItem value="all">Todas</SelectItem>{uniquePrepagas.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
-                                    <Button size="sm" variant="ghost" className="w-full text-xs text-red-500" onClick={() => {setFilters({seller:'all', prepaga:'all'}); setIsFilterOpen(false)}}><X size={12} className="mr-1"/> Borrar Filtros</Button>
+                                    <div className="space-y-2"><h4 className="font-bold text-xs uppercase text-slate-500">Vendedor</h4><Select value={filters.seller} onValueChange={v => setFilters({ ...filters, seller: v })}><SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem>{uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
+                                    <div className="space-y-2"><h4 className="font-bold text-xs uppercase text-slate-500">Prepaga</h4><Select value={filters.prepaga} onValueChange={v => setFilters({ ...filters, prepaga: v })}><SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger><SelectContent><SelectItem value="all">Todas</SelectItem>{uniquePrepagas.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
+                                    <Button size="sm" variant="ghost" className="w-full text-xs text-red-500" onClick={() => { setFilters({ seller: 'all', prepaga: 'all' }); setIsFilterOpen(false) }}><X size={12} className="mr-1" /> Borrar Filtros</Button>
                                 </div>
                             </PopoverContent>
                         </Popover>
@@ -575,7 +608,7 @@ export function OpsBilling() {
                 {/* --- MESA DE ENTRADA (Mantiene formato original con decimales) --- */}
                 <TabsContent value="audit" className="flex-1 overflow-hidden m-0">
                     <Card className="h-full border-0 shadow-md flex flex-col">
-                        <div className="bg-orange-50/50 p-3 border-b border-orange-100 flex items-center gap-2 text-xs text-orange-800 font-medium"><AlertTriangle size={14}/> Estas ventas están en el período seleccionado pero aún no fueron aprobadas.</div>
+                        <div className="bg-orange-50/50 p-3 border-b border-orange-100 flex items-center gap-2 text-xs text-orange-800 font-medium"><AlertTriangle size={14} /> Estas ventas están en el período seleccionado pero aún no fueron aprobadas.</div>
                         <CardContent className="p-0 flex-1 overflow-auto">
                             <Table>
                                 <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[250px]">Cliente / Origen</TableHead><TableHead>Vendedor</TableHead><TableHead>Prepaga / Plan</TableHead><TableHead className="text-right">Valores Base</TableHead><TableHead className="w-[180px]">Cálculo</TableHead><TableHead className="text-right font-bold text-slate-700">Estimado</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
@@ -584,13 +617,13 @@ export function OpsBilling() {
                                     return (
                                         <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
                                             <TableCell>
-                                                <div className="font-bold text-slate-800">
-                                                    {op.clientName} 
-                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                <div className="font-bold text-slate-800 flex items-center gap-1">
+                                                    {op.clientName}
+                                                    <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                                         {op.cuit || op.dni}
                                                     </span>
+                                                    <CopyDniButton cuit={op.cuit} dni={op.dni} />
                                                 </div>
-                                                <div className="text-[11px] font-mono text-slate-400">{op.dni}</div>
                                                 <div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div>
                                             </TableCell>
                                             <TableCell><span className="text-xs font-medium text-slate-600">{op.seller}</span></TableCell>
@@ -604,10 +637,10 @@ export function OpsBilling() {
                                             <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                                                 <div className="flex justify-end gap-2">
                                                     <Button size="sm" variant="secondary" className="h-8 text-slate-600" onClick={() => setRetroOpId(op.id)}>
-                                                        <ArrowLeft size={14} className="mr-1"/> Ant.
+                                                        <ArrowLeft size={14} className="mr-1" /> Ant.
                                                     </Button>
                                                     <Button size="sm" variant="outline" className="h-8 border-orange-200 text-orange-600 hover:bg-orange-50" onClick={() => setDeferOpId(op.id)}>
-                                                        Próx. <ArrowRight size={14} className="ml-1"/>
+                                                        Próx. <ArrowRight size={14} className="ml-1" />
                                                     </Button>
                                                     <Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold" onClick={() => approveOp(op.id)}>Aprobar</Button>
                                                 </div>
@@ -625,8 +658,8 @@ export function OpsBilling() {
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-green-600">
                         <div className="bg-white p-3 border-b border-slate-100">
                             <div className="flex justify-between items-center mb-4">
-                                <div className="text-xs text-green-800 font-medium flex items-center gap-2"><CheckCircle2 size={14}/> Estas ventas ya están computadas para la factura final.</div>
-                                <Button size="sm" variant="outline" className="h-7 text-xs gap-2" disabled={approvedOps.length === 0}><Download size={12}/> Exportar Excel</Button>
+                                <div className="text-xs text-green-800 font-medium flex items-center gap-2"><CheckCircle2 size={14} /> Estas ventas ya están computadas para la factura final.</div>
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-2" disabled={approvedOps.length === 0}><Download size={12} /> Exportar Excel</Button>
                             </div>
                             <div className="grid grid-cols-3 gap-4">
                                 {/* ✅ Subtotales Redondeados para consistencia con tarjetas */}
@@ -644,11 +677,12 @@ export function OpsBilling() {
                                     return (
                                         <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
                                             <TableCell>
-                                                <div className="font-bold text-slate-800">
+                                                <div className="font-bold text-slate-800 flex items-center gap-1">
                                                     {op.clientName}
-                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                    <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                                         {op.cuit || op.dni}
                                                     </span>
+                                                    <CopyDniButton cuit={op.cuit} dni={op.dni} />
                                                 </div>
                                                 <div className="flex items-center gap-2 text-xs text-slate-500">
                                                     <Badge variant="outline" className={`h-4 px-1 text-[9px] border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
@@ -662,10 +696,10 @@ export function OpsBilling() {
                                                 <div className="relative">
                                                     <span className="absolute left-3 top-2.5 text-green-600 font-bold text-xs">$</span>
                                                     {/* ✅ STEP 0.01 PARA PERMITIR DECIMALES */}
-                                                    <Input className="h-8 pl-5 font-bold text-green-700 border-green-200 bg-white focus:ring-green-500 text-right text-sm" type="number" step="0.01" value={calc.val} onChange={(e) => handlePriceChange(op.id, e.target.value)} disabled={isLocked}/>
+                                                    <Input className="h-8 pl-5 font-bold text-green-700 border-green-200 bg-white focus:ring-green-500 text-right text-sm" type="number" step="0.01" value={calc.val} onChange={(e) => handlePriceChange(op.id, e.target.value)} disabled={isLocked} />
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-right" onClick={e => e.stopPropagation()}><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => unapproveOp(op.id)}><Undo2 size={16}/></Button></TableCell>
+                                            <TableCell className="text-right" onClick={e => e.stopPropagation()}><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => unapproveOp(op.id)}><Undo2 size={16} /></Button></TableCell>
                                         </TableRow>
                                     )
                                 })}</TableBody>
@@ -677,7 +711,7 @@ export function OpsBilling() {
                 {/* --- CARTERA --- */}
                 <TabsContent value="portfolio" className="flex-1 overflow-hidden m-0">
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-blue-500">
-                        <div className="bg-white p-3 border-b border-slate-100 flex justify-between items-center"><div className="text-xs text-blue-800 font-medium">Proyección de Cartera (Automática + Manual) - <b>Mostrando ventas de {formatMonth(new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 2).toISOString().slice(0, 7))}</b></div><Button size="sm" className="h-7 text-xs gap-2 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsAddingClient(true)}><Plus size={12}/> Nuevo Cliente</Button></div>
+                        <div className="bg-white p-3 border-b border-slate-100 flex justify-between items-center"><div className="text-xs text-blue-800 font-medium">Proyección de Cartera (Automática + Manual) - <b>Mostrando ventas de {formatMonth(new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 2).toISOString().slice(0, 7))}</b></div><Button size="sm" className="h-7 text-xs gap-2 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsAddingClient(true)}><Plus size={12} /> Nuevo Cliente</Button></div>
                         <CardContent className="p-0 flex-1 overflow-auto">
                             <Table>
                                 <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente</TableHead><TableHead>Origen</TableHead><TableHead>Prepaga</TableHead><TableHead>Valor Liquidado</TableHead><TableHead className="text-right font-black text-blue-700 bg-blue-50 w-[180px]">CARTERA (Editable)</TableHead></TableRow></TableHeader>
@@ -687,10 +721,13 @@ export function OpsBilling() {
                                         return (
                                             <TableRow key={op.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedOp(op)}>
                                                 <TableCell className="font-bold text-slate-700">
-                                                    {op.clientName}
-                                                    <span className="ml-2 text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                                                        {op.cuit || op.dni}
-                                                    </span>
+                                                    <div className="flex items-center gap-1">
+                                                        {op.clientName}
+                                                        <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                            {op.cuit || op.dni}
+                                                        </span>
+                                                        <CopyDniButton cuit={op.cuit} dni={op.dni} />
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell><Badge variant="secondary" className="text-[9px]">Automático</Badge></TableCell>
                                                 <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge></TableCell>
@@ -699,7 +736,7 @@ export function OpsBilling() {
                                                     <div className="relative">
                                                         <span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span>
                                                         {/* ✅ STEP 0.01 */}
-                                                        <Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" type="number" step="0.01" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked}/>
+                                                        <Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" type="number" step="0.01" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked} />
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
@@ -736,15 +773,15 @@ export function OpsBilling() {
                                 {sellersCommissions.map((seller, index) => (
                                     <Card key={index} className={`border-0 shadow-md transition-all relative overflow-hidden bg-white h-fit ${!seller.isThresholdMet ? 'opacity-80 grayscale-[0.3]' : ''}`}>
                                         <div className={`absolute top-0 left-0 w-full h-1.5 ${seller.isThresholdMet ? 'bg-gradient-to-r from-pink-500 to-purple-600' : 'bg-slate-300'}`}></div>
-                                        {!seller.isThresholdMet && <div className="absolute top-3 left-3 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 z-20"><Lock size={10}/> Objetivo No Cumplido</div>}
-                                        <div className="absolute top-2 right-2 z-10"><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setViewingSeller(seller.name)}><Eye size={16}/></Button></div>
+                                        {!seller.isThresholdMet && <div className="absolute top-3 left-3 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 z-20"><Lock size={10} /> Objetivo No Cumplido</div>}
+                                        <div className="absolute top-2 right-2 z-10"><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setViewingSeller(seller.name)}><Eye size={16} /></Button></div>
                                         <CardContent className="p-6">
                                             <div className="flex items-start justify-between mb-4 mt-4">
                                                 <div className="flex items-center gap-3">
-                                                    <Avatar className="h-14 w-14 border-2 border-white shadow-md"><AvatarImage src={seller.info.photo} /><AvatarFallback className="bg-pink-100 text-pink-600 font-black">{seller.name.substring(0,2).toUpperCase()}</AvatarFallback></Avatar>
+                                                    <Avatar className="h-14 w-14 border-2 border-white shadow-md"><AvatarImage src={seller.info.photo} /><AvatarFallback className="bg-pink-100 text-pink-600 font-black">{seller.name.substring(0, 2).toUpperCase()}</AvatarFallback></Avatar>
                                                     <div>
                                                         <h3 className="font-black text-lg text-slate-800 leading-tight">{seller.name}</h3>
-                                                        <div className="flex gap-2 mt-1"><Badge variant="outline" className="bg-slate-50 text-[10px] flex w-fit items-center gap-1 border-slate-200"><Clock size={10}/> {seller.info.shift}</Badge><Badge className="bg-slate-100 text-slate-600 text-[10px]">Abs: {seller.absorbableCount}</Badge></div>
+                                                        <div className="flex gap-2 mt-1"><Badge variant="outline" className="bg-slate-50 text-[10px] flex w-fit items-center gap-1 border-slate-200"><Clock size={10} /> {seller.info.shift}</Badge><Badge className="bg-slate-100 text-slate-600 text-[10px]">Abs: {seller.absorbableCount}</Badge></div>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
@@ -769,21 +806,21 @@ export function OpsBilling() {
             </Tabs>
 
             {/* --- MODAL OPS DETALLE --- */}
-            <OpsModal 
-                op={selectedOp} 
-                isOpen={!!selectedOp} 
-                onClose={() => setSelectedOp(null)} 
-                onUpdateOp={() => fetchData()} 
-                currentUser={"Administración"} 
-                role={"admin_god"} 
-                onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} onSubStateChange={()=>{}} 
+            <OpsModal
+                op={selectedOp}
+                isOpen={!!selectedOp}
+                onClose={() => setSelectedOp(null)}
+                onUpdateOp={() => fetchData()}
+                currentUser={"Administración"}
+                role={"admin_god"}
+                onStatusChange={() => { }} onRelease={() => { }} requestAdvance={() => { }} requestBack={() => { }} onPick={() => { }} onSubStateChange={() => { }}
                 onAddNote={async (note: string) => {
                     const newNote = `FACTURACION|${new Date().toLocaleString()}|Admin|${note}`
                     const currentNotes = selectedOp.notes ? selectedOp.notes + "|||" + newNote : newNote
                     await supabase.from('leads').update({ notes: currentNotes }).eq('id', selectedOp.id)
                 }}
-                onSendChat={()=>{}} onAddReminder={()=>{}} 
-                getStatusColor={getStatusColor} 
+                onSendChat={() => { }} onAddReminder={() => { }}
+                getStatusColor={getStatusColor}
                 getSubStateStyle={getSubStateStyle}
                 globalConfig={globalConfig}
             />
@@ -792,39 +829,39 @@ export function OpsBilling() {
             <Dialog open={showConfig} onOpenChange={setShowConfig}>
                 <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2"><Settings2/> Configuración de Reglas</DialogTitle>
+                        <DialogTitle className="flex items-center gap-2"><Settings2 /> Configuración de Reglas</DialogTitle>
                         <DialogDescription>Ajusta porcentajes y escalas. Cambios aplican en tiempo real.</DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-6 py-4">
-                        
+
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><DollarSign size={14}/> Liquidación General (Prepagas)</h4>
+                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><DollarSign size={14} /> Liquidación General (Prepagas)</h4>
                             <div className="grid grid-cols-3 gap-4">
-                                <div className="space-y-1"><Label className="text-[10px] uppercase text-slate-500 font-bold">Impuestos (10.5%)</Label><div className="relative"><Input type="number" className="pl-2 pr-6" value={calcRules.taxRate} onChange={e=>setCalcRules({...calcRules, taxRate: parseFloat(e.target.value)})} step="0.005"/><span className="absolute right-2 top-2 text-xs text-slate-400">%</span></div></div>
-                                <div className="space-y-1"><Label className="text-[10px] uppercase text-slate-500 font-bold">IVA Prevención</Label><div className="relative"><Input type="number" className="pl-2 pr-6" value={calcRules.prevencionVat} onChange={e=>setCalcRules({...calcRules, prevencionVat: parseFloat(e.target.value)})} step="0.01"/><span className="absolute right-2 top-2 text-xs text-slate-400">%</span></div></div>
-                                <div className="space-y-1"><Label className="text-[10px] uppercase text-slate-500 font-bold">Mult. General (180%)</Label><Input type="number" value={calcRules.generalGroup.multiplier} onChange={e=>setCalcRules({...calcRules, generalGroup:{multiplier: parseFloat(e.target.value)}})} step="0.1"/></div>
+                                <div className="space-y-1"><Label className="text-[10px] uppercase text-slate-500 font-bold">Impuestos (10.5%)</Label><div className="relative"><Input type="number" className="pl-2 pr-6" value={calcRules.taxRate} onChange={e => setCalcRules({ ...calcRules, taxRate: parseFloat(e.target.value) })} step="0.005" /><span className="absolute right-2 top-2 text-xs text-slate-400">%</span></div></div>
+                                <div className="space-y-1"><Label className="text-[10px] uppercase text-slate-500 font-bold">IVA Prevención</Label><div className="relative"><Input type="number" className="pl-2 pr-6" value={calcRules.prevencionVat} onChange={e => setCalcRules({ ...calcRules, prevencionVat: parseFloat(e.target.value) })} step="0.01" /><span className="absolute right-2 top-2 text-xs text-slate-400">%</span></div></div>
+                                <div className="space-y-1"><Label className="text-[10px] uppercase text-slate-500 font-bold">Mult. General (180%)</Label><Input type="number" value={calcRules.generalGroup.multiplier} onChange={e => setCalcRules({ ...calcRules, generalGroup: { multiplier: parseFloat(e.target.value) } })} step="0.1" /></div>
                             </div>
-                            
+
                             <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-4 gap-3">
-                                <div className="space-y-1"><Label className="text-[10px] font-bold text-pink-600">Prev. A1 (90%)</Label><Input className="h-8" type="number" value={calcRules.prevencion['A1']} onChange={e=>setCalcRules({...calcRules, prevencion:{...calcRules.prevencion, 'A1': parseFloat(e.target.value)}})} step="0.1"/></div>
-                                <div className="space-y-1"><Label className="text-[10px] font-bold text-pink-600">Prev. A2 (130%)</Label><Input className="h-8" type="number" value={calcRules.prevencion['A2']} onChange={e=>setCalcRules({...calcRules, prevencion:{...calcRules.prevencion, 'A2': parseFloat(e.target.value)}})} step="0.1"/></div>
-                                <div className="space-y-1"><Label className="text-[10px] font-bold text-pink-600">Prev. A4/A5 (150%)</Label><Input className="h-8" type="number" value={calcRules.prevencion['A4']} onChange={e=>setCalcRules({...calcRules, prevencion:{...calcRules.prevencion, 'A4': parseFloat(e.target.value), 'A5': parseFloat(e.target.value)}})} step="0.1"/></div>
-                                <div className="space-y-1"><Label className="text-[10px] font-bold text-blue-600">Mult. AMPF (200%)</Label><Input className="h-8" type="number" value={calcRules.ampf.multiplier} onChange={e=>setCalcRules({...calcRules, ampf:{multiplier: parseFloat(e.target.value)}})} step="0.1"/></div>
+                                <div className="space-y-1"><Label className="text-[10px] font-bold text-pink-600">Prev. A1 (90%)</Label><Input className="h-8" type="number" value={calcRules.prevencion['A1']} onChange={e => setCalcRules({ ...calcRules, prevencion: { ...calcRules.prevencion, 'A1': parseFloat(e.target.value) } })} step="0.1" /></div>
+                                <div className="space-y-1"><Label className="text-[10px] font-bold text-pink-600">Prev. A2 (130%)</Label><Input className="h-8" type="number" value={calcRules.prevencion['A2']} onChange={e => setCalcRules({ ...calcRules, prevencion: { ...calcRules.prevencion, 'A2': parseFloat(e.target.value) } })} step="0.1" /></div>
+                                <div className="space-y-1"><Label className="text-[10px] font-bold text-pink-600">Prev. A4/A5 (150%)</Label><Input className="h-8" type="number" value={calcRules.prevencion['A4']} onChange={e => setCalcRules({ ...calcRules, prevencion: { ...calcRules.prevencion, 'A4': parseFloat(e.target.value), 'A5': parseFloat(e.target.value) } })} step="0.1" /></div>
+                                <div className="space-y-1"><Label className="text-[10px] font-bold text-blue-600">Mult. AMPF (200%)</Label><Input className="h-8" type="number" value={calcRules.ampf.multiplier} onChange={e => setCalcRules({ ...calcRules, ampf: { multiplier: parseFloat(e.target.value) } })} step="0.1" /></div>
                             </div>
                         </div>
 
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Users size={14}/> Escalas de Vendedores (Absorbible)</h4>
+                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Users size={14} /> Escalas de Vendedores (Absorbible)</h4>
                             <div className="grid grid-cols-2 gap-6">
-                                <div className="p-3 bg-white rounded border border-slate-100"><Label className="text-xs font-bold mb-2 block">Turno 5hs (Mínimo)</Label><Input type="number" value={commissionRules.scales['5hs'].absorbable} onChange={e=>{const s={...commissionRules.scales}; s['5hs'].absorbable=parseInt(e.target.value); setCommissionRules({...commissionRules, scales:s})}}/></div>
-                                <div className="p-3 bg-white rounded border border-slate-100"><Label className="text-xs font-bold mb-2 block">Turno 8hs (Mínimo)</Label><Input type="number" value={commissionRules.scales['8hs'].absorbable} onChange={e=>{const s={...commissionRules.scales}; s['8hs'].absorbable=parseInt(e.target.value); setCommissionRules({...commissionRules, scales:s})}}/></div>
+                                <div className="p-3 bg-white rounded border border-slate-100"><Label className="text-xs font-bold mb-2 block">Turno 5hs (Mínimo)</Label><Input type="number" value={commissionRules.scales['5hs'].absorbable} onChange={e => { const s = { ...commissionRules.scales }; s['5hs'].absorbable = parseInt(e.target.value); setCommissionRules({ ...commissionRules, scales: s }) }} /></div>
+                                <div className="p-3 bg-white rounded border border-slate-100"><Label className="text-xs font-bold mb-2 block">Turno 8hs (Mínimo)</Label><Input type="number" value={commissionRules.scales['8hs'].absorbable} onChange={e => { const s = { ...commissionRules.scales }; s['8hs'].absorbable = parseInt(e.target.value); setCommissionRules({ ...commissionRules, scales: s }) }} /></div>
                             </div>
-                            <div className="mt-2 text-[10px] text-slate-500 flex items-center gap-1"><Info size={10}/> Planes especiales (AMPF, 500) NO suman al conteo, pero se pagan si se supera el mínimo.</div>
+                            <div className="mt-2 text-[10px] text-slate-500 flex items-center gap-1"><Info size={10} /> Planes especiales (AMPF, 500) NO suman al conteo, pero se pagan si se supera el mínimo.</div>
                         </div>
 
                         <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex items-center justify-between">
                             <div><h4 className="font-bold text-sm text-blue-800">Cálculo de Cartera</h4><p className="text-[10px] text-blue-600 mt-1">Fórmula: (Full Price - Descuento - Aportes) * Porcentaje</p></div>
-                            <div className="w-24"><Label className="text-[10px] font-bold text-blue-600 mb-1 block">% Comisión</Label><Input type="number" className="bg-white border-blue-200" value={calcRules.portfolioRate} onChange={e=>setCalcRules({...calcRules, portfolioRate: parseFloat(e.target.value)})} step="0.01"/></div>
+                            <div className="w-24"><Label className="text-[10px] font-bold text-blue-600 mb-1 block">% Comisión</Label><Input type="number" className="bg-white border-blue-200" value={calcRules.portfolioRate} onChange={e => setCalcRules({ ...calcRules, portfolioRate: parseFloat(e.target.value) })} step="0.01" /></div>
                         </div>
                     </div>
                     <DialogFooter><Button onClick={() => setShowConfig(false)}>Guardar Cambios</Button></DialogFooter>
@@ -833,15 +870,15 @@ export function OpsBilling() {
 
             {/* ✅ ALERTA DE DIFERIR (PRÓXIMO MES) */}
             <AlertDialog open={!!deferOpId} onOpenChange={() => setDeferOpId(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Mover al PRÓXIMO mes?</AlertDialogTitle><AlertDialogDescription>La venta pasará al período siguiente del actual.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmDefer}>Confirmar</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
-            
+
             {/* ✅ ALERTA DE RETROCESO (MES ANTERIOR) */}
             <AlertDialog open={!!retroOpId} onOpenChange={() => setRetroOpId(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Mover al mes ANTERIOR?</AlertDialogTitle><AlertDialogDescription>La venta pasará al período anterior del actual.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmRetro}>Confirmar</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
-            
-            <Dialog open={showHistory} onOpenChange={setShowHistory}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Historial Anual</DialogTitle></DialogHeader><div className="py-4"><Table><TableHeader><TableRow><TableHead>Mes</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-[50%]">Gráfico</TableHead></TableRow></TableHeader><TableBody>{historyData.map((data) => { const max=Math.max(...historyData.map(d=>d.total)); const w=max>0?(data.total/max)*100:0; return (<TableRow key={data.month}><TableCell className="capitalize font-bold">{formatMonth(data.month)}</TableCell><TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell><TableCell><div className="h-4 bg-slate-100 rounded-full w-full overflow-hidden"><div className="h-full bg-green-500" style={{width:`${w}%`}}></div></div></TableCell></TableRow>)})}</TableBody></Table></div></DialogContent></Dialog>
-            
-            <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc=calculate(op); return (<TableRow key={op.id} className={op.payStatus==='absorbed'||op.payStatus==='special_locked'?'opacity-50 bg-slate-50':''}><TableCell className="text-xs">{op.entryDate}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-right font-mono text-xs">{formatMoney(calc.val)}</TableCell><TableCell>{op.payStatus==='special_paid'&&<Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus==='special_locked'&&<Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus==='absorbed'&&<Badge variant="outline">Absorbida</Badge>}{op.payStatus==='paid'&&<Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>)})}</TableBody></Table></div></DialogContent></Dialog>
-            
-            <Dialog open={isAddingClient} onOpenChange={setIsAddingClient}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Agregar Manual</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-6 py-4"><div className="space-y-4"><div className="space-y-1"><Label>Nombre</Label><Input value={newClient.name} onChange={e=>setNewClient({...newClient, name:e.target.value})}/></div><div className="space-y-1"><Label>DNI</Label><Input value={newClient.dni} onChange={e=>setNewClient({...newClient, dni:e.target.value})}/></div></div><div className="space-y-4 bg-slate-50 p-4 rounded"><div className="space-y-1"><Label>Full Price</Label><Input type="number" value={newClient.fullPrice} onChange={e=>setNewClient({...newClient, fullPrice:e.target.value})}/></div><div className="grid grid-cols-2 gap-2"><div><Label>Aportes</Label><Input type="number" value={newClient.aportes} onChange={e=>setNewClient({...newClient, aportes:e.target.value})}/></div><div><Label>Desc.</Label><Input type="number" value={newClient.descuento} onChange={e=>setNewClient({...newClient, descuento:e.target.value})}/></div></div><div className="pt-2 flex justify-between text-sm font-bold text-blue-600"><span>Cartera Est:</span><span>${Math.round((parseFloat(newClient.fullPrice)-parseFloat(newClient.descuento)-parseFloat(newClient.aportes))*calcRules.portfolioRate).toLocaleString()}</span></div></div></div><DialogFooter><Button onClick={handleAddClient}>Guardar</Button></DialogFooter></DialogContent></Dialog>
+
+            <Dialog open={showHistory} onOpenChange={setShowHistory}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Historial Anual</DialogTitle></DialogHeader><div className="py-4"><Table><TableHeader><TableRow><TableHead>Mes</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-[50%]">Gráfico</TableHead></TableRow></TableHeader><TableBody>{historyData.map((data) => { const max = Math.max(...historyData.map(d => d.total)); const w = max > 0 ? (data.total / max) * 100 : 0; return (<TableRow key={data.month}><TableCell className="capitalize font-bold">{formatMonth(data.month)}</TableCell><TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell><TableCell><div className="h-4 bg-slate-100 rounded-full w-full overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${w}%` }}></div></div></TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
+
+            <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc = calculate(op); return (<TableRow key={op.id} className={op.payStatus === 'absorbed' || op.payStatus === 'special_locked' ? 'opacity-50 bg-slate-50' : ''}><TableCell className="text-xs">{op.entryDate}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-right font-mono text-xs">{formatMoney(calc.val)}</TableCell><TableCell>{op.payStatus === 'special_paid' && <Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus === 'special_locked' && <Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus === 'absorbed' && <Badge variant="outline">Absorbida</Badge>}{op.payStatus === 'paid' && <Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
+
+            <Dialog open={isAddingClient} onOpenChange={setIsAddingClient}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Agregar Manual</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-6 py-4"><div className="space-y-4"><div className="space-y-1"><Label>Nombre</Label><Input value={newClient.name} onChange={e => setNewClient({ ...newClient, name: e.target.value })} /></div><div className="space-y-1"><Label>DNI</Label><Input value={newClient.dni} onChange={e => setNewClient({ ...newClient, dni: e.target.value })} /></div></div><div className="space-y-4 bg-slate-50 p-4 rounded"><div className="space-y-1"><Label>Full Price</Label><Input type="number" value={newClient.fullPrice} onChange={e => setNewClient({ ...newClient, fullPrice: e.target.value })} /></div><div className="grid grid-cols-2 gap-2"><div><Label>Aportes</Label><Input type="number" value={newClient.aportes} onChange={e => setNewClient({ ...newClient, aportes: e.target.value })} /></div><div><Label>Desc.</Label><Input type="number" value={newClient.descuento} onChange={e => setNewClient({ ...newClient, descuento: e.target.value })} /></div></div><div className="pt-2 flex justify-between text-sm font-bold text-blue-600"><span>Cartera Est:</span><span>${Math.round((parseFloat(newClient.fullPrice) - parseFloat(newClient.descuento) - parseFloat(newClient.aportes)) * calcRules.portfolioRate).toLocaleString()}</span></div></div></div><DialogFooter><Button onClick={handleAddClient}>Guardar</Button></DialogFooter></DialogContent></Dialog>
         </div>
     )
 }

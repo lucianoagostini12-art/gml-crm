@@ -5,14 +5,14 @@ import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { Search, Bell, PartyPopper, X, UserPlus, Sparkles, Undo2, Lock, AlertTriangle, Filter, MessageCircle, Clock, Wallet, ShieldCheck, Calendar as CalendarIcon, Trash2, PlusCircle, Building2, User, RefreshCw, Send, Check, ArrowRightLeft, FileCheck, Megaphone, Store } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Label } from "@/components/ui/label" 
+import { Label } from "@/components/ui/label"
 
 // --- IMPORTAR UTILIDAD DE NOTIFICACIONES ---
 import { sendNativeNotification, requestNotificationPermission } from "@/utils/notifications"
@@ -25,14 +25,14 @@ import { OpsSidebar } from "./OpsSidebar"
 import { OpsDashboard } from "./OpsDashboard"
 import { OpsAgenda } from "./OpsAgenda"
 import { OpsMetrics } from "./OpsMetrics"
-import { OpsKanban } from "./OpsKanban" 
-import { OpsList } from "./OpsList"     
+import { OpsKanban } from "./OpsKanban"
+import { OpsList } from "./OpsList"
 import { OpsModal } from "./OpsModal"
 import { OpsChat } from "./OpsChat"
 import { OpsDatabase } from "./OpsDatabase"
 import { OpsSettings } from "./OpsSettings"
-import { OpsAnnouncements } from "./OpsAnnouncements" 
-import { OpsBilling } from "./OpsBilling" 
+import { OpsAnnouncements } from "./OpsAnnouncements"
+import { OpsBilling } from "./OpsBilling"
 import { OpsPostSale } from "./OpsPostSale"
 import { OpsHistory } from "./OpsHistory"
 
@@ -43,7 +43,7 @@ interface OpsManagerProps { role: 'admin_god' | 'admin_common' | 'ops', userName
 
 export function OpsManager({ role, userName }: OpsManagerProps) {
     const supabase = createClient()
-    const [sidebarOpen, setSidebarOpen] = useState(true) 
+    const [sidebarOpen, setSidebarOpen] = useState(true)
     const [isLoading, setIsLoading] = useState(false)
     const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -53,7 +53,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             audioRef.current = new Audio(ALARM_SOUND);
         }
     }, [])
-    
+
     // ✅ 1. INICIALIZACIÓN INTELIGENTE
     const [viewMode, setViewMode] = useState<'dashboard' | 'stage_list' | 'pool' | 'mine' | 'kanban' | 'agenda' | 'metrics' | 'chat' | 'database' | 'settings' | 'announcements' | 'billing' | 'post_sale' | 'history'>(() => {
         if (typeof window !== 'undefined') {
@@ -77,11 +77,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             window.history.replaceState(null, '', newUrl)
         }
     }, [viewMode])
-    
+
     const [currentStageFilter, setCurrentStageFilter] = useState<string | null>(null)
     // ✅ NUEVO: Filtro de Prepaga
     const [filterPrepaga, setFilterPrepaga] = useState<string>("all")
-    
+
     // --- ESTADO PRINCIPAL ---
     const [operations, setOperations] = useState<Operation[]>([])
     // ✅ Ref de operaciones para mantener orden estable al refrescar
@@ -91,11 +91,11 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     // ✅ Ref del contenedor de lista para preservar scroll
     const listScrollRef = useRef<HTMLDivElement | null>(null)
 
-    const [profiles, setProfiles] = useState<any[]>([]) 
-    
+    const [profiles, setProfiles] = useState<any[]>([])
+
     // --- CONFIGURACIÓN GLOBAL ---
-    const [globalConfig, setGlobalConfig] = useState<{prepagas: any[], subStates: any, origins: string[], postventa: any}>({
-        prepagas: [], 
+    const [globalConfig, setGlobalConfig] = useState<{ prepagas: any[], subStates: any, origins: string[], postventa: any }>({
+        prepagas: [],
         subStates: {},
         origins: ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro'],
         postventa: {
@@ -106,8 +106,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     // --- PERMISOS DINÁMICOS ---
     const [permissions, setPermissions] = useState({
-        accessMetrics: false, 
-        accessBilling: false, 
+        accessMetrics: false,
+        accessBilling: false,
         accessPostSale: true,
         editSettings: false,
         exportData: true,
@@ -122,38 +122,38 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     const seenRef = useRef<Record<string, { chat?: string | null; docs?: string | null }>>({})
     const visibleLeadIdsRef = useRef<Set<string>>(new Set())
     const [searchTerm, setSearchTerm] = useState("")
-    
+
     // --- FILTROS ---
     const [filterStatus, setFilterStatus] = useState<string>("all")
     const [filterSubState, setFilterSubState] = useState<string>("all")
     const [filterSeller, setFilterSeller] = useState<string>("all")
-    const [dateFilter, setDateFilter] = useState<{start: string, end: string}>({start: "", end: ""})
-    const [isFilterOpen, setIsFilterOpen] = useState(false) 
+    const [dateFilter, setDateFilter] = useState<{ start: string, end: string }>({ start: "", end: "" })
+    const [isFilterOpen, setIsFilterOpen] = useState(false)
 
     const [generalTasks, setGeneralTasks] = useState<Reminder[]>([])
 
     // MODALES & NOTIFICACIONES
     const [assigningOp, setAssigningOp] = useState<Operation | null>(null)
-    const [confirmingAdvance, setConfirmingAdvance] = useState<{op: Operation, nextStage: OpStatus} | null>(null)
-    const [confirmingBack, setConfirmingBack] = useState<{op: Operation, prevStage: OpStatus} | null>(null)
+    const [confirmingAdvance, setConfirmingAdvance] = useState<{ op: Operation, nextStage: OpStatus } | null>(null)
+    const [confirmingBack, setConfirmingBack] = useState<{ op: Operation, prevStage: OpStatus } | null>(null)
     const [confirmingRelease, setConfirmingRelease] = useState<Operation | null>(null)
-    const [confirmingManualStatus, setConfirmingManualStatus] = useState<{op: Operation, newStatus: OpStatus} | null>(null)
+    const [confirmingManualStatus, setConfirmingManualStatus] = useState<{ op: Operation, newStatus: OpStatus } | null>(null)
     const [showCelebration, setShowCelebration] = useState(false)
-    const [toast, setToast] = useState<{msg: string, type: 'success'|'error'|'warning'|'info'} | null>(null)
+    const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
 
     // --- CARGA MANUAL ---
     const [isManualLoadOpen, setIsManualLoadOpen] = useState(false)
     const [manualLoadData, setManualLoadData] = useState({
-        clientName: "", 
-        dni: "", 
-        prepaga: "", 
-        plan: "", 
-        source: "", 
+        clientName: "",
+        dni: "",
+        prepaga: "",
+        plan: "",
+        source: "",
         specificSeller: "",
-        type: "alta" 
+        type: "alta"
     })
 
-    
+
     // --- 🕒 FORMATEO FECHA/HORA (Siempre Argentina) ---
     const formatARDateTime = (iso: string) => {
         try {
@@ -173,25 +173,25 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
         }
     }
 
-// --- NOTIFICACIONES ---
+    // --- NOTIFICACIONES ---
     const [notifications, setNotifications] = useState<any[]>([])
     const [newSaleNotif, setNewSaleNotif] = useState<any>(null)
-    const [isBellOpen, setIsBellOpen] = useState(false) 
+    const [isBellOpen, setIsBellOpen] = useState(false)
     const unreadCount = notifications.filter(n => !n.read).length
 
     // --- LOGOUT ---
     const handleLogout = async () => {
         await supabase.auth.signOut()
-        window.location.href = "/" 
+        window.location.href = "/"
     }
 
     // --- 🔔 HELPER DE NOTIFICACIONES (FRONTEND) ---
     // Esta función solo se encarga de MOSTRAR (Sonido + Visual), pero NO guarda.
     // Quien la llama es el LISTENER de la base de datos.
-    const notifyOPS = (title: string, body: string, type: 'success'|'info'|'warning' = 'info') => {
+    const notifyOPS = (title: string, body: string, type: 'success' | 'info' | 'warning' = 'info') => {
         // 1. Toast Visual
         showToast(title + ": " + body, type);
-        
+
         // 2. Notificación Nativa del Navegador
         // 🛑 IMPORTANT: Pasamos 'false' como 3er argumento para que NO use el sonido nativo
         // y así usamos nuestro propio ALARM_SOUND sin conflictos.
@@ -205,50 +205,50 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     }
 
     // --- 💾 HELPER DE NOTIFICACIONES (BACKEND) ---
-// ⚠️ Importante: OpsManager ya NO debe generar notificaciones de negocio (notas/chat/estados/ventas).
-// Eso se resuelve por SQL (triggers) y OpsManager solo escucha la tabla `notifications` para sonar/mostrar.
-// Esta función GUARDA en DB. Al guardar, el listener lo detecta y llama a notifyOPS.
-// ¡Ciclo cerrado!
-// Nota: en DB usamos:
-// - type = nivel visual (info/success/warning)
-// - event_type = tipo funcional (venta_ingresada / archivo_subido / chat_venta / cambio_estado / opschat)
-const inferEventType = (title: string, body: string) => {
-    const t = (title || "").toLowerCase()
-    const b = (body || "").toLowerCase()
+    // ⚠️ Importante: OpsManager ya NO debe generar notificaciones de negocio (notas/chat/estados/ventas).
+    // Eso se resuelve por SQL (triggers) y OpsManager solo escucha la tabla `notifications` para sonar/mostrar.
+    // Esta función GUARDA en DB. Al guardar, el listener lo detecta y llama a notifyOPS.
+    // ¡Ciclo cerrado!
+    // Nota: en DB usamos:
+    // - type = nivel visual (info/success/warning)
+    // - event_type = tipo funcional (venta_ingresada / archivo_subido / chat_venta / cambio_estado / opschat)
+    const inferEventType = (title: string, body: string) => {
+        const t = (title || "").toLowerCase()
+        const b = (body || "").toLowerCase()
 
-    if (t.includes("venta nueva") || t.includes("venta registrada") || t.includes("nueva venta")) return "venta_ingresada"
-    if (t.includes("movimiento de estado") || t.includes("cambio de estado") || t.includes("stage") || t.includes("estado")) return "cambio_estado"
-    if (t.includes("archivo") || b.includes("archivo") || b.includes("subió un archivo") || b.includes("subio un archivo")) return "archivo_subido"
-    if (t.includes("opschat") || b.includes("opschat")) return "opschat"
-    if (t.includes("nuevo mensaje") || t.includes("nueva nota") || b.includes("escrib")) return "chat_venta"
+        if (t.includes("venta nueva") || t.includes("venta registrada") || t.includes("nueva venta")) return "venta_ingresada"
+        if (t.includes("movimiento de estado") || t.includes("cambio de estado") || t.includes("stage") || t.includes("estado")) return "cambio_estado"
+        if (t.includes("archivo") || b.includes("archivo") || b.includes("subió un archivo") || b.includes("subio un archivo")) return "archivo_subido"
+        if (t.includes("opschat") || b.includes("opschat")) return "opschat"
+        if (t.includes("nuevo mensaje") || t.includes("nueva nota") || b.includes("escrib")) return "chat_venta"
 
-    return "generic"
-}
+        return "generic"
+    }
 
-const dispatchNotification = async (
-    title: string,
-    body: string,
-    target: string,
-    level: 'info' | 'success' | 'warning' = 'info',
-    leadId?: string
-) => {
-    const event_type = inferEventType(title, body)
+    const dispatchNotification = async (
+        title: string,
+        body: string,
+        target: string,
+        level: 'info' | 'success' | 'warning' = 'info',
+        leadId?: string
+    ) => {
+        const event_type = inferEventType(title, body)
 
-    await supabase.from('notifications').insert({
-        user_name: target,
-        title,
-        body,
-        type: level,
-        event_type,
-        read: false,
-        lead_id: leadId,
-        created_at: new Date().toISOString()
-    })
-}
+        await supabase.from('notifications').insert({
+            user_name: target,
+            title,
+            body,
+            type: level,
+            event_type,
+            read: false,
+            lead_id: leadId,
+            created_at: new Date().toISOString()
+        })
+    }
 
-const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'success') => { 
-        setToast({ msg, type }); 
-        setTimeout(() => setToast(null), 5000) 
+    const showToast = (msg: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 5000)
     }
 
     // --- CARGA DE DATOS ---
@@ -258,7 +258,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
     }
 
     const fetchPermissions = async () => {
-        if (role === 'admin_god') return 
+        if (role === 'admin_god') return
         const { data } = await supabase.from('system_config').select('value').eq('key', 'ops_permissions').single()
         if (data) setPermissions(data.value)
     }
@@ -270,10 +270,10 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
             const s = data.find(c => c.key === 'workflow_substates')?.value || {}
             const o = data.find(c => c.key === 'sales_origins')?.value || ['Google Ads', 'Meta Ads', 'Instagram', 'Facebook', 'Referido', 'Base de Datos', 'Oficina', 'Vendedor', 'Otro']
             const pv = data.find(c => c.key === 'postventa_config')?.value
-            
-            setGlobalConfig({ 
-                prepagas: p, 
-                subStates: s, 
+
+            setGlobalConfig({
+                prepagas: p,
+                subStates: s,
                 origins: o,
                 postventa: pv || {
                     financial_status: ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO'],
@@ -303,10 +303,16 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
     }
 
     const markAllRead = async () => {
-        const ids = notifications.map(n => n.id)
+        // Filtrar IDs reales (excluir temp-* si los hubiera)
+        const realIds = notifications
+            .map(n => n.id)
+            .filter((id: any) => id && !String(id).startsWith('temp-'))
+
         setNotifications([]) // Limpiar visualmente
-        if (ids.length > 0) {
-            await supabase.from('notifications').update({ read: true }).in('id', ids)
+
+        if (realIds.length > 0) {
+            const { error } = await supabase.from('notifications').update({ read: true }).in('id', realIds)
+            if (error) console.error("Error marcando notificaciones como leídas:", error)
         }
         showToast("Notificaciones limpiadas", 'success');
     }
@@ -316,11 +322,11 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
             setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, read: true } : item))
             await supabase.from('notifications').update({ read: true }).eq('id', n.id)
         }
-        
+
         if (n.lead_id) {
             // Intentar encontrar la operación en la memoria local
             let targetOp = operations.find(o => o.id === n.lead_id)
-            
+
             // Si no está (ej: recién vendida y no refrescada), buscarla en DB
             if (!targetOp) {
                 const { data } = await supabase.from('leads').select('*').eq('id', n.lead_id).single()
@@ -347,9 +353,9 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
 
         // ✅ Orden estable: mantenemos el orden previo aunque cambie last_update
         const prevOrderIds = operationsRef.current.map(o => o.id)
-        
+
         const opsStatuses = [
-            'ingresado', 'precarga', 'medicas', 'legajo', 'demoras', 
+            'ingresado', 'precarga', 'medicas', 'legajo', 'demoras',
             'cumplidas', 'rechazado', 'vendido'
         ];
 
@@ -376,7 +382,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                         safeChat = rawComments.map((c: any) => ({
                             message: c.text || "",
                             user: c.author || "Sistema",
-                            time: c.date ? new Date(c.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "-",
+                            time: c.date ? new Date(c.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "-",
                             isMe: c.author === userName
                         }));
                     }
@@ -391,17 +397,17 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                     dni: op.dni || "S/D",
                     plan: op.plan || op.quoted_plan || "-",
                     prepaga: op.prepaga || op.quoted_prepaga || "Sin Asignar",
-                    status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus, 
+                    status: (op.status === 'vendido' ? 'ingresado' : op.status) as OpStatus,
                     subState: op.sub_state || "Pendiente",
                     seller: op.agent_name || "Desconocido",
-                    operator: op.operator, 
+                    operator: op.operator,
                     entryDate: new Date(op.created_at).toISOString().split('T')[0],
                     created_at: op.created_at,
                     lastUpdate: op.last_update ? new Date(op.last_update).toLocaleDateString() : "Hoy",
                     type: op.type || "alta",
                     phone: op.phone || "",
                     chat: safeChat,
-                    adminNotes: op.admin_notes || [], 
+                    adminNotes: op.admin_notes || [],
                     reminders: (op.reminders || []).map((r: any) => ({
                         id: r.id, text: r.text, date: r.date, completed: r.completed
                     })),
@@ -493,9 +499,9 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                 .in('lead_id', leadIds)
 
             const seenMap: Record<string, { chat?: string | null; docs?: string | null }> = {}
-            ;(seenRows || []).forEach((r: any) => {
-                seenMap[r.lead_id] = { chat: r.last_seen_chat_at, docs: r.last_seen_docs_at }
-            })
+                ; (seenRows || []).forEach((r: any) => {
+                    seenMap[r.lead_id] = { chat: r.last_seen_chat_at, docs: r.last_seen_docs_at }
+                })
             seenRef.current = seenMap
 
             // 2) Traer mensajes y docs (totales son chicos en tu DB, sirve para conteo exacto)
@@ -507,21 +513,21 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
             const counts: Record<string, { chat: number; docs: number }> = {}
             for (const id of leadIds) counts[id] = { chat: 0, docs: 0 }
 
-            ;(msgs || []).forEach((m: any) => {
-                const lid = m.lead_id
-                if (!lid || !counts[lid]) return
-                const seenAt = seenMap[lid]?.chat ? new Date(seenMap[lid]!.chat as string).getTime() : 0
-                const msgAt = m.created_at ? new Date(m.created_at).getTime() : 0
-                if (msgAt > seenAt) counts[lid].chat += 1
-            })
+                ; (msgs || []).forEach((m: any) => {
+                    const lid = m.lead_id
+                    if (!lid || !counts[lid]) return
+                    const seenAt = seenMap[lid]?.chat ? new Date(seenMap[lid]!.chat as string).getTime() : 0
+                    const msgAt = m.created_at ? new Date(m.created_at).getTime() : 0
+                    if (msgAt > seenAt) counts[lid].chat += 1
+                })
 
-            ;(docs || []).forEach((d: any) => {
-                const lid = d.lead_id
-                if (!lid || !counts[lid]) return
-                const seenAt = seenMap[lid]?.docs ? new Date(seenMap[lid]!.docs as string).getTime() : 0
-                const docAt = d.uploaded_at ? new Date(d.uploaded_at).getTime() : 0
-                if (docAt > seenAt) counts[lid].docs += 1
-            })
+                ; (docs || []).forEach((d: any) => {
+                    const lid = d.lead_id
+                    if (!lid || !counts[lid]) return
+                    const seenAt = seenMap[lid]?.docs ? new Date(seenMap[lid]!.docs as string).getTime() : 0
+                    const docAt = d.uploaded_at ? new Date(d.uploaded_at).getTime() : 0
+                    if (docAt > seenAt) counts[lid].docs += 1
+                })
 
             setUnreadByLead(counts)
         } catch (e) {
@@ -547,10 +553,10 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
 
         fetchProfiles()
         fetchPermissions()
-        fetchSystemConfig() 
+        fetchSystemConfig()
         fetchOperations()
-        fetchNotifications() 
-        
+        fetchNotifications()
+
         // --- ⚡ EL OÍDO BIÓNICO DE OPS ⚡ ---
         const channel = supabase.channel('ops-realtime-manager-global')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
@@ -575,7 +581,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                 }
 
                 // Refrescar lista visual
-                fetchOperations() 
+                fetchOperations()
             })
             // Escuchar tabla notifications para alertas directas
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
@@ -631,7 +637,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, () => {
                 fetchPermissions()
-                fetchSystemConfig() 
+                fetchSystemConfig()
             })
             .subscribe()
 
@@ -640,7 +646,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
 
 
     const uniqueSellers = useMemo(() => Array.from(new Set(operations.map(o => o.seller).filter(Boolean))), [operations])
-    
+
     const filteredOps = operations.filter(op => {
         if (searchTerm) {
             const term = searchTerm.toLowerCase()
@@ -652,18 +658,18 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         }
         if (viewMode === 'dashboard' && currentStageFilter && op.status !== currentStageFilter) return false
         if (viewMode === 'stage_list' && currentStageFilter && op.status !== currentStageFilter) return false
-        
+
         if (viewMode === 'mine') {
             if (op.operator !== userName) return false
-            if (['cumplidas', 'rechazado'].includes(op.status)) return false 
+            if (['cumplidas', 'rechazado'].includes(op.status)) return false
         }
 
-        if (viewMode === 'pool' && (op.operator || ['cumplidas','rechazado'].includes(op.status))) return false
-        
+        if (viewMode === 'pool' && (op.operator || ['cumplidas', 'rechazado'].includes(op.status))) return false
+
         if (filterStatus !== 'all' && op.status !== filterStatus) return false
         if (filterSubState !== 'all' && op.subState !== filterSubState) return false
         if (filterSeller !== 'all' && op.seller !== filterSeller) return false
-        
+
         // ✅ FILTRO DE PREPAGA (Conectado al Dashboard)
         if (filterPrepaga !== 'all' && op.prepaga !== filterPrepaga) return false
 
@@ -687,14 +693,14 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         if (updates.sub_state !== undefined) uiUpdates.subState = updates.sub_state
         if (updates.agent_name !== undefined) uiUpdates.seller = updates.agent_name
         if (updates.name !== undefined) uiUpdates.clientName = updates.name
-        
+
         setOperations(prev => prev.map(o => o.id === id ? { ...o, ...uiUpdates } : o))
-        
+
         const dbUpdates: any = {}
         const isDiff = (valA: any, valB: any) => JSON.stringify(valA) !== JSON.stringify(valB)
 
         if (uiUpdates.status && uiUpdates.status !== currentOp.status) dbUpdates.status = uiUpdates.status
-        
+
         const newSub = uiUpdates.subState !== undefined ? uiUpdates.subState : uiUpdates.sub_state
         if (newSub !== undefined && newSub !== currentOp.subState) dbUpdates.sub_state = newSub
 
@@ -720,15 +726,15 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         if (uiUpdates.hijos !== undefined && isDiff(uiUpdates.hijos, currentOp.hijos)) dbUpdates.family_members = uiUpdates.hijos
         if (uiUpdates.adminNotes !== undefined && isDiff(uiUpdates.adminNotes, currentOp.adminNotes)) dbUpdates.admin_notes = uiUpdates.adminNotes
 
-        if (uiUpdates.operator !== undefined && uiUpdates.operator !== currentOp.operator) dbUpdates.operator = uiUpdates.operator 
+        if (uiUpdates.operator !== undefined && uiUpdates.operator !== currentOp.operator) dbUpdates.operator = uiUpdates.operator
         if (uiUpdates.dni !== undefined && uiUpdates.dni !== currentOp.dni && uiUpdates.dni !== "S/D") dbUpdates.dni = uiUpdates.dni
         if (uiUpdates.email !== undefined && uiUpdates.email !== currentOp.email) dbUpdates.email = uiUpdates.email
         if (uiUpdates.phone !== undefined && uiUpdates.phone !== currentOp.phone) dbUpdates.phone = uiUpdates.phone
-        
+
         if (uiUpdates.address_street !== undefined && uiUpdates.address_street !== currentOp.address_street) dbUpdates.address_street = uiUpdates.address_street
         if (uiUpdates.address_city !== undefined && uiUpdates.address_city !== currentOp.address_city) dbUpdates.address_city = uiUpdates.address_city
         if (uiUpdates.address_zip !== undefined && uiUpdates.address_zip !== currentOp.address_zip) dbUpdates.address_zip = uiUpdates.address_zip
-        
+
         if (uiUpdates.fullPrice !== undefined && uiUpdates.fullPrice !== currentOp.fullPrice) dbUpdates.full_price = uiUpdates.fullPrice
         if (uiUpdates.aportes !== undefined && uiUpdates.aportes !== currentOp.aportes) dbUpdates.aportes = uiUpdates.aportes
         if (uiUpdates.descuento !== undefined && uiUpdates.descuento !== currentOp.descuento) dbUpdates.descuento = uiUpdates.descuento
@@ -741,48 +747,48 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         dbUpdates.last_update = new Date().toISOString()
 
         const { error } = await supabase.from('leads').update(dbUpdates).eq('id', id)
-        
+
         if (error) {
             console.error("Error actualizando:", error)
             showToast("Error al guardar cambios en DB", "error")
         }
     }
 
-    const updateOp = (newOp: Operation) => { 
+    const updateOp = (newOp: Operation) => {
         updateOpInDb(newOp.id, newOp)
-        if (selectedOp && selectedOp.id === newOp.id) setSelectedOp(newOp); 
+        if (selectedOp && selectedOp.id === newOp.id) setSelectedOp(newOp);
     }
 
     const handleSendChat = async (text: string) => {
         if (!selectedOp) return
         const newMsg = { text, author: userName, date: new Date().toISOString(), role: 'ops' }
-        
+
         const { data: currentData } = await supabase.from('leads').select('comments').eq('id', selectedOp.id).single()
-        
+
         let existingComments = currentData?.comments;
         if (typeof existingComments === 'string') {
-             try { existingComments = JSON.parse(existingComments) } catch(e) { existingComments = [] }
+            try { existingComments = JSON.parse(existingComments) } catch (e) { existingComments = [] }
         }
         if (!Array.isArray(existingComments)) existingComments = [];
 
         const updatedComments = [...existingComments, newMsg]
         const { error } = await supabase.from('leads').update({ comments: updatedComments, last_update: new Date().toISOString() }).eq('id', selectedOp.id)
-        
+
         if (!error) {
-            const uiMsg: any = { 
+            const uiMsg: any = {
                 message: text,
                 text: text,
-                user: userName, 
-                time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
-                isMe: true 
+                user: userName,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isMe: true
             }
-            setSelectedOp(prev => prev ? {...prev, chat: [...prev.chat, uiMsg]} : null)
+            setSelectedOp(prev => prev ? { ...prev, chat: [...prev.chat, uiMsg] } : null)
         } else {
             showToast("Error al enviar mensaje", "error")
         }
     }
 
-    const handleAddReminder = async (id: string, date: string, time: string, note: string, type: 'call'|'doc'|'payment') => {
+    const handleAddReminder = async (id: string, date: string, time: string, note: string, type: 'call' | 'doc' | 'payment') => {
         const op = operations.find(o => o.id === id)
         if (!op) return
         const newReminder = { id: Date.now(), text: note, date: `${date} ${time}`, type, completed: false }
@@ -791,60 +797,60 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         showToast("Recordatorio guardado", "success")
     }
 
-    const handleCardClick = (op: Operation) => { 
-        if (op.status === 'ingresado' && !op.operator && (role === 'admin_god' || permissions.assignCases)) { 
-            setAssigningOp(op) 
-        } else { 
-            setSelectedOp(op) 
-        } 
+    const handleCardClick = (op: Operation) => {
+        if (op.status === 'ingresado' && !op.operator && (role === 'admin_god' || permissions.assignCases)) {
+            setAssigningOp(op)
+        } else {
+            setSelectedOp(op)
+        }
     }
 
     // --- ACCIONES ---
-    const confirmAssignment = async (operator: string) => { 
-        if (!assigningOp) return; 
+    const confirmAssignment = async (operator: string) => {
+        if (!assigningOp) return;
         await updateOpInDb(assigningOp.id, { operator })
         const updatedOp = { ...assigningOp, operator: operator }
-        setAssigningOp(null); 
-        setSelectedOp(updatedOp); 
-        showToast(`👍 Asignado a ${operator} y abierto.`, 'success'); 
+        setAssigningOp(null);
+        setSelectedOp(updatedOp);
+        showToast(`👍 Asignado a ${operator} y abierto.`, 'success');
     }
 
-    const requestAdvance = () => { if(!selectedOp) return; const idx = FLOW_STATES.indexOf(selectedOp.status); if(idx !== -1 && idx < FLOW_STATES.length - 1) setConfirmingAdvance({ op: selectedOp, nextStage: FLOW_STATES[idx+1] }); }
-    
-    const confirmAdvanceAction = async () => { 
-        if(!confirmingAdvance) return; 
+    const requestAdvance = () => { if (!selectedOp) return; const idx = FLOW_STATES.indexOf(selectedOp.status); if (idx !== -1 && idx < FLOW_STATES.length - 1) setConfirmingAdvance({ op: selectedOp, nextStage: FLOW_STATES[idx + 1] }); }
+
+    const confirmAdvanceAction = async () => {
+        if (!confirmingAdvance) return;
         await updateOpInDb(confirmingAdvance.op.id, { status: confirmingAdvance.nextStage })
-        if (confirmingAdvance.nextStage === 'cumplidas') setShowCelebration(true); 
-        else showToast(`✅ Avanzó de etapa`, 'success'); 
-        setConfirmingAdvance(null); 
+        if (confirmingAdvance.nextStage === 'cumplidas') setShowCelebration(true);
+        else showToast(`✅ Avanzó de etapa`, 'success');
+        setConfirmingAdvance(null);
     }
 
-    const requestBack = () => { if(!selectedOp) return; const idx = FLOW_STATES.indexOf(selectedOp.status); if(idx > 0) setConfirmingBack({ op: selectedOp, prevStage: FLOW_STATES[idx-1] }); }
-    
-    const confirmBackAction = async () => { 
-        if(!confirmingBack) return; 
+    const requestBack = () => { if (!selectedOp) return; const idx = FLOW_STATES.indexOf(selectedOp.status); if (idx > 0) setConfirmingBack({ op: selectedOp, prevStage: FLOW_STATES[idx - 1] }); }
+
+    const confirmBackAction = async () => {
+        if (!confirmingBack) return;
         await updateOpInDb(confirmingBack.op.id, { status: confirmingBack.prevStage })
-        showToast(`⏪ Retrocedió`, 'success'); 
-        setConfirmingBack(null); 
+        showToast(`⏪ Retrocedió`, 'success');
+        setConfirmingBack(null);
     }
 
-    const handleStatusChange = (id: string, newStatus: OpStatus) => { const op = operations.find(o => o.id === id); if(op && op.status !== newStatus) setConfirmingManualStatus({ op, newStatus }); }
-    
-    const confirmManualStatusChange = async () => { 
-        if(!confirmingManualStatus) return; 
+    const handleStatusChange = (id: string, newStatus: OpStatus) => { const op = operations.find(o => o.id === id); if (op && op.status !== newStatus) setConfirmingManualStatus({ op, newStatus }); }
+
+    const confirmManualStatusChange = async () => {
+        if (!confirmingManualStatus) return;
         await updateOpInDb(confirmingManualStatus.op.id, { status: confirmingManualStatus.newStatus })
-        setConfirmingManualStatus(null); 
-        showToast(`Estado cambiado`); 
+        setConfirmingManualStatus(null);
+        showToast(`Estado cambiado`);
     }
 
-    const handleRelease = () => { if(selectedOp) setConfirmingRelease(selectedOp) }
-    
-    const confirmReleaseAction = async () => { 
-        if(!confirmingRelease) return; 
-        await updateOpInDb(confirmingRelease.id, { operator: null }) 
-        setSelectedOp(null); 
-        setConfirmingRelease(null); 
-        showToast("🔓 Caso liberado", 'success'); 
+    const handleRelease = () => { if (selectedOp) setConfirmingRelease(selectedOp) }
+
+    const confirmReleaseAction = async () => {
+        if (!confirmingRelease) return;
+        await updateOpInDb(confirmingRelease.id, { operator: null })
+        setSelectedOp(null);
+        setConfirmingRelease(null);
+        showToast("🔓 Caso liberado", 'success');
     }
 
     // --- CARGA MANUAL ---
@@ -852,24 +858,24 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
         if (!manualLoadData.clientName || !manualLoadData.dni) return;
 
         const { error } = await supabase.from('leads').insert({
-            name: manualLoadData.clientName, 
-            dni: manualLoadData.dni, 
-            plan: manualLoadData.plan || "Base", 
+            name: manualLoadData.clientName,
+            dni: manualLoadData.dni,
+            plan: manualLoadData.plan || "Base",
             prepaga: manualLoadData.prepaga || "Generica",
-            status: "ingresado", 
-            sub_state: "Carga Manual", 
-            agent_name: manualLoadData.specificSeller || "Admin", 
-            created_at: new Date().toISOString(), 
-            last_update: new Date().toISOString(), 
-            type: manualLoadData.type, 
-            source: manualLoadData.source || "Manual Admin" 
+            status: "ingresado",
+            sub_state: "Carga Manual",
+            agent_name: manualLoadData.specificSeller || "Admin",
+            created_at: new Date().toISOString(),
+            last_update: new Date().toISOString(),
+            type: manualLoadData.type,
+            source: manualLoadData.source || "Manual Admin"
         })
 
         if (!error) {
             setIsManualLoadOpen(false)
-            setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "", specificSeller: "", type: "alta" }) 
+            setManualLoadData({ clientName: "", dni: "", prepaga: "", plan: "", source: "", specificSeller: "", type: "alta" })
             showToast("✅ Operación guardada en Base de Datos", 'success')
-            fetchOperations() 
+            fetchOperations()
         } else {
             showToast("Error al guardar", "error")
         }
@@ -879,7 +885,7 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
     const sellerUsers = profiles.filter(p => p.role === 'seller')
 
     const getSearchPlaceholder = () => {
-        switch(viewMode) {
+        switch (viewMode) {
             case 'database': return "Buscador Histórico (DNI, Nombre, Vendedor)..."
             case 'pool': return "Buscar en Pileta..."
             case 'mine': return "Buscar en mis casos..."
@@ -893,34 +899,34 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
 
             {/* NOTIFICACIÓN VENTA FLOTANTE */}
             {newSaleNotif && (
-                <div className="fixed bottom-8 right-8 z-[99999] animate-in slide-in-from-right-10 fade-in duration-500 cursor-pointer hover:translate-y-[-4px] transition-all" onClick={() => {setViewMode('pool'); setNewSaleNotif(null)}}>
-                     <div className="bg-[#0f172a] border-l-4 border-l-green-500 border-t border-r border-b border-slate-700 text-white p-0 rounded-lg shadow-2xl w-[350px] relative overflow-hidden group">
-                         <div className="bg-slate-800/50 p-3 flex justify-between items-center border-b border-slate-700">
-                             <div className="flex items-center gap-2"><Badge className="bg-green-500 text-white border-0 text-[10px] uppercase font-black tracking-widest hover:bg-green-600">Nueva Venta</Badge><span className="text-[10px] text-slate-400">Hace instantes</span></div>
-                             <button className="text-slate-400 hover:text-white" onClick={(e) => {e.stopPropagation(); setNewSaleNotif(null)}}><X size={14}/></button>
-                         </div>
-                         <div className="p-4 flex items-center gap-4">
-                             <div className="h-12 w-12 rounded-full bg-green-900/40 flex items-center justify-center border border-green-500/30 text-green-400 shrink-0"><Wallet size={24}/></div>
-                             <div><h4 className="text-lg font-black text-white leading-tight mb-1">{newSaleNotif.client}</h4><div className="flex flex-col gap-0.5"><span className="text-xs font-bold text-green-400">{newSaleNotif.plan}</span><span className="text-[10px] text-slate-400 flex items-center gap-1"><UserPlus size={10}/> Vendido por: {newSaleNotif.seller}</span></div></div>
-                         </div>
-                     </div>
+                <div className="fixed bottom-8 right-8 z-[99999] animate-in slide-in-from-right-10 fade-in duration-500 cursor-pointer hover:translate-y-[-4px] transition-all" onClick={() => { setViewMode('pool'); setNewSaleNotif(null) }}>
+                    <div className="bg-[#0f172a] border-l-4 border-l-green-500 border-t border-r border-b border-slate-700 text-white p-0 rounded-lg shadow-2xl w-[350px] relative overflow-hidden group">
+                        <div className="bg-slate-800/50 p-3 flex justify-between items-center border-b border-slate-700">
+                            <div className="flex items-center gap-2"><Badge className="bg-green-500 text-white border-0 text-[10px] uppercase font-black tracking-widest hover:bg-green-600">Nueva Venta</Badge><span className="text-[10px] text-slate-400">Hace instantes</span></div>
+                            <button className="text-slate-400 hover:text-white" onClick={(e) => { e.stopPropagation(); setNewSaleNotif(null) }}><X size={14} /></button>
+                        </div>
+                        <div className="p-4 flex items-center gap-4">
+                            <div className="h-12 w-12 rounded-full bg-green-900/40 flex items-center justify-center border border-green-500/30 text-green-400 shrink-0"><Wallet size={24} /></div>
+                            <div><h4 className="text-lg font-black text-white leading-tight mb-1">{newSaleNotif.client}</h4><div className="flex flex-col gap-0.5"><span className="text-xs font-bold text-green-400">{newSaleNotif.plan}</span><span className="text-[10px] text-slate-400 flex items-center gap-1"><UserPlus size={10} /> Vendido por: {newSaleNotif.seller}</span></div></div>
+                        </div>
+                    </div>
                 </div>
             )}
 
-            <OpsSidebar 
-                open={sidebarOpen} 
-                setOpen={setSidebarOpen} 
-                viewMode={viewMode} 
-                setViewMode={setViewMode} 
-                role={role} 
-                currentStage={currentStageFilter} 
+            <OpsSidebar
+                open={sidebarOpen}
+                setOpen={setSidebarOpen}
+                viewMode={viewMode}
+                setViewMode={setViewMode}
+                role={role}
+                currentStage={currentStageFilter}
                 setStage={setCurrentStageFilter}
                 permissions={permissions}
-                currentUser={{ 
-                    name: userName, 
-                    avatar: profiles.find(p => p.full_name === userName)?.avatar_url || "" 
-                }} 
-                onLogout={handleLogout} 
+                currentUser={{
+                    name: userName,
+                    avatar: profiles.find(p => p.full_name === userName)?.avatar_url || ""
+                }}
+                onLogout={handleLogout}
             />
 
             <main className="flex-1 flex flex-col min-w-0 bg-slate-100 relative text-slate-900 h-full">
@@ -928,19 +934,19 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                     <div className="flex items-center gap-8">
                         <h2 className="text-lg font-bold text-slate-700 capitalize min-w-[100px] flex items-center gap-2">
                             {viewMode.replace('_', ' ')}
-                             <Button variant="ghost" size="icon" onClick={fetchOperations} title="Recargar"><RefreshCw className={`h-4 w-4 text-slate-400 ${isLoading ? 'animate-spin' : ''}`}/></Button>
+                            <Button variant="ghost" size="icon" onClick={fetchOperations} title="Recargar"><RefreshCw className={`h-4 w-4 text-slate-400 ${isLoading ? 'animate-spin' : ''}`} /></Button>
                         </h2>
                         <div className="relative group w-[380px]">
-                            <div className="absolute left-0 top-0 bottom-0 w-10 flex items-center justify-center pointer-events-none z-10"><Search className="h-5 w-5 text-slate-400/80" strokeWidth={2}/></div>
-                            <Input 
-                                className="pl-10 w-full bg-slate-50 border-slate-200 h-9 focus:bg-white transition-all font-medium" 
-                                placeholder={getSearchPlaceholder()} 
-                                value={searchTerm} 
-                                onChange={e=>setSearchTerm(e.target.value)}
+                            <div className="absolute left-0 top-0 bottom-0 w-10 flex items-center justify-center pointer-events-none z-10"><Search className="h-5 w-5 text-slate-400/80" strokeWidth={2} /></div>
+                            <Input
+                                className="pl-10 w-full bg-slate-50 border-slate-200 h-9 focus:bg-white transition-all font-medium"
+                                placeholder={getSearchPlaceholder()}
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
                             />
                         </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-3">
                         {/* 🔔 CAMPANITA REALTIME */}
                         <Popover open={isBellOpen} onOpenChange={setIsBellOpen}>
@@ -956,11 +962,11 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                                     {unreadCount > 0 && <Button variant="ghost" size="sm" className="h-6 text-[10px] text-blue-600 hover:text-red-500" onClick={markAllRead}>Limpiar Todo</Button>}
                                 </div>
                                 <div className="max-h-[300px] overflow-y-auto">
-                                    {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> : 
+                                    {notifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Sin novedades.</div> :
                                         notifications.map((n) => (
-                                            <div 
-                                                key={n.id} 
-                                                onClick={() => handleNotificationClick(n)} 
+                                            <div
+                                                key={n.id}
+                                                onClick={() => handleNotificationClick(n)}
                                                 className={`p-3 border-b hover:bg-slate-50 transition-colors cursor-pointer ${!n.read ? 'bg-blue-50/50' : ''}`}
                                             >
                                                 <div className="flex items-start gap-3">
@@ -985,87 +991,87 @@ const showToast = (msg: string, type: 'success'|'error'|'warning'|'info' = 'succ
                 </header>
 
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                   {viewMode === 'kanban' ? (
+                    {viewMode === 'kanban' ? (
                         <div className="w-full h-full bg-slate-100 p-4 overflow-hidden">
-                            <OpsKanban 
-                                operations={filteredOps} 
-                                profiles={profiles} 
-                                onSelectOp={handleCardClick} 
-                                onStatusChange={(id: string, newStatus: string) => updateOpInDb(id, { status: newStatus })} 
+                            <OpsKanban
+                                operations={filteredOps}
+                                profiles={profiles}
+                                onSelectOp={handleCardClick}
+                                onStatusChange={(id: string, newStatus: string) => updateOpInDb(id, { status: newStatus })}
                             />
                         </div>
                     ) : (
                         <div ref={listScrollRef} className="flex-1 h-full">
-                        <ScrollArea className="h-full">
-                            <div className="p-6">
-                                {viewMode === 'dashboard' && (
-                                    <>
-                                        <OpsDashboard 
-                                            operations={operations} 
-                                            activeFilter={currentStageFilter} 
-                                            setActiveFilter={setCurrentStageFilter} 
-                                            filterPrepaga={filterPrepaga}
-                                            setFilterPrepaga={setFilterPrepaga}
-                                            prepagas={globalConfig.prepagas}
-                                        />
-                                        <div className="mt-8 border-t border-slate-200 pt-6">
-                                            <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />
-                                        </div>
-                                    </>
-                                )}
-                                
-                                {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />}
-                                
-                                {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
-                                {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
-                                
-                                {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale globalConfig={globalConfig} />}
-                                
-                                {viewMode === 'settings' && (role === 'admin_god' || permissions.editSettings) && <OpsSettings />}
-                                
-                                {viewMode === 'agenda' && <OpsAgenda operations={operations} generalTasks={generalTasks} setGeneralTasks={setGeneralTasks} onSelectOp={setSelectedOp} updateOp={updateOp} userName={userName} role={role} />}
-                                {viewMode === 'chat' && (<OpsChat currentUser={userName} operations={operations} onViewSale={(op: any) => { setViewMode('pool'); setSelectedOp(op); }} />)}
-                                {viewMode === 'database' && <OpsDatabase operations={filteredOps} onSelectOp={handleCardClick} />}
-                                {viewMode === 'announcements' && <OpsAnnouncements />} 
-                                {viewMode === 'history' && role === 'admin_god' && <OpsHistory />} 
-                            </div>
-                        </ScrollArea>
-                    </div>
+                            <ScrollArea className="h-full">
+                                <div className="p-6">
+                                    {viewMode === 'dashboard' && (
+                                        <>
+                                            <OpsDashboard
+                                                operations={operations}
+                                                activeFilter={currentStageFilter}
+                                                setActiveFilter={setCurrentStageFilter}
+                                                filterPrepaga={filterPrepaga}
+                                                setFilterPrepaga={setFilterPrepaga}
+                                                prepagas={globalConfig.prepagas}
+                                            />
+                                            <div className="mt-8 border-t border-slate-200 pt-6">
+                                                <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />}
+
+                                    {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
+                                    {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
+
+                                    {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale globalConfig={globalConfig} />}
+
+                                    {viewMode === 'settings' && (role === 'admin_god' || permissions.editSettings) && <OpsSettings />}
+
+                                    {viewMode === 'agenda' && <OpsAgenda operations={operations} generalTasks={generalTasks} setGeneralTasks={setGeneralTasks} onSelectOp={setSelectedOp} updateOp={updateOp} userName={userName} role={role} />}
+                                    {viewMode === 'chat' && (<OpsChat currentUser={userName} operations={operations} onViewSale={(op: any) => { setViewMode('pool'); setSelectedOp(op); }} />)}
+                                    {viewMode === 'database' && <OpsDatabase operations={filteredOps} onSelectOp={handleCardClick} />}
+                                    {viewMode === 'announcements' && <OpsAnnouncements />}
+                                    {viewMode === 'history' && role === 'admin_god' && <OpsHistory />}
+                                </div>
+                            </ScrollArea>
+                        </div>
                     )}
                 </div>
             </main>
 
             {/* --- MODAL DETALLE OPERACIÓN --- */}
-            <OpsModal 
-                op={selectedOp} 
-                isOpen={!!selectedOp} 
-                onClose={()=>setSelectedOp(null)} 
+            <OpsModal
+                op={selectedOp}
+                isOpen={!!selectedOp}
+                onClose={() => setSelectedOp(null)}
                 onUpdateOp={updateOp}
-                currentUser={userName} 
-                role={role} 
-                onStatusChange={handleStatusChange} 
-                                onMarkSeen={markSeenLocal}
-onRelease={handleRelease} 
-                requestAdvance={requestAdvance} 
-                requestBack={requestBack} 
-                onPick={() => { if(selectedOp) confirmAssignment(userName) }}
-                onSubStateChange={(id: string, s: string) => updateOpInDb(id, { subState: s })} 
-                onAddNote={(t:string)=>updateOpInDb(selectedOp!.id, { adminNotes: [{action: t, date: new Date().toLocaleDateString(), user: userName}] })} 
-                onSendChat={handleSendChat} 
-                onAddReminder={handleAddReminder} 
-                getStatusColor={getStatusColor} 
+                currentUser={userName}
+                role={role}
+                onStatusChange={handleStatusChange}
+                onMarkSeen={markSeenLocal}
+                onRelease={handleRelease}
+                requestAdvance={requestAdvance}
+                requestBack={requestBack}
+                onPick={() => { if (selectedOp) confirmAssignment(userName) }}
+                onSubStateChange={(id: string, s: string) => updateOpInDb(id, { subState: s })}
+                onAddNote={(t: string) => updateOpInDb(selectedOp!.id, { adminNotes: [{ action: t, date: new Date().toLocaleDateString(), user: userName }] })}
+                onSendChat={handleSendChat}
+                onAddReminder={handleAddReminder}
+                getStatusColor={getStatusColor}
                 getSubStateStyle={getSubStateStyle}
                 globalConfig={globalConfig}
             />
-            
+
             {/* --- MODAL ASIGNAR OPERADOR (ESTÉTICA PREMIUM MEJORADA) --- */}
             <Dialog open={!!assigningOp} onOpenChange={(open) => !open && setAssigningOp(null)}>
                 <DialogContent className="max-w-[600px] w-full p-0 overflow-hidden border-0 shadow-2xl rounded-3xl gap-0 bg-slate-50">
                     <div className="bg-slate-900 p-8 relative flex flex-col items-center justify-center text-center overflow-hidden">
                         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-400 via-slate-900 to-slate-900"></div>
-                        <button onClick={() => setAssigningOp(null)} className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors z-20"><X size={20}/></button>
+                        <button onClick={() => setAssigningOp(null)} className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors z-20"><X size={20} /></button>
                         <div className="relative z-10 h-16 w-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-900/50 rotate-3">
-                            <ShieldCheck className="h-8 w-8 text-white"/>
+                            <ShieldCheck className="h-8 w-8 text-white" />
                         </div>
                         <DialogTitle className="relative z-10 text-white text-2xl font-black tracking-tight">Asignar Responsable</DialogTitle>
                         <DialogDescription className="relative z-10 text-blue-200 text-sm mt-1 font-medium">Seleccioná quien gestionará este caso.</DialogDescription>
@@ -1073,9 +1079,9 @@ onRelease={handleRelease}
 
                     <div className="p-8 bg-slate-50 grid grid-cols-2 gap-4 max-h-[450px] overflow-y-auto">
                         {adminUsers.length > 0 ? adminUsers.map((u) => (
-                            <div 
-                                key={u.id} 
-                                onClick={() => confirmAssignment(u.full_name || u.email)} 
+                            <div
+                                key={u.id}
+                                onClick={() => confirmAssignment(u.full_name || u.email)}
                                 className="group relative cursor-pointer bg-white border border-slate-200 hover:border-blue-500/50 rounded-2xl p-4 flex items-center gap-4 hover:shadow-xl hover:shadow-blue-900/5 transition-all duration-300 active:scale-[0.98]"
                             >
                                 <div className="relative shrink-0">
@@ -1099,7 +1105,7 @@ onRelease={handleRelease}
                             </div>
                         )) : (
                             <div className="col-span-2 flex flex-col items-center justify-center py-10 opacity-50">
-                                <User className="h-10 w-10 mb-2"/>
+                                <User className="h-10 w-10 mb-2" />
                                 <p className="text-sm font-medium">No hay operadores disponibles.</p>
                             </div>
                         )}
@@ -1111,54 +1117,54 @@ onRelease={handleRelease}
                 <DialogContent className="max-w-lg p-0 overflow-hidden border-0 shadow-2xl rounded-2xl gap-0">
                     <div className="bg-[#1e3a8a] p-6 text-white text-center transition-colors duration-300">
                         <div className="mx-auto bg-white/20 p-3 rounded-full w-fit mb-3">
-                            {manualLoadData.type === 'alta' ? <FileCheck className="h-8 w-8 text-white"/> : <ArrowRightLeft className="h-8 w-8 text-white"/>}
+                            {manualLoadData.type === 'alta' ? <FileCheck className="h-8 w-8 text-white" /> : <ArrowRightLeft className="h-8 w-8 text-white" />}
                         </div>
                         <DialogTitle className="text-xl font-bold">Carga Manual de Operación</DialogTitle>
                         <DialogDescription className="text-white/70 text-xs">
                             {manualLoadData.type === 'alta' ? 'Ingreso de Venta Nueva' : 'Ingreso de Traspaso (Pass)'}
                         </DialogDescription>
                     </div>
-                    
+
                     <div className="p-6 bg-white space-y-5">
                         <div className="flex bg-slate-100 p-1 rounded-lg">
-                            <button onClick={() => setManualLoadData({...manualLoadData, type: 'alta'})} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'alta' ? 'bg-white text-blue-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>✨ Alta Nueva</button>
-                            <button onClick={() => setManualLoadData({...manualLoadData, type: 'pass'})} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'pass' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>🔄 Pass</button>
+                            <button onClick={() => setManualLoadData({ ...manualLoadData, type: 'alta' })} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'alta' ? 'bg-white text-blue-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>✨ Alta Nueva</button>
+                            <button onClick={() => setManualLoadData({ ...manualLoadData, type: 'pass' })} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${manualLoadData.type === 'pass' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>🔄 Pass</button>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Nombre Completo</Label><Input value={manualLoadData.clientName} onChange={e => setManualLoadData({...manualLoadData, clientName: e.target.value})} placeholder="Ej: Juan Pérez" className="h-9 text-slate-900"/></div>
-                            <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">DNI / CUIL</Label><Input value={manualLoadData.dni} onChange={e => setManualLoadData({...manualLoadData, dni: e.target.value})} placeholder="Sin puntos" className="h-9 text-slate-900"/></div>
+                            <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">Nombre Completo</Label><Input value={manualLoadData.clientName} onChange={e => setManualLoadData({ ...manualLoadData, clientName: e.target.value })} placeholder="Ej: Juan Pérez" className="h-9 text-slate-900" /></div>
+                            <div className="space-y-1"><Label className="text-xs font-bold text-slate-500 uppercase">DNI / CUIL</Label><Input value={manualLoadData.dni} onChange={e => setManualLoadData({ ...manualLoadData, dni: e.target.value })} placeholder="Sin puntos" className="h-9 text-slate-900" /></div>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1">
                                 <Label className="text-xs font-bold text-slate-500 uppercase">Prepaga</Label>
-                                <Select value={manualLoadData.prepaga} onValueChange={(v) => setManualLoadData({...manualLoadData, prepaga: v})}>
-                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger>
+                                <Select value={manualLoadData.prepaga} onValueChange={(v) => setManualLoadData({ ...manualLoadData, prepaga: v })}>
+                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                                     <SelectContent>{globalConfig.prepagas.map((p: any) => <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>)}</SelectContent>
                                 </Select>
                             </div>
                             <div className="space-y-1">
                                 <Label className="text-xs font-bold text-slate-500 uppercase">Plan</Label>
-                                <Select value={manualLoadData.plan} onValueChange={(v) => setManualLoadData({...manualLoadData, plan: v})}>
-                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar"/></SelectTrigger>
+                                <Select value={manualLoadData.plan} onValueChange={(v) => setManualLoadData({ ...manualLoadData, plan: v })}>
+                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                                     <SelectContent>{(() => { const selectedPrepagaData = globalConfig.prepagas.find((p: any) => p.name === manualLoadData.prepaga); return (selectedPrepagaData?.plans || []).map((plan: string) => (<SelectItem key={plan} value={plan}>{plan}</SelectItem>)); })()}</SelectContent>
                                 </Select>
                             </div>
                         </div>
-                        <Separator className="bg-slate-100"/>
+                        <Separator className="bg-slate-100" />
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1">
-                                <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Megaphone size={12}/> Origen del Dato</Label>
-                                <Select value={manualLoadData.source} onValueChange={(v) => setManualLoadData({...manualLoadData, source: v})}>
-                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Ej: Google Ads..."/></SelectTrigger>
+                                <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Megaphone size={12} /> Origen del Dato</Label>
+                                <Select value={manualLoadData.source} onValueChange={(v) => setManualLoadData({ ...manualLoadData, source: v })}>
+                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Ej: Google Ads..." /></SelectTrigger>
                                     <SelectContent>{globalConfig.origins.map((src) => (<SelectItem key={src} value={src}>{src}</SelectItem>))}</SelectContent>
                                 </Select>
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><User size={12}/> Vendedor Responsable</Label>
-                                <Select value={manualLoadData.specificSeller} onValueChange={(v) => setManualLoadData({...manualLoadData, specificSeller: v})}>
-                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Elegir..."/></SelectTrigger>
+                                <Label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><User size={12} /> Vendedor Responsable</Label>
+                                <Select value={manualLoadData.specificSeller} onValueChange={(v) => setManualLoadData({ ...manualLoadData, specificSeller: v })}>
+                                    <SelectTrigger className="h-9 text-slate-900"><SelectValue placeholder="Elegir..." /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="Oficina" className="font-bold text-blue-700 bg-blue-50/50 mb-1"><Store size={14} className="inline mr-2"/>Oficina</SelectItem>
+                                        <SelectItem value="Oficina" className="font-bold text-blue-700 bg-blue-50/50 mb-1"><Store size={14} className="inline mr-2" />Oficina</SelectItem>
                                         <SelectItem value="Iara" className="font-bold text-purple-700 bg-purple-50/50 mb-1">iara</SelectItem>
                                         <SelectItem value="Otros" className="font-bold text-slate-700 bg-slate-50/50 mb-1">Otros</SelectItem>
                                         <div className="h-px bg-slate-200 my-1"></div>
@@ -1175,11 +1181,11 @@ onRelease={handleRelease}
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={!!confirmingAdvance} onOpenChange={(open) => !open && setConfirmingAdvance(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-blue-100 p-3 rounded-full mb-2"><Sparkles className="h-8 w-8 text-blue-600 animate-pulse"/></div><DialogTitle className="text-xl">¡Avanzar Etapa!</DialogTitle><DialogDescription>¿Avanzar caso a la siguiente etapa?</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmAdvanceAction} className="bg-blue-600 hover:bg-blue-700 w-full">Confirmar Avance</Button></DialogFooter></DialogContent></Dialog>
-            <Dialog open={!!confirmingBack} onOpenChange={(open) => !open && setConfirmingBack(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-orange-100 p-3 rounded-full mb-2"><Undo2 className="h-8 w-8 text-orange-600"/></div><DialogTitle className="text-xl">Retroceder</DialogTitle><DialogDescription>El caso volverá a la etapa anterior.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmBackAction} variant="secondary" className="w-full border-orange-200 text-orange-700">Confirmar Retroceso</Button></DialogFooter></DialogContent></Dialog>
-            <Dialog open={!!confirmingRelease} onOpenChange={(open) => !open && setConfirmingRelease(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-red-100 p-3 rounded-full mb-2"><Lock className="h-8 w-8 text-red-600"/></div><DialogTitle className="text-xl">Liberar Caso</DialogTitle><DialogDescription>Dejará de estar asignado a vos.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmReleaseAction} variant="destructive" className="w-full">Liberar Ahora</Button></DialogFooter></DialogContent></Dialog>
-            <Dialog open={!!confirmingManualStatus} onOpenChange={(open) => !open && setConfirmingManualStatus(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-yellow-100 p-3 rounded-full mb-2"><AlertTriangle className="h-8 w-8 text-yellow-600"/></div><DialogTitle className="text-xl">Cambio Manual</DialogTitle><DialogDescription>Estás forzando un cambio de estado.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmManualStatusChange} className="w-full">Confirmar Cambio</Button></DialogFooter></DialogContent></Dialog>
-            <Dialog open={showCelebration} onOpenChange={setShowCelebration}><DialogContent className="sm:max-w-sm text-center p-8"><DialogHeader><div className="mx-auto bg-green-100 p-4 rounded-full mb-4"><PartyPopper className="h-10 w-10 text-green-600"/></div><DialogTitle className="text-2xl font-black text-green-700">¡FELICITACIONES!</DialogTitle><DialogDescription className="text-lg text-slate-600 mt-2">Venta concretada con éxito.</DialogDescription></DialogHeader><Button onClick={() => setShowCelebration(false)} className="mt-6 w-full bg-green-600 hover:bg-green-700">¡Excelente!</Button></DialogContent></Dialog>
+            <Dialog open={!!confirmingAdvance} onOpenChange={(open) => !open && setConfirmingAdvance(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-blue-100 p-3 rounded-full mb-2"><Sparkles className="h-8 w-8 text-blue-600 animate-pulse" /></div><DialogTitle className="text-xl">¡Avanzar Etapa!</DialogTitle><DialogDescription>¿Avanzar caso a la siguiente etapa?</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmAdvanceAction} className="bg-blue-600 hover:bg-blue-700 w-full">Confirmar Avance</Button></DialogFooter></DialogContent></Dialog>
+            <Dialog open={!!confirmingBack} onOpenChange={(open) => !open && setConfirmingBack(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-orange-100 p-3 rounded-full mb-2"><Undo2 className="h-8 w-8 text-orange-600" /></div><DialogTitle className="text-xl">Retroceder</DialogTitle><DialogDescription>El caso volverá a la etapa anterior.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmBackAction} variant="secondary" className="w-full border-orange-200 text-orange-700">Confirmar Retroceso</Button></DialogFooter></DialogContent></Dialog>
+            <Dialog open={!!confirmingRelease} onOpenChange={(open) => !open && setConfirmingRelease(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-red-100 p-3 rounded-full mb-2"><Lock className="h-8 w-8 text-red-600" /></div><DialogTitle className="text-xl">Liberar Caso</DialogTitle><DialogDescription>Dejará de estar asignado a vos.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmReleaseAction} variant="destructive" className="w-full">Liberar Ahora</Button></DialogFooter></DialogContent></Dialog>
+            <Dialog open={!!confirmingManualStatus} onOpenChange={(open) => !open && setConfirmingManualStatus(null)}><DialogContent className="sm:max-w-sm text-center p-6"><DialogHeader><div className="mx-auto bg-yellow-100 p-3 rounded-full mb-2"><AlertTriangle className="h-8 w-8 text-yellow-600" /></div><DialogTitle className="text-xl">Cambio Manual</DialogTitle><DialogDescription>Estás forzando un cambio de estado.</DialogDescription></DialogHeader><DialogFooter className="sm:justify-center mt-4"><Button onClick={confirmManualStatusChange} className="w-full">Confirmar Cambio</Button></DialogFooter></DialogContent></Dialog>
+            <Dialog open={showCelebration} onOpenChange={setShowCelebration}><DialogContent className="sm:max-w-sm text-center p-8"><DialogHeader><div className="mx-auto bg-green-100 p-4 rounded-full mb-4"><PartyPopper className="h-10 w-10 text-green-600" /></div><DialogTitle className="text-2xl font-black text-green-700">¡FELICITACIONES!</DialogTitle><DialogDescription className="text-lg text-slate-600 mt-2">Venta concretada con éxito.</DialogDescription></DialogHeader><Button onClick={() => setShowCelebration(false)} className="mt-6 w-full bg-green-600 hover:bg-green-700">¡Excelente!</Button></DialogContent></Dialog>
         </div>
     )
 }

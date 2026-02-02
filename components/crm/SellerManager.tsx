@@ -194,6 +194,23 @@ export function SellerManager({
     setExpiredTasks(alertsList)
   }
 
+  // ✅ Limpiar todas las agendas vencidas (poner scheduled_for = null)
+  const clearExpiredAgendas = async () => {
+    const vencidas = expiredTasks.filter(t => t.type === "vencida")
+    if (vencidas.length === 0) return
+
+    const ids = vencidas.map(t => t.leadId)
+
+    // Actualizar en DB
+    await supabase
+      .from("leads")
+      .update({ scheduled_for: null, last_update: new Date().toISOString() })
+      .in("id", ids)
+
+    // Actualizar UI (quitar las vencidas)
+    setExpiredTasks(prev => prev.filter(t => t.type !== "vencida"))
+  }
+
   useEffect(() => {
     if (!currentUser) return
 
@@ -352,7 +369,7 @@ export function SellerManager({
     // 1) Marcar leída (DB + UI)
     try {
       await supabase.from("notifications").update({ read: true }).eq("id", n.id)
-    } catch {}
+    } catch { }
     setUnreadNotifications((prev) => prev.filter((x) => x.id !== n.id))
 
     // 2) Navegar al lugar
@@ -383,9 +400,8 @@ export function SellerManager({
     <div className="flex h-screen w-full bg-white dark:bg-slate-950 overflow-hidden text-slate-900 dark:text-slate-100 transition-colors">
       {/* --- SIDEBAR --- */}
       <aside
-        className={`h-full bg-slate-50/50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out z-20 flex flex-col ${
-          isSidebarOpen ? "w-[260px] min-w-[260px]" : "w-0 min-w-0 opacity-0 overflow-hidden"
-        }`}
+        className={`h-full bg-slate-50/50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out z-20 flex flex-col ${isSidebarOpen ? "w-[260px] min-w-[260px]" : "w-0 min-w-0 opacity-0 overflow-hidden"
+          }`}
       >
         <div className="p-6 h-16 flex items-center border-b border-slate-200 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-2 text-[#1e3a8a] dark:text-blue-400 font-black text-xl tracking-tighter whitespace-nowrap">
@@ -529,22 +545,22 @@ export function SellerManager({
                 {currentView === "board"
                   ? "Tablero Principal"
                   : currentView === "agenda"
-                  ? "Agenda de Llamados"
-                  : currentView === "mysales"
-                  ? "Mis Ventas Mensuales"
-                  : currentView === "stats"
-                  ? "Mis Métricas"
-                  : currentView === "rankings"
-                  ? "Ranking de Ventas"
-                  : currentView === "settings"
-                  ? "Configuración"
-                  : currentView === "wiki"
-                  ? "Wiki de Ventas"
-                  : currentView === "focus"
-                  ? "Modo Foco 🎯"
-                  : currentView === "announcements"
-                  ? "Novedades"
-                  : "Base de Contactos"}
+                    ? "Agenda de Llamados"
+                    : currentView === "mysales"
+                      ? "Mis Ventas Mensuales"
+                      : currentView === "stats"
+                        ? "Mis Métricas"
+                        : currentView === "rankings"
+                          ? "Ranking de Ventas"
+                          : currentView === "settings"
+                            ? "Configuración"
+                            : currentView === "wiki"
+                              ? "Wiki de Ventas"
+                              : currentView === "focus"
+                                ? "Modo Foco 🎯"
+                                : currentView === "announcements"
+                                  ? "Novedades"
+                                  : "Base de Contactos"}
               </h1>
               <span className="text-[10px] text-slate-500">GML Sales CRM</span>
             </div>
@@ -597,9 +613,8 @@ export function SellerManager({
                         onClick={() => setSelectedLeadId(task.leadId)}
                       >
                         <div
-                          className={`flex items-center gap-2 font-bold text-xs mb-1 ${
-                            task.type === "vencida" ? "text-red-600" : "text-amber-600"
-                          }`}
+                          className={`flex items-center gap-2 font-bold text-xs mb-1 ${task.type === "vencida" ? "text-red-600" : "text-amber-600"
+                            }`}
                         >
                           <CalendarClock size={12} /> {task.type === "vencida" ? "VENCIDA" : "PRÓXIMA (30 min)"}
                         </div>
@@ -613,11 +628,19 @@ export function SellerManager({
                     <div className="p-4 text-xs text-slate-500 text-center italic">Agenda al día.</div>
                   ) : null}
 
-                  {quoteAlertsCount > 0 && (
-                    <div className="p-3 border-t bg-slate-50 dark:bg-slate-900 flex justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setQuoteAlertsCount(0)} className="text-xs">
-                        Limpiar cotizaciones
-                      </Button>
+                  {/* ✅ Botones de limpieza */}
+                  {(expiredTasks.filter(t => t.type === "vencida").length > 0 || quoteAlertsCount > 0) && (
+                    <div className="p-3 border-t bg-slate-50 dark:bg-slate-900 flex justify-end gap-2">
+                      {expiredTasks.filter(t => t.type === "vencida").length > 0 && (
+                        <Button variant="outline" size="sm" onClick={clearExpiredAgendas} className="text-xs">
+                          Limpiar agendas vencidas
+                        </Button>
+                      )}
+                      {quoteAlertsCount > 0 && (
+                        <Button variant="outline" size="sm" onClick={() => setQuoteAlertsCount(0)} className="text-xs">
+                          Limpiar cotizaciones
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -650,9 +673,8 @@ export function SellerManager({
                     unreadNotifications.map((n) => (
                       <div
                         key={n.id}
-                        className={`p-3 border-b last:border-b-0 cursor-pointer hover:bg-slate-50 ${
-                          n.type === "chat" ? "bg-blue-50/50" : ""
-                        }`}
+                        className={`p-3 border-b last:border-b-0 cursor-pointer hover:bg-slate-50 ${n.type === "chat" ? "bg-blue-50/50" : ""
+                          }`}
                         onClick={() => handleNotificationClick(n)}
                       >
                         <div className="flex items-start justify-between gap-2">

@@ -18,6 +18,57 @@ function seenRecently(messageId: string) {
   return false
 }
 
+// ✅ NUEVO: Determinar source según reglas de etiquetado configuradas en AdminConfig
+async function determineSourceFromRules(supabase: any, messageText: string): Promise<string | null> {
+  try {
+    // Obtener las reglas de message_source_rules desde system_config
+    const { data: config } = await supabase
+      .from('system_config')
+      .select('value')
+      .eq('key', 'message_source_rules')
+      .single();
+
+    if (!config?.value || !Array.isArray(config.value)) {
+      return null;
+    }
+
+    const rules = config.value as { trigger: string; source: string; matchType: string; priority?: number }[];
+
+    // Ordenar por prioridad (mayor primero)
+    const sortedRules = [...rules].sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+    const lowerText = messageText.toLowerCase();
+
+    for (const rule of sortedRules) {
+      const trigger = rule.trigger.toLowerCase();
+      let matches = false;
+
+      switch (rule.matchType) {
+        case 'exact':
+          matches = lowerText === trigger;
+          break;
+        case 'starts_with':
+          matches = lowerText.startsWith(trigger);
+          break;
+        case 'contains':
+        default:
+          matches = lowerText.includes(trigger);
+          break;
+      }
+
+      if (matches) {
+        console.log(`🏷️ Regla aplicada: "${rule.trigger}" → ${rule.source}`);
+        return rule.source;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Error obteniendo reglas de source:', err);
+    return null;
+  }
+}
+
 // ✅ NUEVO: Generador automático de etiquetas IA basado en el chat
 function generateAILabels(chat: any[], leadData?: { province?: string; locality?: string; group?: string; work?: string }): string[] {
   const labels: string[] = []
@@ -136,13 +187,19 @@ export async function POST(request: Request) {
 
     if (!lead) {
       console.log('👤 Creando nuevo usuario en base de datos...');
+
+      // ✅ Determinar source según reglas de etiquetado
+      const detectedSource = await determineSourceFromRules(supabase, text);
+
       const { data: newLead, error } = await supabase.from('leads').insert({
         phone: from,
         name: name,
         status: 'nuevo',
         chat: [],
         ai_status: 'active',
-        chat_source: 'sofia_ai', // ✅ NUEVO: Marcar origen como Sofía
+        chat_source: 'sofia_ai',
+        chat_status: 'abierto', // ✅ NUEVO: Iniciar como chat abierto
+        source: detectedSource || 'WhatsApp Directo',
         last_update: new Date().toISOString()
       }).select().single();
       if (error) console.error('Error creando lead:', error);
@@ -153,13 +210,27 @@ export async function POST(request: Request) {
       // 2. Guardar mensaje del usuario
       const updatedChat = [...(lead.chat || []), { role: 'user', content: text, timestamp: new Date().toISOString(), sender: name, isMe: false }];
 
-      // ✅ NUEVO: Actualizar chat_source si no estaba seteado (leads legacy)
+      // ✅ NUEVO: Actualizar chat_source y source si no estaban seteados (leads legacy)
       const updateData: any = {
         chat: updatedChat,
         last_update: new Date().toISOString()
       };
       if (!lead.chat_source) {
         updateData.chat_source = 'sofia_ai';
+      }
+      // ✅ Aplicar reglas de source si no tiene uno asignado
+      if (!lead.source) {
+        const detectedSource = await determineSourceFromRules(supabase, text);
+        if (detectedSource) {
+          updateData.source = detectedSource;
+        }
+      }
+
+      // ✅ NUEVO: Reabrir chat si estaba cerrado y el cliente vuelve a escribir
+      if (lead.chat_status === 'cerrado') {
+        updateData.chat_status = 'abierto';
+        updateData.ai_status = 'active'; // Reactivar la IA también
+        console.log('🔓 [Webhook] Chat reabierto automáticamente');
       }
 
       await supabase.from('leads').update(updateData).eq('id', lead.id);

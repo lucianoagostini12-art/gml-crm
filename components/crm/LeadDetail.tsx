@@ -14,6 +14,7 @@ import { Phone, Headset, Calendar, Plus, Star, Send, History, MessageSquare, Pen
 import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { toast } from "sonner"
 
 export interface Lead {
   id: string
@@ -25,13 +26,14 @@ export interface Lead {
   agent?: string
   notes?: string
   prepaga?: string
-  plan?: string 
+  plan?: string
   scheduled_for?: string
   calls?: number
+  last_call_at?: string // ✅ NUEVO: Fecha del último llamado
   full_price?: number
   price?: number
   intent?: 'high' | 'medium' | 'low'
-  chat?: any[] // ✅ Agregado para leer el historial del webhook
+  chat?: any[]
   [key: string]: any
 }
 
@@ -60,7 +62,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   const [messages, setMessages] = useState<any[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [auditLogs, setAuditLogs] = useState<any[]>([])
-  
+
   const [logAvatars, setLogAvatars] = useState<Record<string, string>>({})
   const [intent, setIntent] = useState<'high' | 'medium' | 'low'>('medium')
 
@@ -73,32 +75,32 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   useEffect(() => {
     if (!open) return
     let alive = true
-    ;(async () => {
-      const { data, error } = await supabase.auth.getUser()
-      if (!alive) return
-      if (error) {
-        console.warn("[LeadDetail] auth.getUser error", error)
-        return
-      }
-      const uid = data?.user?.id ?? null
-      setCurrentUserId(uid)
-      if (!uid) return
+      ; (async () => {
+        const { data, error } = await supabase.auth.getUser()
+        if (!alive) return
+        if (error) {
+          console.warn("[LeadDetail] auth.getUser error", error)
+          return
+        }
+        const uid = data?.user?.id ?? null
+        setCurrentUserId(uid)
+        if (!uid) return
 
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("full_name, avatar_url")
-        .eq("id", uid)
-        .maybeSingle()
+        const { data: prof, error: profErr } = await supabase
+          .from("profiles")
+          .select("full_name, avatar_url")
+          .eq("id", uid)
+          .maybeSingle()
 
-      if (!alive) return
-      if (profErr) {
-        console.warn("[LeadDetail] profiles lookup error", profErr)
-        return
-      }
+        if (!alive) return
+        if (profErr) {
+          console.warn("[LeadDetail] profiles lookup error", profErr)
+          return
+        }
 
-      setCurrentUserName(prof?.full_name || "")
-      setCurrentUserAvatar(prof?.avatar_url || "")
-    })()
+        setCurrentUserName(prof?.full_name || "")
+        setCurrentUserAvatar(prof?.avatar_url || "")
+      })()
     return () => {
       alive = false
     }
@@ -149,27 +151,27 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
 
   const fmtDateTime24 = (date: Date) =>
     new Intl.DateTimeFormat("es-AR", {
-      day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", 
+      day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
     }).format(date)
 
   const fetchAuditLogs = async () => {
     if (!lead?.id) return
     const { data } = await supabase.from("audit_logs").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false })
     if (data) {
-        setAuditLogs(data)
-        // ✅ Avatar por actor_user_id (estable). Fallback a actor_name si no hay user_id.
-        const uniqueActorIds = Array.from(new Set(data.map((l: any) => l.actor_user_id))).filter(Boolean)
-        const avatarMap: Record<string, string> = {}
-        if (uniqueActorIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, avatar_url")
-            .in("id", uniqueActorIds)
-          profiles?.forEach((p: any) => {
-            if (p.id && p.avatar_url) avatarMap[p.id] = p.avatar_url
-          })
-        }
-        setLogAvatars(avatarMap)
+      setAuditLogs(data)
+      // ✅ Avatar por actor_user_id (estable). Fallback a actor_name si no hay user_id.
+      const uniqueActorIds = Array.from(new Set(data.map((l: any) => l.actor_user_id))).filter(Boolean)
+      const avatarMap: Record<string, string> = {}
+      if (uniqueActorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, avatar_url")
+          .in("id", uniqueActorIds)
+        profiles?.forEach((p: any) => {
+          if (p.id && p.avatar_url) avatarMap[p.id] = p.avatar_url
+        })
+      }
+      setLogAvatars(avatarMap)
     }
   }
 
@@ -204,10 +206,10 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
   }
 
   const handleIntentChange = async (newIntent: 'high' | 'medium' | 'low') => {
-      if (!lead) return
-      setIntent(newIntent) 
-      lead.intent = newIntent
-      await supabase.from("leads").update({ intent: newIntent, last_update: new Date().toISOString() }).eq("id", lead.id)
+    if (!lead) return
+    setIntent(newIntent)
+    lead.intent = newIntent
+    await supabase.from("leads").update({ intent: newIntent, last_update: new Date().toISOString() }).eq("id", lead.id)
   }
 
   const saveAgenda = async () => {
@@ -223,6 +225,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     })
     lead.scheduled_for = isoDate
     fetchAuditLogs()
+    toast.success(`📅 Agenda guardada: ${fmtDateTime24(new Date(scheduledFor))}`)
   }
 
   const saveNote = async () => {
@@ -353,24 +356,49 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
     if (!lead) return
     const currentCalls = Number(lead.calls || 0)
     const newCallCount = currentCalls + 1
-    const timestamp = fmtDateTime24(new Date())
+    const now = new Date()
+    const timestamp = fmtDateTime24(now)
+    const isoNow = now.toISOString()
     const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
     let newStatus = (lead.status || "").toLowerCase()
     const isBurned = newCallCount >= 7 && (newStatus === "nuevo" || newStatus === "contactado")
     if (isBurned) newStatus = "perdido"
-    lead.calls = newCallCount as any; lead.notes = updatedNotes as any; lead.status = newStatus as any
-    await supabase.from("leads").update({ calls: newCallCount, notes: updatedNotes, status: newStatus, last_update: new Date().toISOString(), loss_reason: isBurned ? "Dato quemado (7 llamados)" : null }).eq("id", lead.id)
-    await supabase.from("audit_logs").insert({ lead_id: lead.id, actor_user_id: currentUserId, actor_name: currentUserName || "Sistema", action: "Llamada registrada", details: `Llamada #${newCallCount}${isBurned ? " (Dato quemado)" : ""}` })
+
+    // ✅ Actualizar objeto local
+    lead.calls = newCallCount as any
+    lead.notes = updatedNotes as any
+    lead.status = newStatus as any
+    lead.last_call_at = isoNow
+
+    // ✅ Guardar en DB con last_call_at
+    await supabase.from("leads").update({
+      calls: newCallCount,
+      notes: updatedNotes,
+      status: newStatus,
+      last_update: isoNow,
+      last_call_at: isoNow, // ✅ NUEVO: Fecha del último llamado
+      loss_reason: isBurned ? "Dato quemado (7 llamados)" : null
+    }).eq("id", lead.id)
+
+    await supabase.from("audit_logs").insert({
+      lead_id: lead.id,
+      actor_user_id: currentUserId,
+      actor_name: currentUserName || "Sistema",
+      action: "Llamada registrada",
+      details: `Llamada #${newCallCount} - ${timestamp}${isBurned ? " (Dato quemado)" : ""}`
+    })
+
     fetchAuditLogs()
+    toast.success(`📞 Llamada #${newCallCount} registrada - ${timestamp}`)
   }
 
   const getIntentStyle = (val: string) => {
-      switch(val) {
-          case 'high': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          case 'medium': return 'bg-amber-50 text-amber-700 border-amber-200'
-          case 'low': return 'bg-rose-50 text-rose-700 border-rose-200'
-          default: return 'bg-slate-50 text-slate-600'
-      }
+    switch (val) {
+      case 'high': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      case 'medium': return 'bg-amber-50 text-amber-700 border-amber-200'
+      case 'low': return 'bg-rose-50 text-rose-700 border-rose-200'
+      default: return 'bg-slate-50 text-slate-600'
+    }
   }
 
   if (!lead) return null
@@ -381,32 +409,32 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
           <SheetHeader className="mb-6 space-y-4">
             <div className="flex flex-col space-y-2 mt-4">
-              
+
               <div className="flex justify-between items-start">
-                  <SheetTitle className="text-3xl font-black text-slate-900 tracking-tight">
-                    {lead.name}
-                  </SheetTitle>
-                  
-                  {/* SELECTOR DE INTENCIÓN */}
-                  <Select value={intent} onValueChange={(v: any) => handleIntentChange(v)}>
-                      <SelectTrigger className={`h-8 w-[140px] text-[11px] font-black uppercase tracking-wider border-2 ${getIntentStyle(intent)}`}>
-                          <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value="high" className="text-emerald-600 font-bold">🔥 ALTA</SelectItem>
-                          <SelectItem value="medium" className="text-amber-600 font-bold">⚖️ MEDIA</SelectItem>
-                          <SelectItem value="low" className="text-rose-600 font-bold">❄️ BAJA</SelectItem>
-                      </SelectContent>
-                  </Select>
+                <SheetTitle className="text-3xl font-black text-slate-900 tracking-tight">
+                  {lead.name}
+                </SheetTitle>
+
+                {/* SELECTOR DE INTENCIÓN */}
+                <Select value={intent} onValueChange={(v: any) => handleIntentChange(v)}>
+                  <SelectTrigger className={`h-8 w-[140px] text-[11px] font-black uppercase tracking-wider border-2 ${getIntentStyle(intent)}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high" className="text-emerald-600 font-bold">🔥 ALTA</SelectItem>
+                    <SelectItem value="medium" className="text-amber-600 font-bold">⚖️ MEDIA</SelectItem>
+                    <SelectItem value="low" className="text-rose-600 font-bold">❄️ BAJA</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="flex gap-2">
-                  <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none px-3 uppercase text-[10px] font-black tracking-widest">
-                    {lead.status}
-                  </Badge>
-                  <Badge variant="outline" className="text-[10px] font-bold text-slate-500">
-                    Fuente: {lead.source}
-                  </Badge>
+                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none px-3 uppercase text-[10px] font-black tracking-widest">
+                  {lead.status}
+                </Badge>
+                <Badge variant="outline" className="text-[10px] font-bold text-slate-500">
+                  Fuente: {lead.source}
+                </Badge>
               </div>
 
               <div className="flex items-center justify-between mt-2">
@@ -425,7 +453,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   )}
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <Button type="button" onClick={handleCallIncrement} variant="outline" className="relative h-10 w-10 rounded-full bg-green-50 text-green-600 border-green-200 hover:bg-green-100" title="Registrar llamada">
                     <Phone className="h-5 w-5" />
                     <span className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white text-[9px] font-black rounded-full px-1.5 py-0.5 border-2 border-white">{lead.calls || 0}</span>
@@ -433,6 +461,12 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   <Button type="button" onClick={() => { if (omniLink) window.open(omniLink, "_blank") }} size="icon" variant="outline" className="h-10 w-10 rounded-full bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100" disabled={!omniLink}>
                     <Headset className="h-5 w-5" />
                   </Button>
+                  {/* ✅ NUEVO: Mostrar último llamado */}
+                  {lead.last_call_at && (
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Último: {fmtDateTime24(new Date(lead.last_call_at))}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -451,6 +485,12 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 space-y-3">
                 <div className="flex items-center justify-between text-blue-800 font-bold text-sm">
                   <span className="flex items-center gap-2 font-black uppercase"><Calendar className="h-4 w-4" /> Próximo Llamado</span>
+                  {/* ✅ NUEVO: Mostrar agenda guardada */}
+                  {lead.scheduled_for && (
+                    <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px] font-bold">
+                      ✓ Agendado: {fmtDateTime24(new Date(lead.scheduled_for))}
+                    </Badge>
+                  )}
                 </div>
 
                 <Input
@@ -491,39 +531,38 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
               </div>
 
               {/* ✅ AQUI ESTÁ EL CAMBIO PRINCIPAL: LEE lead.chat del Webhook */}
-              <Separator className="my-4"/>
-              
+              <Separator className="my-4" />
+
               <div className="space-y-3">
-                  <div className="flex justify-between items-center px-1">
-                      <Label className="font-black text-[11px] uppercase text-slate-500 tracking-wider flex items-center gap-2">
-                          <MessageCircle size={14}/> Historial CHAT CLIENTE (Solo Lectura)
-                      </Label>
-                  </div>
-                  
-                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
-                      <div className="h-48 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
-                          {lead.chat && Array.isArray(lead.chat) && lead.chat.length > 0 ? (
-                              lead.chat.map((m: any, i: number) => (
-                                  <div key={i} className={`flex flex-col ${m.isMe || m.user === 'Bot' ? "items-end" : "items-start"}`}>
-                                      <div className={`px-3 py-2 rounded-xl max-w-[90%] text-xs shadow-sm border ${
-                                        m.isMe || m.user === 'Bot' 
-                                        ? "bg-blue-100 text-blue-900 border-blue-200 rounded-tr-none" 
-                                        : "bg-white text-slate-700 border-slate-200 rounded-tl-none"
-                                      }`}>
-                                          {m.text}
-                                      </div>
-                                      <span className="text-[9px] text-slate-400 mt-1 px-1">
-                                        {m.time || (m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '')}
-                                      </span>
-                                  </div>
-                              ))
-                          ) : (
-                              <div className="h-full flex flex-col items-center justify-center text-slate-300">
-                                  <p className="text-xs italic">Sin historial de chat</p>
-                              </div>
-                          )}
+                <div className="flex justify-between items-center px-1">
+                  <Label className="font-black text-[11px] uppercase text-slate-500 tracking-wider flex items-center gap-2">
+                    <MessageCircle size={14} /> Historial CHAT CLIENTE (Solo Lectura)
+                  </Label>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
+                  <div className="h-48 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
+                    {lead.chat && Array.isArray(lead.chat) && lead.chat.length > 0 ? (
+                      lead.chat.map((m: any, i: number) => (
+                        <div key={i} className={`flex flex-col ${m.isMe || m.user === 'Bot' ? "items-end" : "items-start"}`}>
+                          <div className={`px-3 py-2 rounded-xl max-w-[90%] text-xs shadow-sm border ${m.isMe || m.user === 'Bot'
+                            ? "bg-blue-100 text-blue-900 border-blue-200 rounded-tr-none"
+                            : "bg-white text-slate-700 border-slate-200 rounded-tl-none"
+                            }`}>
+                            {m.text}
+                          </div>
+                          <span className="text-[9px] text-slate-400 mt-1 px-1">
+                            {m.time || (m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-300">
+                        <p className="text-xs italic">Sin historial de chat</p>
                       </div>
+                    )}
                   </div>
+                </div>
               </div>
 
               <Separator />
@@ -534,7 +573,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   {lead.notes?.split("|||").reverse().map((notaStr: string, i: number) => {
                     const parts = notaStr.split("|")
                     const isFormatted = parts[0] === "SEP_NOTE"
-                    
+
                     // ⚠️ FILTRO DE LIMPIEZA: Si la nota no tiene formato SEP_NOTE, asumimos que es el mensaje crudo del webhook y lo ocultamos
                     // para que no salga duplicado (ya que se muestra arriba en el Chat)
                     if (!isFormatted) return null
@@ -560,7 +599,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
 
             <TabsContent value="cotizacion" className="space-y-6">
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
-                <h4 className="font-black text-xs text-slate-500 uppercase flex items-center gap-2"><Plus className="h-4 w-4"/> Agregar Propuesta Económica</h4>
+                <h4 className="font-black text-xs text-slate-500 uppercase flex items-center gap-2"><Plus className="h-4 w-4" /> Agregar Propuesta Económica</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <Select value={newQuotePrepaga} onValueChange={(val) => { setNewQuotePrepaga(val); setNewQuotePlan("") }}>
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Empresa" /></SelectTrigger>
@@ -641,7 +680,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                   {messages.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-40">
                       <MessageSquare className="h-12 w-12 stroke-[1px]" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.2em] text-center">Inicia una conversación<br/>con el supervisor</p>
+                      <p className="text-[11px] font-black uppercase tracking-[0.2em] text-center">Inicia una conversación<br />con el supervisor</p>
                     </div>
                   ) : (
                     messages.map((m, i) => {
@@ -649,11 +688,10 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                       return (
                         <div key={i} className={`flex flex-col ${me ? "items-end" : "items-start animate-in slide-in-from-left-3 duration-300"}`}>
                           <span className="text-[9px] text-slate-400 font-black mb-1.5 uppercase px-2 tracking-widest">{m.sender}</span>
-                          <div className={`px-5 py-3 rounded-2xl max-w-[85%] text-[14px] shadow-sm font-semibold leading-relaxed border transition-all ${
-                            me
-                              ? "bg-blue-600 text-white rounded-tr-none border-blue-500"
-                              : "bg-white border-slate-200 rounded-tl-none text-slate-700"
-                          }`}>
+                          <div className={`px-5 py-3 rounded-2xl max-w-[85%] text-[14px] shadow-sm font-semibold leading-relaxed border transition-all ${me
+                            ? "bg-blue-600 text-white rounded-tr-none border-blue-500"
+                            : "bg-white border-slate-200 rounded-tl-none text-slate-700"
+                            }`}>
                             {m.text}
                           </div>
                         </div>
@@ -683,7 +721,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
 
             <TabsContent value="historial" className="space-y-6">
               <div className="flex items-center gap-2 text-slate-900 font-black text-[11px] uppercase tracking-[0.2em] mb-4 px-1">
-                <History className="h-4 w-4 text-blue-600"/> Línea de Tiempo de Auditoría
+                <History className="h-4 w-4 text-blue-600" /> Línea de Tiempo de Auditoría
               </div>
               <div className="space-y-8 pl-2 pr-2 overflow-y-auto max-h-[500px] custom-scrollbar">
                 {auditLogs.map((log, i) => (

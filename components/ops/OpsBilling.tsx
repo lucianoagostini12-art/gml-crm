@@ -608,22 +608,23 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
         setIsSavingCarteraCaida(false)
     }
 
-    // ✅ FUNCIÓN: Toggle de verificación de billing
+    // ✅ FUNCIÓN: Toggle de verificación de billing (OPTIMISTA)
     const toggleBillingVerified = async (opId: string, currentValue: boolean) => {
         const newValue = !currentValue
         const now = newValue ? new Date().toISOString() : null
 
-        await supabase.from('leads').update({
-            billing_verified: newValue,
-            billing_verified_at: now
-        }).eq('id', opId)
-
-        // Actualizar localmente
+        // 1. Actualizar localmente PRIMERO (instantáneo, sin retardo)
         setOperations(prev => prev.map(op =>
             op.id === opId
                 ? { ...op, billing_verified: newValue, billing_verified_at: now }
                 : op
         ))
+
+        // 2. Guardar en Supabase en background
+        await supabase.from('leads').update({
+            billing_verified: newValue,
+            billing_verified_at: now
+        }).eq('id', opId)
     }
 
     const uniqueSellers = Array.from(new Set(operations.map(o => o.seller)))
@@ -827,7 +828,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                 <TableBody>{approvedOps.length === 0 ? (<TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">Aprobá ventas desde la pestaña "Mesa de Entrada".</TableCell></TableRow>) : approvedOps.map((op: any) => {
                                     const calc = calculate(op)
                                     return (
-                                        <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors group ${op.billing_verified ? 'bg-green-50/30' : ''}`}>
+                                        <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors group ${op.billing_verified ? 'bg-emerald-50 border-l-4 border-l-emerald-400' : ''}`}>
                                             {/* ✅ Checkbox de verificación */}
                                             <TableCell className="p-2" onClick={(e) => e.stopPropagation()}>
                                                 <Checkbox
@@ -945,7 +946,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                         const mesNombre = month ? new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).toUpperCase() : ""
                                         const isPass = op.type === 'pass'
                                         return (
-                                            <TableRow key={op.id} className={`hover:bg-slate-50 group ${op.billing_verified ? 'bg-blue-50/30' : ''}`}>
+                                            <TableRow key={op.id} className={`hover:bg-slate-50 group ${op.billing_verified ? 'bg-emerald-50 border-l-4 border-l-emerald-400' : ''}`}>
                                                 {/* ✅ Checkbox de verificación */}
                                                 <TableCell className="p-2" onClick={(e) => e.stopPropagation()}>
                                                     <Checkbox

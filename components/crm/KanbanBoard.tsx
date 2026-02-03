@@ -601,7 +601,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const handleCallIncrement = async (leadId: string) => {
         const lead = leads.find(l => l.id === leadId); if (!lead) return
         const newCallCount = lead.calls + 1
-        const timestamp = new Date().toLocaleString('es-AR', { hour: '2-digit', minute: '2-digit' })
+        const timestamp = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
         const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
         let newStatus = lead.status
         const isBurned = newCallCount >= 7 && (lead.status === 'nuevo' || lead.status === 'contactado')
@@ -610,6 +610,30 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
         else setLeads(prev => prev.map(l => l.id === leadId ? { ...l, calls: newCallCount, notes: updatedNotes } : l))
         await supabase.from('leads').update({ calls: newCallCount, notes: updatedNotes, status: newStatus.toLowerCase(), last_update: new Date().toISOString(), loss_reason: isBurned ? 'Dato quemado' : null }).eq('id', leadId)
         if (isBurned) logHistory(leadId, lead.status, 'perdido')
+
+        // ✅ MENSAJE AUTOMÁTICO EN PRIMERA LLAMADA (solo leads de Sofia, dentro de ventana de 24hs)
+        if (lead.chat_source === 'sofia_ai' && newCallCount === 1 && lead.phone) {
+            try {
+                // Verificar si estamos dentro de la ventana de 24hs de Meta
+                const lastUpdate = new Date(lead.last_update || lead.created_at).getTime()
+                const now = Date.now()
+                const hoursElapsed = (now - lastUpdate) / (1000 * 60 * 60)
+
+                if (hoursElapsed <= 24) {
+                    const { sendManualWhatsAppMessage } = await import('@/app/actions/send-whatsapp')
+                    const nombreVendedora = lead.agent_name || 'una asesora'
+                    const mensaje = `💬 ¡Hola! Te está intentando llamar *${nombreVendedora}* para darte la info que pediste 📞\n\n¿En qué momento te queda más cómodo que te contactemos? 😊`
+
+                    await sendManualWhatsAppMessage(lead.phone, mensaje)
+                    console.log(`✅ Mensaje de primera llamada enviado a ${lead.name}`)
+                    toast.success("Mensaje enviado al cliente")
+                } else {
+                    console.log(`⚠️ No se envió mensaje a ${lead.name}: fuera de ventana de 24hs (${hoursElapsed.toFixed(1)}hs)`)
+                }
+            } catch (err) {
+                console.error(`❌ Error enviando mensaje de primera llamada:`, err)
+            }
+        }
     }
 
     const handleOmniClick = (leadId: string) => {

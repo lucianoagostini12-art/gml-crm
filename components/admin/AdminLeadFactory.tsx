@@ -521,6 +521,17 @@ export function AdminLeadFactory() {
 
     const { error } = await supabase.from("leads").update(updates).in("id", selectedLeads)
 
+    // ✅ Marcar leads de Sofia como "derivado" para que aparezca el badge en AdminIABrain
+    if (origin === "inbox") {
+      const sofiaLeadIds = unassignedLeads
+        .filter(l => selectedLeads.includes(l.id) && l.chat_source === 'sofia_ai')
+        .map(l => l.id)
+
+      if (sofiaLeadIds.length > 0) {
+        await supabase.from("leads").update({ chat_status: 'derivado' }).in("id", sofiaLeadIds)
+      }
+    }
+
     if (!error) {
       // ✅ IMPORTANTE: CREAR HISTORIAL MANUALMENTE PARA EL CONTADOR
       // Si el trigger de la base de datos no lo hace, lo hacemos aquí para asegurar que 'fetchDailyStats' lo vea.

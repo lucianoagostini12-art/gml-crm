@@ -1982,16 +1982,6 @@ export default function AdminIABrain() {
                           </div>
                         )}
                       </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-600">Mensaje fuera de horario</label>
-                        <Textarea
-                          value={offHoursMessage}
-                          onChange={e => setOffHoursMessage(e.target.value)}
-                          rows={3}
-                          className="bg-slate-50 border-slate-200 focus-visible:ring-violet-500 text-sm resize-none"
-                        />
-                      </div>
                     </div>
                   )}
                 </div>
@@ -2398,23 +2388,6 @@ export default function AdminIABrain() {
                           onClick={() => handleStatusChange('paused')}
                         >
                           Intervenir
-                        </Button>
-                      </div>
-                    )}
-
-                    {officeEnabled && !inServiceHours && (
-                      <div className="bg-amber-50/80 backdrop-blur-sm border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between">
-                        <span className="flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-amber-500" />
-                          Fuera de horario ({officeStart}–{officeEnd})
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs hover:bg-amber-100 text-amber-800 px-3 rounded-lg font-semibold"
-                          onClick={() => setDraft(offHoursMessage)}
-                        >
-                          Usar mensaje auto
                         </Button>
                       </div>
                     )}

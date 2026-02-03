@@ -90,16 +90,15 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig, unread
               onClick={() => onSelectOp(op)}
               className={`bg-white rounded-xl border border-slate-200 border-l-[6px] ${borderColorClass} p-4 hover:shadow-lg transition-all flex items-center justify-between group cursor-pointer relative overflow-hidden`}
             >
-              
+
               {/* ❌ ELIMINADO: El bloque absoluto antiguo que tapaba los botones */}
 
               {/* 1. DATOS PRINCIPALES */}
               <div className="flex items-center gap-4 w-[40%]">
                 {/* ✅ ICONO DINÁMICO: PASS vs ALTA (Estilo unificado con Modal) */}
                 <div
-                  className={`h-10 w-10 rounded-lg flex items-center justify-center font-black shadow-sm shrink-0 ${
-                    isPass ? "bg-purple-100 text-purple-600" : "bg-green-100 text-green-600"
-                  }`}
+                  className={`h-10 w-10 rounded-lg flex items-center justify-center font-black shadow-sm shrink-0 ${isPass ? "bg-purple-100 text-purple-600" : "bg-green-100 text-green-600"
+                    }`}
                 >
                   {isPass ? <ArrowRightLeft size={18} /> : <UserPlus size={18} />}
                 </div>
@@ -108,16 +107,27 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig, unread
                   <h3 className="font-black text-slate-800 text-base leading-tight truncate">{op.clientName}</h3>
 
                   <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-                    {/* CUIT/DNI + copiar rápido (sin abrir OpsModal) */}
+                    {/* CUIT + copiar DNI rápido (sin abrir OpsModal) */}
                     <div className="flex items-center gap-1">
-                      <span className="font-mono bg-slate-50 px-1.5 rounded border border-slate-100">{op.dni}</span>
+                      <span className="font-mono bg-slate-50 px-1.5 rounded border border-slate-100">{op.cuit || op.dni}</span>
 
                       <button
                         type="button"
-                        onClick={(e) => handleCopyCuit(e, op.dni)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          // Extrae DNI del CUIT y lo copia
+                          let textToCopy = op.dni || ""
+                          if (op.cuit) {
+                            const digits = String(op.cuit).replace(/\D/g, "")
+                            if (digits.length === 11) textToCopy = digits.substring(2, 10)
+                            else if (digits.length === 10) textToCopy = digits.substring(2)
+                            else textToCopy = digits || op.dni || ""
+                          }
+                          navigator.clipboard.writeText(textToCopy)
+                        }}
                         className="p-1 rounded-md border border-transparent hover:border-slate-200 hover:bg-slate-50 text-slate-400 hover:text-slate-700 transition-all"
-                        title="Copiar CUIT"
-                        aria-label="Copiar CUIT"
+                        title="Copiar DNI (extraído del CUIT)"
+                        aria-label="Copiar DNI"
                       >
                         <Copy size={14} />
                       </button>
@@ -161,12 +171,12 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig, unread
               <div className="w-[40%] flex flex-col items-end gap-2 pl-4 border-l border-slate-100">
                 {/* Fila Superior: Badge Estado + Operador + NOTIFICACIONES */}
                 <div className="flex items-center justify-end gap-2 w-full h-7">
-                  
+
                   {/* ✨ NUEVO: Badges de Notificación integrados y sutiles (No tapan nada) */}
                   {(unreadChat > 0 || unreadDocs > 0) && (
                     <div className="flex items-center gap-1.5 mr-auto animate-in fade-in zoom-in duration-300">
                       {unreadChat > 0 && (
-                        <div 
+                        <div
                           className="flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-md text-[10px] font-bold shadow-sm"
                           title={`${unreadChat} mensajes nuevos`}
                         >
@@ -175,7 +185,7 @@ export function OpsList({ operations, onSelectOp, updateOp, globalConfig, unread
                         </div>
                       )}
                       {unreadDocs > 0 && (
-                        <div 
+                        <div
                           className="flex items-center gap-1 px-1.5 py-0.5 bg-orange-50 text-orange-600 border border-orange-100 rounded-md text-[10px] font-bold shadow-sm"
                           title={`${unreadDocs} documentos nuevos`}
                         >

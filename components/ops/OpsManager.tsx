@@ -894,6 +894,8 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
             case 'database': return "Buscador Histórico (DNI, Nombre, Vendedor)..."
             case 'pool': return "Buscar en Pileta..."
             case 'mine': return "Buscar en mis casos..."
+            case 'billing': return "Buscar por cliente, DNI, vendedor..."
+            case 'post_sale': return "Buscar en cartera postventa..."
             default: return "Buscar operación..."
         }
     }
@@ -1028,7 +1030,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                     {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />}
 
                                     {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
-                                    {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling />}
+                                    {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling searchTerm={searchTerm} />}
 
                                     {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale globalConfig={globalConfig} />}
 

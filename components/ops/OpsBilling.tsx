@@ -141,7 +141,8 @@ const getCurrentMonth = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function OpsBilling() {
+
+export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
     const supabase = createClient()
 
     // --- ESTADO ---
@@ -307,14 +308,21 @@ export function OpsBilling() {
             if (p.includes("pass")) { val = 0; formula = "Manual" }
         }
 
+        // ✅ CARTERA: Solo se calcula para Prevención Salud
         let portfolioVal = 0
-        if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
-            portfolioVal = parseFloat(op.billing_portfolio_override.toString())
-        } else {
-            const full = parseFloat(op.fullPrice || "0"); const aportes = parseFloat(op.aportes || "0"); const desc = parseFloat(op.descuento || "0")
-            const netPayable = Math.max(0, full - desc - aportes)
-            portfolioVal = Number((netPayable * calcRules.portfolioRate).toFixed(2))
+        const prepagaLower = op.prepaga?.toLowerCase() || ""
+        const isPrevention = prepagaLower.includes("preven")
+
+        if (isPrevention) {
+            if (op.billing_portfolio_override !== null && op.billing_portfolio_override !== undefined) {
+                portfolioVal = parseFloat(op.billing_portfolio_override.toString())
+            } else {
+                const full = parseFloat(op.fullPrice || "0"); const aportes = parseFloat(op.aportes || "0"); const desc = parseFloat(op.descuento || "0")
+                const netPayable = Math.max(0, full - desc - aportes)
+                portfolioVal = Number((netPayable * calcRules.portfolioRate).toFixed(2))
+            }
         }
+        // Si no es Prevención, portfolioVal queda en 0
 
         return { val: Number(val.toFixed(2)), formula, portfolio: Number(portfolioVal.toFixed(2)) }
     }
@@ -330,6 +338,7 @@ export function OpsBilling() {
     }
 
     const opsInPeriod = useMemo(() => {
+        const term = searchTerm.toLowerCase().trim()
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
@@ -338,14 +347,26 @@ export function OpsBilling() {
             if (targetMonth !== selectedMonth) return false
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
+
+            // ✅ Filtro de búsqueda global
+            if (term) {
+                const matchesSearch =
+                    (op.clientName?.toLowerCase().includes(term)) ||
+                    (op.dni?.toLowerCase().includes(term)) ||
+                    (op.cuit?.toLowerCase().includes(term)) ||
+                    (op.seller?.toLowerCase().includes(term)) ||
+                    (op.prepaga?.toLowerCase().includes(term))
+                if (!matchesSearch) return false
+            }
             return true
         })
-    }, [operations, selectedMonth, filters])
+    }, [operations, selectedMonth, filters, searchTerm])
 
     const opsPreviousMonth = useMemo(() => {
         const [y, m] = selectedMonth.split('-').map(Number)
         const prevDate = new Date(y, m - 2, 1)
         const prevIso = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
+        const term = searchTerm.toLowerCase().trim()
 
         return operations.filter((op: any) => {
             const opDate = new Date(op.entryDate)
@@ -354,9 +375,25 @@ export function OpsBilling() {
 
             if (op.billing_approved !== true) return false
             if (targetMonth !== prevIso) return false
+            // ✅ CARTERA: Solo operaciones de Prevención Salud generan cartera
+            const prepagaLower = op.prepaga?.toLowerCase() || ""
+            if (!prepagaLower.includes("preven")) return false
+            // ✅ Aplicar filtros de vendedor y prepaga (igual que opsInPeriod)
+            if (filters.seller !== 'all' && op.seller !== filters.seller) return false
+            if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
+
+            // ✅ Filtro de búsqueda global
+            if (term) {
+                const matchesSearch =
+                    (op.clientName?.toLowerCase().includes(term)) ||
+                    (op.dni?.toLowerCase().includes(term)) ||
+                    (op.cuit?.toLowerCase().includes(term)) ||
+                    (op.seller?.toLowerCase().includes(term))
+                if (!matchesSearch) return false
+            }
             return true
         })
-    }, [operations, selectedMonth])
+    }, [operations, selectedMonth, filters, searchTerm])
 
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
@@ -615,7 +652,7 @@ export function OpsBilling() {
                                 <TableBody>{pendingOps.length === 0 ? (<TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400 font-medium">🎉 Todo al día para {formatMonth(selectedMonth)}.</TableCell></TableRow>) : pendingOps.map((op: any) => {
                                     const calc = calculate(op)
                                     return (
-                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
+                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors group">
                                             <TableCell>
                                                 <div className="font-bold text-slate-800 flex items-center gap-1">
                                                     {op.clientName}
@@ -675,7 +712,7 @@ export function OpsBilling() {
                                 <TableBody>{approvedOps.length === 0 ? (<TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">Aprobá ventas desde la pestaña "Mesa de Entrada".</TableCell></TableRow>) : approvedOps.map((op: any) => {
                                     const calc = calculate(op)
                                     return (
-                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => setSelectedOp(op)}>
+                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors group">
                                             <TableCell>
                                                 <div className="font-bold text-slate-800 flex items-center gap-1">
                                                     {op.clientName}
@@ -719,7 +756,7 @@ export function OpsBilling() {
                                     {opsPreviousMonth.map((op: any) => {
                                         const liq = calculate(op)
                                         return (
-                                            <TableRow key={op.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedOp(op)}>
+                                            <TableRow key={op.id} className="hover:bg-slate-50">
                                                 <TableCell className="font-bold text-slate-700">
                                                     <div className="flex items-center gap-1">
                                                         {op.clientName}
@@ -805,25 +842,7 @@ export function OpsBilling() {
                 </TabsContent>
             </Tabs>
 
-            {/* --- MODAL OPS DETALLE --- */}
-            <OpsModal
-                op={selectedOp}
-                isOpen={!!selectedOp}
-                onClose={() => setSelectedOp(null)}
-                onUpdateOp={() => fetchData()}
-                currentUser={"Administración"}
-                role={"admin_god"}
-                onStatusChange={() => { }} onRelease={() => { }} requestAdvance={() => { }} requestBack={() => { }} onPick={() => { }} onSubStateChange={() => { }}
-                onAddNote={async (note: string) => {
-                    const newNote = `FACTURACION|${new Date().toLocaleString()}|Admin|${note}`
-                    const currentNotes = selectedOp.notes ? selectedOp.notes + "|||" + newNote : newNote
-                    await supabase.from('leads').update({ notes: currentNotes }).eq('id', selectedOp.id)
-                }}
-                onSendChat={() => { }} onAddReminder={() => { }}
-                getStatusColor={getStatusColor}
-                getSubStateStyle={getSubStateStyle}
-                globalConfig={globalConfig}
-            />
+            {/* --- OpsModal removido: no es necesario en Facturación --- */}
 
             {/* CONFIGURACIÓN */}
             <Dialog open={showConfig} onOpenChange={setShowConfig}>

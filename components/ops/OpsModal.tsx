@@ -50,7 +50,7 @@ function EditableField({ label, value, onBlur, onChange, icon, color, prefix, su
             e.preventDefault();
             const text = e.clipboardData.getData('text');
             // Detecta 24/03/1998 o 24-03-1998
-            const match = text.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+            const match = text.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
             if (match) {
                 const [_, day, month, year] = match;
                 const isoDate = `${year}-${month}-${day}`;
@@ -68,18 +68,20 @@ function EditableField({ label, value, onBlur, onChange, icon, color, prefix, su
             </span>
             <div className="relative w-full">
                 {prefix && <span className="absolute left-0 bottom-1.5 text-xs text-slate-400 font-bold">{prefix}</span>}
+                {/* ✅ MEJORADO: Input más obvio como editable, cursor-text, borde visible */}
                 <Input
                     type={type}
-                    className={`text-sm font-medium border-0 border-b border-transparent group-hover:border-slate-200 focus-visible:border-blue-500 focus-visible:ring-0 px-0 h-7 rounded-none transition-all ${color || 'text-slate-800'} ${prefix ? 'pl-4' : ''}`}
+                    className={`text-sm font-medium border border-slate-200 hover:border-slate-400 focus-visible:border-blue-500 focus-visible:ring-1 focus-visible:ring-blue-500/30 px-2 h-8 rounded-md transition-all cursor-text bg-white ${color || 'text-slate-800'} ${prefix ? 'pl-4' : ''}`}
                     value={localValue}
-                    onPaste={handlePaste} // ✅ Conectado
+                    onPaste={handlePaste}
                     onChange={(e) => {
                         setLocalValue(e.target.value)
                         if (onChange) onChange(e.target.value)
                     }}
                     onBlur={() => onBlur && onBlur(localValue)}
+                // ✅ Tab navigation nativa funciona, no se necesita tabIndex custom
                 />
-                {suffix && <span className="absolute right-0 bottom-1.5 text-xs text-slate-400 font-bold">{suffix}</span>}
+                {suffix && <span className="absolute right-2 top-2 text-xs text-slate-400 font-bold">{suffix}</span>}
             </div>
         </div>
     )
@@ -307,10 +309,26 @@ export function OpsModal({
         if (data) setRealHistory(data)
     }
     const fetchSellers = async () => {
-        const { data } = await supabase.from('profiles').select('full_name')
-        if (data) {
-            setSellersList(data)
+        // Cargar perfiles reales
+        const { data: realProfiles } = await supabase.from('profiles').select('full_name')
+
+        // Cargar agentes virtuales de system_config
+        const { data: virtualConfig } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'virtual_agents')
+            .single()
+
+        const virtualAgents: { full_name: string }[] = []
+        if (virtualConfig?.value && Array.isArray(virtualConfig.value)) {
+            virtualConfig.value.forEach((name: string) => {
+                virtualAgents.push({ full_name: name })
+            })
         }
+
+        // Combinar reales + virtuales
+        const allSellers = [...(realProfiles || []), ...virtualAgents]
+        setSellersList(allSellers)
     }
 
 

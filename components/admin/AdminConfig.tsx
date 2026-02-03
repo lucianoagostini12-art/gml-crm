@@ -159,29 +159,57 @@ export function AdminConfig() {
     }
 
     // --- PERFILES VIRTUALES (Oficina, Calle, etc.) ---
+    // Los perfiles virtuales se guardan en system_config con key 'virtual_agents'
+    // porque la tabla profiles tiene FK a auth.users y no permite crear perfiles sin usuario real
     const fetchVirtualProfiles = async () => {
-        // Los perfiles virtuales tienen email terminando en @virtual.local
-        const { data } = await supabase.from('profiles').select('*').ilike('email', '%@virtual.local').order('full_name', { ascending: true })
-        if (data) setVirtualProfiles(data)
+        const { data } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'virtual_agents')
+            .single()
+
+        if (data?.value && Array.isArray(data.value)) {
+            // Convertir el array a formato compatible con la UI
+            const profiles = data.value.map((name: string, idx: number) => ({
+                id: `virtual_${idx}`,
+                full_name: name,
+                role: 'seller',
+                email: `${name.toLowerCase().replace(/\s+/g, '.')}@virtual.local`
+            }))
+            setVirtualProfiles(profiles)
+        } else {
+            setVirtualProfiles([])
+        }
     }
 
     const addVirtualProfile = async () => {
         const name = newVirtualName.trim()
         if (!name) return alert("⚠️ Escribí un nombre para el perfil")
 
-        // Verificar que no exista ya
-        const { data: existing } = await supabase.from('profiles').select('id').eq('full_name', name).maybeSingle()
-        if (existing) return alert("⚠️ Ya existe un perfil con ese nombre")
+        // Obtener lista actual
+        const { data: current } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'virtual_agents')
+            .single()
 
-        const { error } = await supabase.from('profiles').insert({
-            full_name: name,
-            role: 'seller',
-            user_id: null,
-            email: `${name.toLowerCase().replace(/\s+/g, '.')}@virtual.local`
-        })
+        const currentList: string[] = (current?.value && Array.isArray(current.value)) ? current.value : []
+
+        // Verificar que no exista ya
+        if (currentList.some(n => n.toLowerCase() === name.toLowerCase())) {
+            return alert("⚠️ Ya existe un perfil con ese nombre")
+        }
+
+        // Agregar el nuevo
+        const newList = [...currentList, name]
+
+        const { error } = await supabase
+            .from('system_config')
+            .upsert({ key: 'virtual_agents', value: newList }, { onConflict: 'key' })
+
         if (error) {
-            console.error(error)
-            alert("❌ Error al crear perfil virtual")
+            console.error("Error creando perfil virtual:", error)
+            alert(`❌ Error al crear perfil virtual: ${error.message || error.code || "desconocido"}`)
         } else {
             setNewVirtualName("")
             fetchVirtualProfiles()
@@ -192,7 +220,23 @@ export function AdminConfig() {
 
     const deleteVirtualProfile = async (id: string, name: string) => {
         if (!confirm(`¿Eliminar el perfil "${name}"? Las operaciones asociadas conservarán el nombre.`)) return
-        const { error } = await supabase.from('profiles').delete().eq('id', id)
+
+        // Obtener lista actual
+        const { data: current } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'virtual_agents')
+            .single()
+
+        const currentList: string[] = (current?.value && Array.isArray(current.value)) ? current.value : []
+
+        // Remover el nombre
+        const newList = currentList.filter(n => n !== name)
+
+        const { error } = await supabase
+            .from('system_config')
+            .upsert({ key: 'virtual_agents', value: newList }, { onConflict: 'key' })
+
         if (error) {
             console.error(error)
             alert("❌ Error al eliminar")

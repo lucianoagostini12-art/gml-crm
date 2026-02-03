@@ -297,7 +297,14 @@ export function AdminPerformance() {
     if (drillMode === "ventas") {
       const items = normalizedAllSales
         .filter((x) => x.agentName === drillSellerName && (drillWeekIdx === 0 || x.weekIdx === drillWeekIdx))
-        .map((x) => ({ ...x, lead: leadById.get(String(x.leadId)) || null }))
+        .map((x) => {
+          // Buscar el lead en el Map, o directamente en allLeads si no está
+          let lead = leadById.get(String(x.leadId))
+          if (!lead) {
+            lead = allLeads.find((l) => String(l.id) === String(x.leadId)) || null
+          }
+          return { ...x, lead }
+        })
 
       items.sort((a: any, b: any) => {
         if (a.kind !== b.kind) return a.kind === "ALTA" ? -1 : 1
@@ -1216,7 +1223,7 @@ export function AdminPerformance() {
                           const l = it.lead
                           const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
                           const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
-                          const cliente = l?.name || "-"
+                          const cliente = l?.name || l?.full_name || l?.client_name || l?.contact_name || l?.nombre || (l?.id ? `ID: ${l.id}` : "-")
                           const cuit = l?.cuit || l?.dni || "-"
                           const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
                           const plan = l?.quoted_plan || l?.plan || "-"
@@ -1262,7 +1269,7 @@ export function AdminPerformance() {
                           const l = it.lead
                           const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
                           const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
-                          const cliente = l?.name || "-"
+                          const cliente = l?.name || l?.full_name || l?.client_name || l?.contact_name || l?.nombre || (l?.id ? `ID: ${l.id}` : "-")
                           const cuit = l?.cuit || l?.dni || "-"
                           const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
                           const plan = l?.quoted_plan || l?.plan || "-"

@@ -974,7 +974,7 @@ export function AdminConteo() {
                         <TableRow key={String(l.id)} className="hover:bg-slate-50/60">
                           <TableCell className="font-bold">{points}</TableCell>
                           <TableCell className="text-xs text-slate-600">{fi || "-"}</TableCell>
-                          <TableCell className="font-medium">{l?.full_name || l?.nombre || "-"}</TableCell>
+                          <TableCell className="font-medium">{l?.name || l?.full_name || l?.nombre || "-"}</TableCell>
                           <TableCell className="font-mono text-xs">{l?.cuit || l?.dni || "-"}</TableCell>
                           <TableCell className="text-xs">{l?.prepaga || l?.quoted_prepaga || "-"}</TableCell>
                           <TableCell className="text-xs">{l?.plan || l?.quoted_plan || "-"}</TableCell>

@@ -1698,7 +1698,7 @@ export default function AdminIABrain() {
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <h4 className="font-bold text-sm text-slate-800 truncate">{lead.name}</h4>
                           <span className="text-[10px] text-slate-400 flex-none">
-                            {new Date(lead.last_update).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(lead.last_update).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}
                           </span>
                         </div>
 
@@ -2396,6 +2396,7 @@ export default function AdminIABrain() {
                                     {new Date(msg.timestamp).toLocaleTimeString('es-AR', {
                                       hour: '2-digit',
                                       minute: '2-digit',
+                                      timeZone: 'America/Argentina/Buenos_Aires',
                                     })}
                                   </span>
                                 </div>

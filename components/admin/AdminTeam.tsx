@@ -48,7 +48,7 @@ export function AdminTeam() {
     const d = new Date(value)
     if (Number.isNaN(d.getTime())) return "—"
     const date = d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" })
-    const time = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
+    const time = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: 'America/Argentina/Buenos_Aires' })
     return `${date} ${time}`
   }
 
@@ -455,7 +455,7 @@ export function AdminTeam() {
                                       <span className="text-[10px] text-blue-600 font-bold uppercase tracking-wider flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-full">
                                         <CalendarDays className="h-3 w-3" />
                                         {new Date(lead.scheduled_for).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}{" "}
-                                        {new Date(lead.scheduled_for).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                        {new Date(lead.scheduled_for).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}
                                       </span>
                                     ) : (
                                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">

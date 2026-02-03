@@ -286,19 +286,24 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
     // --- NOTIFICACIONES ---
     const fetchNotifications = async () => {
         // Campanita: en OPS mostramos solo eventos funcionales (persistentes) que necesita el equipo.
+        // IMPORTANTE: Solo mostrar notificaciones que tienen event_type explícito en la lista permitida
         const allowedOpsEvents = ['venta_ingresada', 'archivo_subido', 'chat_venta', 'cambio_estado', 'opschat']
 
-        const base = supabase.from('notifications').select('*').eq('read', false).order('created_at', { ascending: false }).limit(20)
-
-        // Escuchar notificaciones MÍAS, de "OPS" o de "Administración" (admin)
-        // En OPS filtramos además por event_type para evitar ruido de Seller.
         const roleStr = String(role || '')
 
-        const q = (roleStr === 'ops' || roleStr === 'ops_manager')
-            ? base.or(`user_name.eq.${userName},user_name.eq.OPS`).in('event_type', allowedOpsEvents)
-            : base.or(`user_name.eq.${userName},user_name.eq.OPS,user_name.eq.Administración`)
+        // Para OPS: filtrar SOLO por event_type permitido, ignorando todo lo demás
+        // Para Admin: mostrar todo para usuarios específicos
+        let query = supabase.from('notifications').select('*').eq('read', false).order('created_at', { ascending: false }).limit(20)
 
-        const { data } = await q
+        if (roleStr === 'ops' || roleStr === 'ops_manager') {
+            // OPS solo ve notificaciones con event_type explícito en la lista permitida
+            query = query.in('event_type', allowedOpsEvents)
+        } else {
+            // Admin ve notificaciones dirigidas a ellos o a "Administración"
+            query = query.or(`user_name.eq.${userName},user_name.eq.Administración`)
+        }
+
+        const { data } = await query
         if (data) setNotifications(data)
     }
 

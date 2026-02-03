@@ -28,7 +28,7 @@ export function FocusModeView() {
   const [copySuccess, setCopySuccess] = useState(false)
   const [streak, setStreak] = useState(0)
   const [currentUser, setCurrentUser] = useState<string | null>(null)
-  
+
   // ESTADO PARA EL MODAL DE DETALLE
   const [isDetailOpen, setIsDetailOpen] = useState(false)
 
@@ -51,10 +51,10 @@ export function FocusModeView() {
       .order("created_at", { ascending: false })
 
     if (data) {
-        setLeads(data)
-        if (currentIndex >= data.length && data.length > 0) {
-            setCurrentIndex(data.length - 1)
-        }
+      setLeads(data)
+      if (currentIndex >= data.length && data.length > 0) {
+        setCurrentIndex(data.length - 1)
+      }
     }
     setLoading(false)
   }
@@ -103,7 +103,7 @@ export function FocusModeView() {
 
     const newCount = (currentLead.calls || 0) + 1
     const now = new Date()
-    const newNotes = (currentLead.notes || "") + `\n[FOCO] Llamada #${newCount} - ${now.toLocaleTimeString()}`
+    const newNotes = (currentLead.notes || "") + `\n[FOCO] Llamada #${newCount} - ${now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}`
 
     const updatedLead = { ...currentLead, calls: newCount, notes: newNotes, last_update: now.toISOString() }
     const newLeads = [...leads]
@@ -118,7 +118,7 @@ export function FocusModeView() {
 
   return (
     <div className="h-full flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 p-6 relative">
-      
+
       <div className="w-full max-w-lg mb-6 flex justify-between items-end animate-in fade-in slide-in-from-top-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -161,14 +161,14 @@ export function FocusModeView() {
 
           {/* BOTÓN VER FICHA (Props corregidas) */}
           <div className="mb-6">
-             <Button 
-                className="w-full h-12 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 font-bold text-base shadow-sm hover:bg-slate-50 dark:hover:bg-slate-900 transition-all active:scale-[0.98] group"
-                onClick={() => setIsDetailOpen(true)}
-             >
-                <FileText className="mr-2 h-5 w-5 text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300 transition-colors"/> 
-                Ver Ficha Completa / Notas
-                <ExternalLink className="ml-2 h-4 w-4 opacity-50 group-hover:opacity-100 transition-opacity"/>
-             </Button>
+            <Button
+              className="w-full h-12 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 font-bold text-base shadow-sm hover:bg-slate-50 dark:hover:bg-slate-900 transition-all active:scale-[0.98] group"
+              onClick={() => setIsDetailOpen(true)}
+            >
+              <FileText className="mr-2 h-5 w-5 text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300 transition-colors" />
+              Ver Ficha Completa / Notas
+              <ExternalLink className="ml-2 h-4 w-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+            </Button>
           </div>
 
           <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
@@ -181,14 +181,14 @@ export function FocusModeView() {
 
       {/* RENDERIZADO CON PROPS CORREGIDAS (open y onOpenChange) */}
       {isDetailOpen && currentLead && (
-          <LeadDetail
-            open={isDetailOpen}
-            onOpenChange={(isOpen: boolean) => {
-                setIsDetailOpen(isOpen)
-                if (!isOpen) fetchFocusLeads()
-            }}
-            lead={currentLead}
-          />
+        <LeadDetail
+          open={isDetailOpen}
+          onOpenChange={(isOpen: boolean) => {
+            setIsDetailOpen(isOpen)
+            if (!isOpen) fetchFocusLeads()
+          }}
+          lead={currentLead}
+        />
       )}
     </div>
   )

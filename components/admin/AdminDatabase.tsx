@@ -185,6 +185,7 @@ export function AdminDatabase() {
   // --- SELECCIÓN MASIVA ---
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [targetAgent, setTargetAgent] = useState("")
+  const [targetStatus, setTargetStatus] = useState("") // Estado destino para reasignación
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
   // Nota: la devolución a OPS se hace desde el mismo selector de reasignación.
@@ -202,6 +203,7 @@ export function AdminDatabase() {
   const [webhookEvents, setWebhookEvents] = useState<LeadEvent[]>([])
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([])
   const [notes, setNotes] = useState<LeadNote[]>([])
+  const [chatMessages, setChatMessages] = useState<any[]>([]) // Mensajes de chat (lead_messages + lead.chat)
 
   // Acciones del modal
   const [modalAgent, setModalAgent] = useState("")
@@ -414,8 +416,13 @@ export function AdminDatabase() {
       last_update: new Date().toISOString(),
     }
 
-    // Si el destino es OPS (ADMIN), además lo devolvemos a estado OPS.
-    if (sendToOps) {
+    // Si el destino es OPS (ADMIN) y no se eligió estado, lo devolvemos a "ingresado"
+    // Si se eligió un estado específico, usar ese estado
+    if (targetStatus && targetStatus !== "__none__") {
+      payload.status = targetStatus
+      payload.warning_sent = false
+      payload.warning_date = null
+    } else if (sendToOps) {
       payload.status = "ingresado"
       payload.warning_sent = false
       payload.warning_date = null
@@ -424,25 +431,28 @@ export function AdminDatabase() {
     const { error } = await supabase.from("leads").update(payload).in("id", selectedIds)
 
     if (!error) {
-      if (sendToOps) {
-        // Auditoría best-effort
-        try {
+      // Auditoría best-effort
+      try {
+        const finalStatus = targetStatus || (sendToOps ? "ingresado" : null)
+        if (finalStatus) {
           const rows = selectedIds.map((leadId) => ({
             lead_id: leadId,
             from_status: null,
-            to_status: "ingresado",
+            to_status: finalStatus,
             actor_name: currentUserName || "ADMIN",
             to_agent: targetAgent,
-            notes: "DEVUELTO A OPS (INGRESADO) DESDE ADMIN DATABASE",
+            notes: `Reasignado desde Admin Database${targetStatus ? ` a estado: ${targetStatus}` : ""}`,
             changed_at: new Date().toISOString(),
           }))
           await supabase.from("lead_status_history").insert(rows as any)
-        } catch (_) { }
-      }
+        }
+      } catch (_) { }
 
-      alert(` ${selectedIds.length} leads reasignados a ${targetAgent}${sendToOps ? " (OPS: ingresado)" : ""}.`)
+      const statusMsg = targetStatus ? ` (Estado: ${targetStatus})` : (sendToOps ? " (OPS: ingresado)" : "")
+      alert(` ${selectedIds.length} leads reasignados a ${targetAgent}${statusMsg}.`)
       setSelectedIds([])
       setTargetAgent("")
+      setTargetStatus("")
       fetchData()
     } else {
       alert("Error al reasignar.")
@@ -580,6 +590,51 @@ export function AdminDatabase() {
           break
         }
       }
+
+      // Chat Messages (lead_messages + lead.chat del webhook)
+      const allChatMessages: any[] = []
+
+      // 1. Mensajes de lead_messages (chat interno)
+      const { data: dbMessages } = await supabase
+        .from("lead_messages")
+        .select("*")
+        .eq("lead_id", id)
+        .order("created_at", { ascending: true })
+
+      if (dbMessages) {
+        dbMessages.forEach((m: any) => {
+          allChatMessages.push({
+            id: m.id,
+            text: m.text,
+            sender: m.sender,
+            time: m.created_at,
+            source: "internal"
+          })
+        })
+      }
+
+      // 2. Mensajes del webhook Wati (lead.chat)
+      if (lead?.chat && Array.isArray(lead.chat)) {
+        lead.chat.forEach((m: any, idx: number) => {
+          allChatMessages.push({
+            id: `webhook_${idx}`,
+            text: m.text || m.message || m.body || "",
+            sender: m.user || m.sender || (m.isMe ? "Bot" : "Cliente"),
+            time: m.time || m.timestamp || m.created_at || "",
+            source: "wati",
+            isMe: m.isMe || false
+          })
+        })
+      }
+
+      // Ordenar por tiempo
+      allChatMessages.sort((a, b) => {
+        const ta = new Date(a.time || 0).getTime()
+        const tb = new Date(b.time || 0).getTime()
+        return ta - tb
+      })
+
+      setChatMessages(allChatMessages)
     } finally {
       setDetailLoading(false)
     }
@@ -591,6 +646,7 @@ export function AdminDatabase() {
     setWebhookEvents([])
     setAuditLogs([])
     setNotes([])
+    setChatMessages([])
     setModalAgent("")
     setModalStatus("")
     setModalLossReason("")
@@ -911,6 +967,19 @@ export function AdminDatabase() {
                     })}
                   </SelectContent>
                 </Select>
+                <Select value={targetStatus} onValueChange={setTargetStatus}>
+                  <SelectTrigger className="w-full md:w-[180px] h-8 bg-white border-blue-200"><SelectValue placeholder="Estado (opcional)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin cambiar estado</SelectItem>
+                    <SelectItem value="nuevo">🆕 Nuevo</SelectItem>
+                    <SelectItem value="contactado">📞 Contactado</SelectItem>
+                    <SelectItem value="cotizacion">💰 Cotización</SelectItem>
+                    <SelectItem value="documentacion">📄 Documentación</SelectItem>
+                    <SelectItem value="ingresado">📥 Ingresado (OPS)</SelectItem>
+                    <SelectItem value="vendido">✅ Vendido</SelectItem>
+                    <SelectItem value="perdido">❌ Perdido</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700" onClick={executeReassign}><UserCheck className="h-4 w-4 mr-2" /> Aplicar</Button>
                 <Button size="sm" variant="destructive" className="h-8" onClick={() => setBulkDeleteOpen(true)}><Trash2 className="h-4 w-4 mr-2" /> Borrar Selección</Button>
               </div>
@@ -1181,23 +1250,25 @@ export function AdminDatabase() {
                           <TabsTrigger value="notes" className="gap-2 rounded-lg"><StickyNote className="h-4 w-4" /> Notas</TabsTrigger>
                         </TabsList>
 
-                        {/* TAB: Historial de Chat (WATI/Sofia) */}
+                        {/* TAB: Historial de Chat (WATI/Sofia + lead_messages interno) */}
                         <TabsContent value="chat" className="mt-4">
-                          {(!leadDetail?.chat || !Array.isArray(leadDetail.chat) || leadDetail.chat.length === 0) ? (
+                          {chatMessages.length === 0 ? (
                             <div className="text-sm text-slate-400 py-8 text-center">No hay historial de chat disponible.</div>
                           ) : (
                             <div className="max-h-[420px] overflow-y-auto space-y-3 p-2 bg-slate-50 dark:bg-slate-900/20 rounded-xl">
-                              {leadDetail.chat.map((msg: any, i: number) => {
-                                const isOutgoing = msg.isMe || msg.role === 'assistant' || msg.user === 'Bot'
+                              {chatMessages.map((msg: any, i: number) => {
+                                const isOutgoing = msg.isMe || msg.source === 'internal' || msg.role === 'assistant' || msg.sender === 'Bot'
                                 const messageText = msg.text || msg.content || ''
                                 const timestamp = msg.time || msg.timestamp || ''
                                 const senderName = msg.sender || (isOutgoing ? (msg.role === 'assistant' ? 'Sofía IA' : 'Agente') : 'Cliente')
+                                const sourceLabel = msg.source === 'wati' ? '📱' : (msg.source === 'internal' ? '💬' : '')
 
                                 return (
-                                  <div key={i} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                                  <div key={msg.id || i} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
                                     <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${isOutgoing ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
-                                      {!isOutgoing && <span className="text-[10px] font-bold text-slate-500 block mb-1">{senderName}</span>}
+                                      {!isOutgoing && <span className="text-[10px] font-bold text-slate-500 block mb-1">{sourceLabel} {senderName}</span>}
                                       {isOutgoing && msg.role === 'assistant' && <span className="text-[10px] font-bold text-blue-200 block mb-1">🤖 {senderName}</span>}
+                                      {isOutgoing && msg.source === 'internal' && <span className="text-[10px] font-bold text-blue-200 block mb-1">💬 {senderName}</span>}
                                       <p className="whitespace-pre-wrap">{messageText}</p>
                                       {timestamp && (
                                         <span className={`text-[10px] block text-right mt-1 font-medium ${isOutgoing ? 'text-blue-200' : 'text-slate-400'}`}>
@@ -1277,9 +1348,9 @@ export function AdminDatabase() {
               <Button variant="outline" onClick={closeLead}>Cerrar</Button>
             </DialogFooter>
           </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+        </DialogContent >
+      </Dialog >
+    </div >
   )
 
 }

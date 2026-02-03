@@ -68,7 +68,7 @@ import AdminIABrain from "@/components/admin/ai/AdminIABrain" // ✅ IMPORTADO: 
 const formatTime = (dateString: string) => {
   if (!dateString) return "--:--"
   const date = new Date(dateString)
-  return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' })
 }
 
 // --- COMPONENTE DE VISIÓN GLOBAL CON FILTRO DE MES ---

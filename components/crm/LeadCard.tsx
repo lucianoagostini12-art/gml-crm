@@ -150,7 +150,7 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
     if (lead.scheduled_for) {
         const date = new Date(lead.scheduled_for)
         const day = date.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' })
-        const time = date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+        const time = date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' })
         scheduleDisplay = `${day}, ${time}`
     }
 
@@ -221,10 +221,10 @@ export function LeadCard({ lead, onCallIncrement, onOmniClick }: LeadCardProps) 
                                     key={idx}
                                     variant="outline"
                                     className={`text-[8px] px-1 py-0 font-medium ${label.startsWith('Falta:')
-                                            ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                            : label === 'Pidió precio' || label === 'Intención alta'
-                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                        : label === 'Pidió precio' || label === 'Intención alta'
+                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                            : 'bg-slate-50 text-slate-600 border-slate-200'
                                         }`}
                                 >
                                     {label}

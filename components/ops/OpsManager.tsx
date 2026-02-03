@@ -824,7 +824,12 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
 
     const confirmAdvanceAction = async () => {
         if (!confirmingAdvance) return;
-        await updateOpInDb(confirmingAdvance.op.id, { status: confirmingAdvance.nextStage })
+        // ✅ Si avanza a cumplidas, guardar cumplida_at para OpsBilling
+        const updateData: any = { status: confirmingAdvance.nextStage }
+        if (confirmingAdvance.nextStage === 'cumplidas') {
+            updateData.cumplida_at = new Date().toISOString()
+        }
+        await updateOpInDb(confirmingAdvance.op.id, updateData)
         if (confirmingAdvance.nextStage === 'cumplidas') setShowCelebration(true);
         else showToast(`✅ Avanzó de etapa`, 'success');
         setConfirmingAdvance(null);

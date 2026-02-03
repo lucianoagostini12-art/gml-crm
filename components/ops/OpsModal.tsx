@@ -458,7 +458,13 @@ export function OpsModal({
         setLocalOp((prev: any) => ({ ...prev, [field]: value }))
         onUpdateOp({ ...localOp, [field]: value })
 
-        const { error } = await supabase.from('leads').update({ [field]: value }).eq('id', localOp.id)
+        // ✅ Si el campo es status y el valor es cumplidas, agregar cumplida_at
+        let updateData: any = { [field]: value }
+        if (field === 'status' && value === 'cumplidas') {
+            updateData.cumplida_at = new Date().toISOString()
+        }
+
+        const { error } = await supabase.from('leads').update(updateData).eq('id', localOp.id)
 
         if (error) {
             console.error(`Error guardando ${field}:`, error)

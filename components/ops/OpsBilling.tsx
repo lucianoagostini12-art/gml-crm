@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle, Copy, Check } from "lucide-react"
+import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle, Copy, Check, Trash2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
@@ -175,6 +175,13 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
     const [isFilterOpen, setIsFilterOpen] = useState(false)
     const [viewingSeller, setViewingSeller] = useState<string | null>(null)
 
+    // ✅ Estado para modal de Cartera Caída
+    const [carteraCaidaOp, setCarteraCaidaOp] = useState<any>(null)
+    const [carteraCaidaMotivo, setCarteraCaidaMotivo] = useState("")
+    const [isSavingCarteraCaida, setIsSavingCarteraCaida] = useState(false)
+    // ✅ Filtro de mes de cartera
+    const [filterCarteraMes, setFilterCarteraMes] = useState<string>('all')
+
     // MAPA DE VENDEDORES (Para horas y fotos)
     const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
 
@@ -205,6 +212,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
             const mapped: Operation[] = opsData.map((d: any) => ({
                 id: d.id,
                 entryDate: d.created_at,
+                cumplida_at: d.cumplida_at, // ✅ Fecha cuando pasó a cumplidas
                 clientName: d.name || "Sin Nombre",
                 dni: d.dni || "",
                 origen: d.source || "Dato",
@@ -222,6 +230,12 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                 billing_period: d.billing_period,
                 billing_price_override: d.billing_price_override,
                 billing_portfolio_override: d.billing_portfolio_override,
+                // ✅ Campos de cartera caída
+                cartera_caida: d.cartera_caida || false,
+                cartera_caida_motivo: d.cartera_caida_motivo || "",
+                cartera_caida_at: d.cartera_caida_at,
+                // ✅ Tipo de operación (alta/pass)
+                type: d.type || 'alta',
 
                 // Mapeo completo para OpsModal
                 phone: d.phone,
@@ -340,7 +354,8 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
     const opsInPeriod = useMemo(() => {
         const term = searchTerm.toLowerCase().trim()
         return operations.filter((op: any) => {
-            const opDate = new Date(op.entryDate)
+            // ✅ QUIRÚRGICO: Usar cumplida_at para período de liquidación (solo en OpsBilling)
+            const opDate = new Date(op.cumplida_at || op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
             const targetMonth = op.billing_period || defaultMonth
 
@@ -362,23 +377,29 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
         })
     }, [operations, selectedMonth, filters, searchTerm])
 
-    const opsPreviousMonth = useMemo(() => {
-        const [y, m] = selectedMonth.split('-').map(Number)
-        const prevDate = new Date(y, m - 2, 1)
-        const prevIso = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
+    // ✅ CARTERA ACUMULATIVA: Todas las operaciones de Prevención aprobadas (snowball)
+    const allPortfolioOps = useMemo(() => {
         const term = searchTerm.toLowerCase().trim()
+        const [selectedYear, selectedMonthNum] = selectedMonth.split('-').map(Number)
+        const selectedDate = new Date(selectedYear, selectedMonthNum - 1, 1)
 
         return operations.filter((op: any) => {
-            const opDate = new Date(op.entryDate)
+            // ✅ Usar cumplida_at para determinar el mes de cartera
+            const opDate = new Date(op.cumplida_at || op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
             const targetMonth = op.billing_period || defaultMonth
+            const [opYear, opMonth] = targetMonth.split('-').map(Number)
+            const opMonthDate = new Date(opYear, opMonth - 1, 1)
 
+            // Solo operaciones de meses ANTERIORES al seleccionado
+            if (opMonthDate >= selectedDate) return false
             if (op.billing_approved !== true) return false
-            if (targetMonth !== prevIso) return false
+            // ✅ Excluir carteras caídas
+            if (op.cartera_caida === true) return false
             // ✅ CARTERA: Solo operaciones de Prevención Salud generan cartera
             const prepagaLower = op.prepaga?.toLowerCase() || ""
             if (!prepagaLower.includes("preven")) return false
-            // ✅ Aplicar filtros de vendedor y prepaga (igual que opsInPeriod)
+            // ✅ Aplicar filtros de vendedor y prepaga
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
 
@@ -392,8 +413,26 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                 if (!matchesSearch) return false
             }
             return true
+        }).map((op: any) => {
+            // ✅ Agregar campo con mes de inicio de cartera para badge
+            const opDate = new Date(op.cumplida_at || op.entryDate)
+            const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
+            const carteraMes = op.billing_period || defaultMonth
+            return { ...op, cartera_inicio_mes: carteraMes }
         })
     }, [operations, selectedMonth, filters, searchTerm])
+
+    // ✅ Meses únicos de cartera para el filtro
+    const uniqueCarteraMeses = useMemo(() => {
+        const meses = allPortfolioOps.map((op: any) => op.cartera_inicio_mes).filter(Boolean)
+        return [...new Set(meses)].sort().reverse() // Más reciente primero
+    }, [allPortfolioOps])
+
+    // ✅ Operaciones de cartera filtradas por mes
+    const filteredPortfolioOps = useMemo(() => {
+        if (filterCarteraMes === 'all') return allPortfolioOps
+        return allPortfolioOps.filter((op: any) => op.cartera_inicio_mes === filterCarteraMes)
+    }, [allPortfolioOps, filterCarteraMes])
 
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
     const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
@@ -426,7 +465,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
     }, [approvedOps, calcRules])
 
     const totalBilling = totalNeto + totalIVA
-    const portfolioOps = opsPreviousMonth.reduce((acc, op) => acc + calculate(op).portfolio, 0)
+    const portfolioOps = allPortfolioOps.reduce((acc, op) => acc + calculate(op).portfolio, 0)
     const portfolioManualTotal = manualPortfolio.reduce((acc, item) => acc + (parseFloat(item.calculated_liquidation || "0") * calcRules.portfolioRate), 0)
     const totalPortfolio = portfolioOps + portfolioManualTotal
 
@@ -522,6 +561,28 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
             name: newClient.name, dni: newClient.dni, prepaga: newClient.prepaga, plan: newClient.plan, full_price: parseFloat(newClient.fullPrice), aportes: parseFloat(newClient.aportes), descuento: parseFloat(newClient.descuento), calculated_liquidation: val, hijos: newClient.hijos
         })
         setNewClient({ name: "", dni: "", prepaga: "Prevención Salud", plan: "", fullPrice: "0", aportes: "0", descuento: "0", hijos: [] }); setIsAddingClient(false)
+    }
+
+    // ✅ FUNCIÓN: Marcar cartera como caída
+    const handleCarteraCaida = async () => {
+        if (!carteraCaidaOp || !carteraCaidaMotivo.trim()) return
+        setIsSavingCarteraCaida(true)
+        await supabase.from('leads').update({
+            cartera_caida: true,
+            cartera_caida_motivo: carteraCaidaMotivo.trim(),
+            cartera_caida_at: new Date().toISOString()
+        }).eq('id', carteraCaidaOp.id)
+
+        // Actualizar operaciones localmente
+        setOperations(prev => prev.map(op =>
+            op.id === carteraCaidaOp.id
+                ? { ...op, cartera_caida: true, cartera_caida_motivo: carteraCaidaMotivo.trim() }
+                : op
+        ))
+
+        setCarteraCaidaOp(null)
+        setCarteraCaidaMotivo("")
+        setIsSavingCarteraCaida(false)
     }
 
     const uniqueSellers = Array.from(new Set(operations.map(o => o.seller)))
@@ -625,7 +686,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                     <TabsList className="bg-transparent gap-6 p-0 h-auto">
                         <TabsTrigger value="audit" className="rounded-none border-b-4 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-700 px-4 py-2 text-slate-400 font-bold uppercase tracking-widest transition-all">⏳ Mesa de Entrada ({pendingOps.length})</TabsTrigger>
                         <TabsTrigger value="official" className="rounded-none border-b-4 border-transparent data-[state=active]:border-green-600 data-[state=active]:text-green-700 px-4 py-2 text-slate-400 font-bold uppercase tracking-widest transition-all">✅ Liquidación Oficial ({approvedOps.length})</TabsTrigger>
-                        <TabsTrigger value="portfolio" className="rounded-none border-b-4 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 px-4 py-2 text-slate-400 font-bold uppercase tracking-widest transition-all">📈 Cartera</TabsTrigger>
+                        <TabsTrigger value="portfolio" className="rounded-none border-b-4 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 px-4 py-2 text-slate-400 font-bold uppercase tracking-widest transition-all">📈 Cartera ({allPortfolioOps.length})</TabsTrigger>
                         <TabsTrigger value="commissions" className="rounded-none border-b-4 border-transparent data-[state=active]:border-pink-600 data-[state=active]:text-pink-700 px-4 py-2 text-slate-400 font-bold uppercase tracking-widest transition-all">💸 Comisiones</TabsTrigger>
                     </TabsList>
                     <div className="flex gap-2 mb-2 items-center">
@@ -748,33 +809,93 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                 {/* --- CARTERA --- */}
                 <TabsContent value="portfolio" className="flex-1 overflow-hidden m-0">
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-blue-500">
-                        <div className="bg-white p-3 border-b border-slate-100 flex justify-between items-center"><div className="text-xs text-blue-800 font-medium">Proyección de Cartera (Automática + Manual) - <b>Mostrando ventas de {formatMonth(new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 2).toISOString().slice(0, 7))}</b></div><Button size="sm" className="h-7 text-xs gap-2 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsAddingClient(true)}><Plus size={12} /> Nuevo Cliente</Button></div>
+                        <div className="bg-white p-3 border-b border-slate-100 flex justify-between items-center gap-4">
+                            <div className="text-xs text-blue-800 font-medium">
+                                Proyección de Cartera Acumulativa - <b>{filteredPortfolioOps.length} de {allPortfolioOps.length} operaciones</b>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {/* ✅ Filtro por mes de cartera */}
+                                <Select value={filterCarteraMes} onValueChange={setFilterCarteraMes}>
+                                    <SelectTrigger className="w-[160px] h-8 text-xs">
+                                        <SelectValue placeholder="Filtrar por mes" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Todos los meses</SelectItem>
+                                        {uniqueCarteraMeses.map((m: string) => {
+                                            const [y, mo] = m.split("-")
+                                            const nombre = new Date(parseInt(y), parseInt(mo) - 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+                                            return <SelectItem key={m} value={m}>{nombre}</SelectItem>
+                                        })}
+                                    </SelectContent>
+                                </Select>
+                                <Button size="sm" className="h-7 text-xs gap-2 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsAddingClient(true)}><Plus size={12} /> Nuevo Cliente</Button>
+                            </div>
+                        </div>
                         <CardContent className="p-0 flex-1 overflow-auto">
                             <Table>
-                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente</TableHead><TableHead>Origen</TableHead><TableHead>Prepaga</TableHead><TableHead>Valor Liquidado</TableHead><TableHead className="text-right font-black text-blue-700 bg-blue-50 w-[180px]">CARTERA (Editable)</TableHead></TableRow></TableHeader>
+                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente</TableHead><TableHead>Cartera Desde</TableHead><TableHead>Prepaga</TableHead><TableHead>Valor Liquidado</TableHead><TableHead className="text-right font-black text-blue-700 bg-blue-50 w-[180px]">CARTERA (Editable)</TableHead><TableHead className="w-[50px]"></TableHead></TableRow></TableHeader>
                                 <TableBody>
-                                    {opsPreviousMonth.map((op: any) => {
+                                    {filteredPortfolioOps.map((op: any) => {
                                         const liq = calculate(op)
+                                        // Formatear mes de inicio para badge premium
+                                        const mesInicio = op.cartera_inicio_mes || ""
+                                        const [year, month] = mesInicio.split("-")
+                                        const mesNombre = month ? new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).toUpperCase() : ""
+                                        const isPass = op.type === 'pass'
                                         return (
-                                            <TableRow key={op.id} className="hover:bg-slate-50">
+                                            <TableRow key={op.id} className="hover:bg-slate-50 group">
                                                 <TableCell className="font-bold text-slate-700">
                                                     <div className="flex items-center gap-1">
                                                         {op.clientName}
+                                                        {/* ✅ Badge PASS violeta */}
+                                                        {isPass && (
+                                                            <Badge className="bg-purple-500 text-white text-[9px] font-bold px-1.5 py-0 ml-1">
+                                                                PASS
+                                                            </Badge>
+                                                        )}
                                                         <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                                             {op.cuit || op.dni}
                                                         </span>
                                                         <CopyDniButton cuit={op.cuit} dni={op.dni} />
                                                     </div>
                                                 </TableCell>
-                                                <TableCell><Badge variant="secondary" className="text-[9px]">Automático</Badge></TableCell>
+                                                <TableCell>
+                                                    {/* ✅ Badge premium de mes de inicio */}
+                                                    <Badge className="bg-gradient-to-r from-blue-500 to-blue-600 text-white text-[9px] font-bold px-2 py-0.5 shadow-sm">
+                                                        🏷️ {mesNombre}
+                                                    </Badge>
+                                                </TableCell>
                                                 <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge></TableCell>
                                                 <TableCell>{formatMoney(liq.val)}</TableCell>
                                                 <TableCell className="text-right bg-blue-50/50 p-2" onClick={e => e.stopPropagation()}>
                                                     <div className="relative">
                                                         <span className="absolute left-3 top-2.5 text-blue-600 font-bold text-xs">$</span>
-                                                        {/* ✅ STEP 0.01 */}
-                                                        <Input className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm" type="number" step="0.01" value={liq.portfolio} onChange={(e) => handlePortfolioChange(op.id, e.target.value)} disabled={isLocked} />
+                                                        {/* ✅ Input de texto para permitir comas/puntos */}
+                                                        <Input
+                                                            className="h-8 pl-5 font-bold text-blue-700 border-blue-200 bg-white focus:ring-blue-500 text-right text-sm"
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            pattern="[0-9]*[.,]?[0-9]*"
+                                                            value={liq.portfolio}
+                                                            onChange={(e) => {
+                                                                // Reemplazar coma por punto para parseFloat
+                                                                const val = e.target.value.replace(',', '.')
+                                                                handlePortfolioChange(op.id, val)
+                                                            }}
+                                                            disabled={isLocked}
+                                                        />
                                                     </div>
+                                                </TableCell>
+                                                <TableCell className="p-1">
+                                                    {/* ✅ Botón de cartera caída */}
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 hover:bg-red-50"
+                                                        onClick={() => setCarteraCaidaOp(op)}
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </Button>
                                                 </TableCell>
                                             </TableRow>
                                         )
@@ -800,10 +921,10 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                             </Table>
                         </CardContent>
                     </Card>
-                </TabsContent>
+                </TabsContent >
 
                 {/* --- COMISIONES --- */}
-                <TabsContent value="commissions" className="flex-1 overflow-hidden m-0">
+                < TabsContent value="commissions" className="flex-1 overflow-hidden m-0" >
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-pink-500 bg-slate-50/50">
                         <div className="flex-1 overflow-y-auto p-6">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -839,8 +960,8 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                             </div>
                         </div>
                     </Card>
-                </TabsContent>
-            </Tabs>
+                </TabsContent >
+            </Tabs >
 
             {/* --- OpsModal removido: no es necesario en Facturación --- */}
 
@@ -893,11 +1014,51 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
             {/* ✅ ALERTA DE RETROCESO (MES ANTERIOR) */}
             <AlertDialog open={!!retroOpId} onOpenChange={() => setRetroOpId(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Mover al mes ANTERIOR?</AlertDialogTitle><AlertDialogDescription>La venta pasará al período anterior del actual.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmRetro}>Confirmar</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
+            {/* ✅ MODAL DE CARTERA CAÍDA */}
+            <Dialog open={!!carteraCaidaOp} onOpenChange={() => { setCarteraCaidaOp(null); setCarteraCaidaMotivo("") }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-600">
+                            <Trash2 size={20} /> ¿Esta cartera se cayó?
+                        </DialogTitle>
+                        <DialogDescription>
+                            {carteraCaidaOp?.clientName} - {carteraCaidaOp?.prepaga}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <div className="bg-red-50 border border-red-100 rounded-lg p-3 text-sm text-red-700">
+                            Esta acción marcará la cartera como perdida. Podrás recuperarla desde la Base de Datos.
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="text-sm font-bold">Motivo de la pérdida</Label>
+                            <textarea
+                                className="w-full min-h-[100px] p-3 border border-slate-200 rounded-lg text-sm resize-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                                placeholder="Describe el motivo por el cual esta cartera se perdió..."
+                                value={carteraCaidaMotivo}
+                                onChange={(e) => setCarteraCaidaMotivo(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => { setCarteraCaidaOp(null); setCarteraCaidaMotivo("") }}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            onClick={handleCarteraCaida}
+                            disabled={!carteraCaidaMotivo.trim() || isSavingCarteraCaida}
+                        >
+                            {isSavingCarteraCaida ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Guardando...</> : "Confirmar Caída"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={showHistory} onOpenChange={setShowHistory}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Historial Anual</DialogTitle></DialogHeader><div className="py-4"><Table><TableHeader><TableRow><TableHead>Mes</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-[50%]">Gráfico</TableHead></TableRow></TableHeader><TableBody>{historyData.map((data) => { const max = Math.max(...historyData.map(d => d.total)); const w = max > 0 ? (data.total / max) * 100 : 0; return (<TableRow key={data.month}><TableCell className="capitalize font-bold">{formatMonth(data.month)}</TableCell><TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell><TableCell><div className="h-4 bg-slate-100 rounded-full w-full overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${w}%` }}></div></div></TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
 
             <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc = calculate(op); return (<TableRow key={op.id} className={op.payStatus === 'absorbed' || op.payStatus === 'special_locked' ? 'opacity-50 bg-slate-50' : ''}><TableCell className="text-xs">{op.entryDate}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-right font-mono text-xs">{formatMoney(calc.val)}</TableCell><TableCell>{op.payStatus === 'special_paid' && <Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus === 'special_locked' && <Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus === 'absorbed' && <Badge variant="outline">Absorbida</Badge>}{op.payStatus === 'paid' && <Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
 
             <Dialog open={isAddingClient} onOpenChange={setIsAddingClient}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Agregar Manual</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-6 py-4"><div className="space-y-4"><div className="space-y-1"><Label>Nombre</Label><Input value={newClient.name} onChange={e => setNewClient({ ...newClient, name: e.target.value })} /></div><div className="space-y-1"><Label>DNI</Label><Input value={newClient.dni} onChange={e => setNewClient({ ...newClient, dni: e.target.value })} /></div></div><div className="space-y-4 bg-slate-50 p-4 rounded"><div className="space-y-1"><Label>Full Price</Label><Input type="number" value={newClient.fullPrice} onChange={e => setNewClient({ ...newClient, fullPrice: e.target.value })} /></div><div className="grid grid-cols-2 gap-2"><div><Label>Aportes</Label><Input type="number" value={newClient.aportes} onChange={e => setNewClient({ ...newClient, aportes: e.target.value })} /></div><div><Label>Desc.</Label><Input type="number" value={newClient.descuento} onChange={e => setNewClient({ ...newClient, descuento: e.target.value })} /></div></div><div className="pt-2 flex justify-between text-sm font-bold text-blue-600"><span>Cartera Est:</span><span>${Math.round((parseFloat(newClient.fullPrice) - parseFloat(newClient.descuento) - parseFloat(newClient.aportes)) * calcRules.portfolioRate).toLocaleString()}</span></div></div></div><DialogFooter><Button onClick={handleAddClient}>Guardar</Button></DialogFooter></DialogContent></Dialog>
-        </div>
+        </div >
     )
 }

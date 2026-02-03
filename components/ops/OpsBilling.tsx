@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle, Copy, Check, Trash2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
@@ -181,6 +182,9 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
     const [isSavingCarteraCaida, setIsSavingCarteraCaida] = useState(false)
     // ✅ Filtro de mes de cartera
     const [filterCarteraMes, setFilterCarteraMes] = useState<string>('all')
+    // ✅ Filtros de verificación
+    const [filterVerificadoLiq, setFilterVerificadoLiq] = useState<'all' | 'verified' | 'pending'>('all')
+    const [filterVerificadoCartera, setFilterVerificadoCartera] = useState<'all' | 'verified' | 'pending'>('all')
 
     // MAPA DE VENDEDORES (Para horas y fotos)
     const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
@@ -236,6 +240,12 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                 cartera_caida_at: d.cartera_caida_at,
                 // ✅ Tipo de operación (alta/pass)
                 type: d.type || 'alta',
+                // ✅ Verificación de billing
+                billing_verified: d.billing_verified || false,
+                billing_verified_at: d.billing_verified_at,
+                // ✅ Grupo familiar (igual que OpsPostsale)
+                capitas: d.capitas || 1,
+                familia: d.family_members || d.hijos || [],
 
                 // Mapeo completo para OpsModal
                 phone: d.phone,
@@ -251,8 +261,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                 chat: [],
                 reminders: [],
                 history: [],
-                adminNotes: d.admin_notes || [],
-                capitas: d.capitas ? Number(d.capitas) : 1
+                adminNotes: d.admin_notes || []
             }))
             setOperations(mapped)
         }
@@ -434,8 +443,22 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
         return allPortfolioOps.filter((op: any) => op.cartera_inicio_mes === filterCarteraMes)
     }, [allPortfolioOps, filterCarteraMes])
 
+    // ✅ Filtrado adicional por verificación en Cartera
+    const filteredPortfolioOpsFinal = useMemo(() => {
+        if (filterVerificadoCartera === 'all') return filteredPortfolioOps
+        if (filterVerificadoCartera === 'verified') return filteredPortfolioOps.filter((op: any) => op.billing_verified === true)
+        return filteredPortfolioOps.filter((op: any) => op.billing_verified !== true)
+    }, [filteredPortfolioOps, filterVerificadoCartera])
+
     const pendingOps = opsInPeriod.filter((op: any) => op.billing_approved !== true)
-    const approvedOps = opsInPeriod.filter((op: any) => op.billing_approved === true)
+    const approvedOpsBase = opsInPeriod.filter((op: any) => op.billing_approved === true)
+
+    // ✅ Filtrado por verificación en Liquidación Oficial
+    const approvedOps = useMemo(() => {
+        if (filterVerificadoLiq === 'all') return approvedOpsBase
+        if (filterVerificadoLiq === 'verified') return approvedOpsBase.filter((op: any) => op.billing_verified === true)
+        return approvedOpsBase.filter((op: any) => op.billing_verified !== true)
+    }, [approvedOpsBase, filterVerificadoLiq])
 
     const historyData = useMemo(() => {
         const aggregated: Record<string, number> = {}
@@ -583,6 +606,24 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
         setCarteraCaidaOp(null)
         setCarteraCaidaMotivo("")
         setIsSavingCarteraCaida(false)
+    }
+
+    // ✅ FUNCIÓN: Toggle de verificación de billing
+    const toggleBillingVerified = async (opId: string, currentValue: boolean) => {
+        const newValue = !currentValue
+        const now = newValue ? new Date().toISOString() : null
+
+        await supabase.from('leads').update({
+            billing_verified: newValue,
+            billing_verified_at: now
+        }).eq('id', opId)
+
+        // Actualizar localmente
+        setOperations(prev => prev.map(op =>
+            op.id === opId
+                ? { ...op, billing_verified: newValue, billing_verified_at: now }
+                : op
+        ))
     }
 
     const uniqueSellers = Array.from(new Set(operations.map(o => o.seller)))
@@ -757,7 +798,20 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                         <div className="bg-white p-3 border-b border-slate-100">
                             <div className="flex justify-between items-center mb-4">
                                 <div className="text-xs text-green-800 font-medium flex items-center gap-2"><CheckCircle2 size={14} /> Estas ventas ya están computadas para la factura final.</div>
-                                <Button size="sm" variant="outline" className="h-7 text-xs gap-2" disabled={approvedOps.length === 0}><Download size={12} /> Exportar Excel</Button>
+                                <div className="flex items-center gap-3">
+                                    {/* ✅ Filtro de verificación */}
+                                    <Select value={filterVerificadoLiq} onValueChange={(v) => setFilterVerificadoLiq(v as any)}>
+                                        <SelectTrigger className="w-[140px] h-8 text-xs">
+                                            <SelectValue placeholder="Verificación" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Todos</SelectItem>
+                                            <SelectItem value="verified">✅ Verificados</SelectItem>
+                                            <SelectItem value="pending">⏳ Sin verificar</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <Button size="sm" variant="outline" className="h-7 text-xs gap-2" disabled={approvedOps.length === 0}><Download size={12} /> Exportar Excel</Button>
+                                </div>
                             </div>
                             <div className="grid grid-cols-3 gap-4">
                                 {/* ✅ Subtotales Redondeados para consistencia con tarjetas */}
@@ -769,11 +823,19 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
 
                         <CardContent className="p-0 flex-1 overflow-auto">
                             <Table>
-                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente / Plan</TableHead><TableHead>Vendedor</TableHead><TableHead className="text-right">Valores Orig.</TableHead><TableHead className="w-[180px] text-center">Fórmula</TableHead><TableHead className="text-right font-black text-green-700 w-[160px] bg-green-50/50">A LIQUIDAR ($)</TableHead><TableHead className="text-right w-[80px]">Volver</TableHead></TableRow></TableHeader>
-                                <TableBody>{approvedOps.length === 0 ? (<TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">Aprobá ventas desde la pestaña "Mesa de Entrada".</TableCell></TableRow>) : approvedOps.map((op: any) => {
+                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[40px]">✓</TableHead><TableHead>Cliente / Plan</TableHead><TableHead>Vendedor</TableHead><TableHead className="text-right">Valores Orig.</TableHead><TableHead className="w-[180px] text-center">Fórmula</TableHead><TableHead className="text-right font-black text-green-700 w-[160px] bg-green-50/50">A LIQUIDAR ($)</TableHead><TableHead className="text-right w-[80px]">Volver</TableHead></TableRow></TableHeader>
+                                <TableBody>{approvedOps.length === 0 ? (<TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">Aprobá ventas desde la pestaña "Mesa de Entrada".</TableCell></TableRow>) : approvedOps.map((op: any) => {
                                     const calc = calculate(op)
                                     return (
-                                        <TableRow key={op.id} className="hover:bg-slate-50 transition-colors group">
+                                        <TableRow key={op.id} className={`hover:bg-slate-50 transition-colors group ${op.billing_verified ? 'bg-green-50/30' : ''}`}>
+                                            {/* ✅ Checkbox de verificación */}
+                                            <TableCell className="p-2" onClick={(e) => e.stopPropagation()}>
+                                                <Checkbox
+                                                    checked={op.billing_verified || false}
+                                                    onCheckedChange={() => toggleBillingVerified(op.id, op.billing_verified)}
+                                                    className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600"
+                                                />
+                                            </TableCell>
                                             <TableCell>
                                                 <div className="font-bold text-slate-800 flex items-center gap-1">
                                                     {op.clientName}
@@ -785,6 +847,35 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                                 <div className="flex items-center gap-2 text-xs text-slate-500">
                                                     <Badge variant="outline" className={`h-4 px-1 text-[9px] border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
                                                     <span>{op.plan}</span>
+                                                    {/* ✅ Popover de grupo familiar (igual que OpsPostsale) */}
+                                                    <Popover>
+                                                        <PopoverTrigger asChild>
+                                                            <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 cursor-help hover:bg-blue-100 transition-colors" onClick={(e) => e.stopPropagation()}>
+                                                                <Users size={10} className="text-blue-500" />
+                                                                <span className="text-[10px] font-bold text-blue-700">{op.capitas}</span>
+                                                            </div>
+                                                        </PopoverTrigger>
+                                                        <PopoverContent className="w-60 p-3 bg-white border-slate-200 shadow-xl">
+                                                            <h4 className="text-xs font-black text-slate-600 uppercase mb-2 border-b pb-1">Grupo Familiar</h4>
+                                                            <div className="space-y-2">
+                                                                <div className="text-xs">
+                                                                    <span className="font-bold text-slate-800 block">{op.clientName}</span>
+                                                                    <span className="text-[10px] text-slate-400">Titular</span>
+                                                                </div>
+                                                                {op.familia && op.familia.length > 0 ? op.familia.map((f: any, i: number) => (
+                                                                    <div key={i} className="text-xs border-t border-slate-50 pt-1 mt-1">
+                                                                        <span className="font-medium text-slate-700 block">{f.nombre}</span>
+                                                                        <div className="flex justify-between">
+                                                                            <span className="text-[10px] text-slate-400">{f.dni}</span>
+                                                                            <span className="text-[9px] bg-slate-100 px-1 rounded text-slate-500 uppercase">{f.rol || 'Familiar'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                )) : (
+                                                                    op.capitas > 1 ? <p className="text-[10px] text-red-400 italic">No hay datos de familiares cargados.</p> : null
+                                                                )}
+                                                            </div>
+                                                        </PopoverContent>
+                                                    </Popover>
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-xs text-slate-600 font-medium">{op.seller}</TableCell>
@@ -811,7 +902,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                     <Card className="h-full border-0 shadow-md flex flex-col border-t-4 border-t-blue-500">
                         <div className="bg-white p-3 border-b border-slate-100 flex justify-between items-center gap-4">
                             <div className="text-xs text-blue-800 font-medium">
-                                Proyección de Cartera Acumulativa - <b>{filteredPortfolioOps.length} de {allPortfolioOps.length} operaciones</b>
+                                Proyección de Cartera Acumulativa - <b>{filteredPortfolioOpsFinal.length} de {allPortfolioOps.length} operaciones</b>
                             </div>
                             <div className="flex items-center gap-3">
                                 {/* ✅ Filtro por mes de cartera */}
@@ -828,14 +919,25 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                         })}
                                     </SelectContent>
                                 </Select>
+                                {/* ✅ Filtro de verificación */}
+                                <Select value={filterVerificadoCartera} onValueChange={(v) => setFilterVerificadoCartera(v as any)}>
+                                    <SelectTrigger className="w-[140px] h-8 text-xs">
+                                        <SelectValue placeholder="Verificación" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Todos</SelectItem>
+                                        <SelectItem value="verified">✅ Verificados</SelectItem>
+                                        <SelectItem value="pending">⏳ Sin verificar</SelectItem>
+                                    </SelectContent>
+                                </Select>
                                 <Button size="sm" className="h-7 text-xs gap-2 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsAddingClient(true)}><Plus size={12} /> Nuevo Cliente</Button>
                             </div>
                         </div>
                         <CardContent className="p-0 flex-1 overflow-auto">
                             <Table>
-                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente</TableHead><TableHead>Cartera Desde</TableHead><TableHead>Prepaga</TableHead><TableHead>Valor Liquidado</TableHead><TableHead className="text-right font-black text-blue-700 bg-blue-50 w-[180px]">CARTERA (Editable)</TableHead><TableHead className="w-[50px]"></TableHead></TableRow></TableHeader>
+                                <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead className="w-[40px]">✓</TableHead><TableHead>Cliente</TableHead><TableHead>Cartera Desde</TableHead><TableHead>Prepaga</TableHead><TableHead>Valor Liquidado</TableHead><TableHead className="text-right font-black text-blue-700 bg-blue-50 w-[180px]">CARTERA (Editable)</TableHead><TableHead className="w-[50px]"></TableHead></TableRow></TableHeader>
                                 <TableBody>
-                                    {filteredPortfolioOps.map((op: any) => {
+                                    {filteredPortfolioOpsFinal.map((op: any) => {
                                         const liq = calculate(op)
                                         // Formatear mes de inicio para badge premium
                                         const mesInicio = op.cartera_inicio_mes || ""
@@ -843,7 +945,15 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                         const mesNombre = month ? new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).toUpperCase() : ""
                                         const isPass = op.type === 'pass'
                                         return (
-                                            <TableRow key={op.id} className="hover:bg-slate-50 group">
+                                            <TableRow key={op.id} className={`hover:bg-slate-50 group ${op.billing_verified ? 'bg-blue-50/30' : ''}`}>
+                                                {/* ✅ Checkbox de verificación */}
+                                                <TableCell className="p-2" onClick={(e) => e.stopPropagation()}>
+                                                    <Checkbox
+                                                        checked={op.billing_verified || false}
+                                                        onCheckedChange={() => toggleBillingVerified(op.id, op.billing_verified)}
+                                                        className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                                                    />
+                                                </TableCell>
                                                 <TableCell className="font-bold text-slate-700">
                                                     <div className="flex items-center gap-1">
                                                         {op.clientName}
@@ -865,7 +975,40 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                                         🏷️ {mesNombre}
                                                     </Badge>
                                                 </TableCell>
-                                                <TableCell><Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge></TableCell>
+                                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                                    <div className="flex items-center gap-2">
+                                                        <Badge variant="outline" className={`border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
+                                                        {/* ✅ Popover de grupo familiar (igual que OpsPostsale) */}
+                                                        <Popover>
+                                                            <PopoverTrigger asChild>
+                                                                <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 cursor-help hover:bg-blue-100 transition-colors">
+                                                                    <Users size={10} className="text-blue-500" />
+                                                                    <span className="text-[10px] font-bold text-blue-700">{op.capitas}</span>
+                                                                </div>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent className="w-60 p-3 bg-white border-slate-200 shadow-xl">
+                                                                <h4 className="text-xs font-black text-slate-600 uppercase mb-2 border-b pb-1">Grupo Familiar</h4>
+                                                                <div className="space-y-2">
+                                                                    <div className="text-xs">
+                                                                        <span className="font-bold text-slate-800 block">{op.clientName}</span>
+                                                                        <span className="text-[10px] text-slate-400">Titular</span>
+                                                                    </div>
+                                                                    {op.familia && op.familia.length > 0 ? op.familia.map((f: any, i: number) => (
+                                                                        <div key={i} className="text-xs border-t border-slate-50 pt-1 mt-1">
+                                                                            <span className="font-medium text-slate-700 block">{f.nombre}</span>
+                                                                            <div className="flex justify-between">
+                                                                                <span className="text-[10px] text-slate-400">{f.dni}</span>
+                                                                                <span className="text-[9px] bg-slate-100 px-1 rounded text-slate-500 uppercase">{f.rol || 'Familiar'}</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    )) : (
+                                                                        op.capitas > 1 ? <p className="text-[10px] text-red-400 italic">No hay datos de familiares cargados.</p> : null
+                                                                    )}
+                                                                </div>
+                                                            </PopoverContent>
+                                                        </Popover>
+                                                    </div>
+                                                </TableCell>
                                                 <TableCell>{formatMoney(liq.val)}</TableCell>
                                                 <TableCell className="text-right bg-blue-50/50 p-2" onClick={e => e.stopPropagation()}>
                                                     <div className="relative">

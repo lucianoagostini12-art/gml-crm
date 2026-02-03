@@ -1,48 +1,78 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { BarChart, Activity, DollarSign, TrendingUp, Award, PieChart, History, ChevronDown, ChevronUp } from "lucide-react"
+import { BarChart, Activity, DollarSign, TrendingUp, Award, PieChart, CheckCircle2 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
-
-type Period = "month" | "year"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 export function DashboardView({ userName }: { userName?: string }) {
   const supabase = createClient()
   const [currentUser, setCurrentUser] = useState<string | null>(userName || null)
 
-  // ✅ NUEVO: switch período
-  const [period, setPeriod] = useState<Period>("month")
+  // ✅ Selector de Mes/Año inteligente
+  const now = new Date()
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth().toString())
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear().toString())
+
+  // ✅ Generar opciones de año (desde 2024 hasta año actual + 1)
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear()
+    const years: string[] = []
+    for (let y = 2024; y <= currentYear + 1; y++) years.push(String(y))
+    return years
+  }, [])
+
+  // ✅ Período formateado para billing_period (ej: "2026-02")
+  const targetPeriod = useMemo(() => {
+    return `${selectedYear}-${String(parseInt(selectedMonth, 10) + 1).padStart(2, "0")}`
+  }, [selectedMonth, selectedYear])
 
   const [stats, setStats] = useState({ totalLeads: 0, contactados: 0, cotizados: 0, vendidos: 0, callsToday: 0 })
   const [sourceStats, setSourceStats] = useState<any[]>([])
-  const [auditLogs, setAuditLogs] = useState<any[]>([])
-  const [isAuditExpanded, setIsAuditExpanded] = useState(false)
 
-  // Helper: inicio de período (mes/año)
-  const getPeriodStart = (p: Period) => {
-    const now = new Date()
-    if (p === "month") return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
-    return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0)
+  // ✅ CUMPLIDAS: estado y modal
+  const [cumplidasLeads, setCumplidasLeads] = useState<any[]>([])
+  const [cumplidasOpen, setCumplidasOpen] = useState(false)
+
+  // ✅ Helper: puntos de ALTA (capitas, AMPF=1)
+  const altasPointsOfLead = (l: any) => {
+    const prep = ((l?.prepaga ?? l?.quoted_prepaga) || "").toLowerCase()
+    const plan = ((l?.plan ?? l?.quoted_plan) || "").toLowerCase()
+    if (prep.includes("ampf") || plan.includes("ampf")) return 1
+    const c = Number(l?.capitas)
+    return Number.isFinite(c) && c > 0 ? c : 1
+  }
+
+  // ✅ Total capitas de cumplidas
+  const cumplidasCapitas = useMemo(() => {
+    return cumplidasLeads.reduce((acc, l) => acc + altasPointsOfLead(l), 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cumplidasLeads])
+
+  // Helper: inicio de período (para métricas del mes actual)
+  const getPeriodStart = () => {
+    const year = parseInt(selectedYear, 10)
+    const month = parseInt(selectedMonth, 10)
+    return new Date(year, month, 1, 0, 0, 0, 0)
   }
 
   // Helper: fecha de venta (prioridad sold_at)
   const saleDateOf = (l: any) => l?.sold_at || l?.fecha_ingreso || l?.activation_date || l?.fecha_alta || l?.created_at
 
-  // 1. IDENTIFICAR AL USUARIO REAL (Si no viene por props, lo buscamos en la sesión)
+  // 1. IDENTIFICAR AL USUARIO REAL
   useEffect(() => {
     if (userName) {
       setCurrentUser(userName)
     } else {
       const getUser = async () => {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
+        const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) {
           const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", session.user.id).single()
-
           if (profile?.full_name) {
             setCurrentUser(profile.full_name)
           }
@@ -53,12 +83,13 @@ export function DashboardView({ userName }: { userName?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userName])
 
-  // 2. TRAER DATOS (Se ejecuta cuando ya tenemos el usuario identificado)
+  // 2. TRAER DATOS
   useEffect(() => {
     if (!currentUser) return
 
     const fetchData = async () => {
-      const periodStart = getPeriodStart(period)
+      const periodStart = getPeriodStart()
+      const periodEnd = new Date(parseInt(selectedYear, 10), parseInt(selectedMonth, 10) + 1, 0, 23, 59, 59, 999)
 
       // A. TRAER LEADS DEL VENDEDOR
       const { data: leads, error: leadsError } = await supabase.from("leads").select("*").eq("agent_name", currentUser)
@@ -70,32 +101,24 @@ export function DashboardView({ userName }: { userName?: string }) {
 
       if (leads) {
         const total = leads.length
-
-        // ✅ Estados de venta (éxito)
         const estadosVenta = ["ingresado", "vendido", "cumplidas", "legajo", "medicas", "precarga"]
 
-        // ✅ Filtramos por período
+        // Filtramos por período seleccionado
         const leadsInPeriod = leads.filter((l: any) => {
           const d = new Date(l.created_at)
-          return d >= periodStart
+          return d >= periodStart && d <= periodEnd
         })
 
-        // ✅ Contactados del período
         const contactados = leadsInPeriod.filter((l: any) => l.status === "contactado" || (l.calls && l.calls > 0)).length
-
-        // ✅ Cotizados del período
         const cotizados = leadsInPeriod.filter((l: any) => l.status === "cotizacion" || l.quoted_price).length
-
-        // ✅ Vendidos del período (por sold_at si existe)
         const vendidos = leads
           .filter((l: any) => estadosVenta.includes(l.status?.toLowerCase()))
           .filter((l: any) => {
             const sd = new Date(saleDateOf(l))
-            return sd >= periodStart
+            return sd >= periodStart && sd <= periodEnd
           })
           .reduce((sum: number, l: any) => sum + (Number(l.capitas) || 1), 0)
 
-        // ✅ Llamadas Hoy (no depende del período)
         const todayStr = new Date().toDateString()
         const callsToday = leads.filter((l: any) => {
           if (!l.last_update) return false
@@ -105,7 +128,7 @@ export function DashboardView({ userName }: { userName?: string }) {
 
         setStats({ totalLeads: total, contactados, cotizados, vendidos, callsToday })
 
-        // ✅ FUENTES: también del período (para que tenga sentido con el switch)
+        // FUENTES
         const sourcesMap: Record<string, { total: number; won: number }> = {}
         leadsInPeriod.forEach((l: any) => {
           let sourceName = l.source || "Desconocido"
@@ -114,7 +137,6 @@ export function DashboardView({ userName }: { userName?: string }) {
           }
 
           if (!sourcesMap[sourceName]) sourcesMap[sourceName] = { total: 0, won: 0 }
-
           sourcesMap[sourceName].total += 1
           if (estadosVenta.includes(l.status?.toLowerCase())) {
             sourcesMap[sourceName].won += 1
@@ -133,37 +155,21 @@ export function DashboardView({ userName }: { userName?: string }) {
         setSourceStats(sourceArray)
       }
 
-      // B. TRAER HISTORIAL REAL (lead_status_history)
-      // (lo dejamos como estaba: últimos 15 movimientos; si querés que también respete Mes/Año, lo ajustamos)
-      const { data: history, error: historyError } = await supabase
-        .from("lead_status_history")
-        .select(
-          `
-            id,
-            from_status,
-            to_status,
-            changed_at,
-            leads ( name )
-        `
-        )
+      // B. TRAER CUMPLIDAS del período seleccionado
+      const { data: cumplidas } = await supabase
+        .from("leads")
+        .select("id, name, full_name, prepaga, quoted_prepaga, plan, quoted_plan, capitas, cuit, dni, fecha_ingreso, billing_period")
         .eq("agent_name", currentUser)
-        .order("changed_at", { ascending: false })
-        .limit(15)
+        .eq("status", "cumplidas")
+        .eq("billing_approved", true)
+        .eq("billing_period", targetPeriod)
 
-      if (!historyError && history) {
-        const formattedLogs = history.map((h: any) => ({
-          id: h.id,
-          action: `Cambio: ${h.to_status?.toUpperCase()}`,
-          details: `${h.leads?.name || "Cliente"} (de ${h.from_status} a ${h.to_status})`,
-          created_at: h.changed_at,
-        }))
-        setAuditLogs(formattedLogs)
-      }
+      setCumplidasLeads(cumplidas || [])
     }
 
     fetchData()
 
-    // 3. ACTIVAR REALTIME
+    // REALTIME
     const channel = supabase
       .channel("dashboard_metrics_realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `agent_name=eq.${currentUser}` }, () => {
@@ -175,7 +181,7 @@ export function DashboardView({ userName }: { userName?: string }) {
       supabase.removeChannel(channel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, period])
+  }, [currentUser, selectedMonth, selectedYear, targetPeriod])
 
   // --- NIVELES (Gamificación) ---
   const getLevel = (sales: number) => {
@@ -191,24 +197,38 @@ export function DashboardView({ userName }: { userName?: string }) {
 
   const currentLevel = getLevel(stats.vendidos)
   const progress = Math.min((stats.vendidos / currentLevel.target) * 100, 100)
-  const visibleLogs = isAuditExpanded ? auditLogs : auditLogs.slice(0, 3)
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
   if (!currentUser) return <div className="p-10 text-center text-slate-400">Cargando perfil...</div>
 
   return (
     <div className="p-6 h-full overflow-y-auto max-w-6xl mx-auto text-slate-900 dark:text-slate-100">
-      <div className="flex justify-between items-center mb-6 gap-3">
+      <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
         <h2 className="text-2xl font-bold flex items-center gap-2">Mi Tablero de Control 📈</h2>
 
-        <div className="flex items-center gap-2">
-          {/* ✅ SWITCH MES/AÑO */}
-          <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg flex">
-            <Button size="sm" variant={period === "month" ? "default" : "ghost"} onClick={() => setPeriod("month")} className="text-xs font-bold h-8">
-              Mes
-            </Button>
-            <Button size="sm" variant={period === "year" ? "default" : "ghost"} onClick={() => setPeriod("year")} className="text-xs font-bold h-8">
-              Año
-            </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* ✅ SELECTOR MES/AÑO */}
+          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger className="h-8 w-[120px] text-xs font-bold border-0 bg-transparent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {monthNames.map((m, i) => (
+                  <SelectItem key={i} value={String(i)}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedYear} onValueChange={setSelectedYear}>
+              <SelectTrigger className="h-8 w-[90px] text-xs font-bold border-0 bg-transparent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions.map((y) => (
+                  <SelectItem key={y} value={y}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="text-xs text-slate-400 font-medium bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
@@ -256,7 +276,7 @@ export function DashboardView({ userName }: { userName?: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">{stats.cotizados}</div>
-            <p className="text-xs text-slate-500">{period === "month" ? "Enviadas este mes" : "Enviadas este año"}</p>
+            <p className="text-xs text-slate-500">Enviadas en {monthNames[parseInt(selectedMonth, 10)]}</p>
           </CardContent>
         </Card>
 
@@ -267,7 +287,7 @@ export function DashboardView({ userName }: { userName?: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">{stats.vendidos}</div>
-            <p className="text-xs text-slate-500">{period === "month" ? "Del mes" : "Del año"}</p>
+            <p className="text-xs text-slate-500">Del mes seleccionado</p>
           </CardContent>
         </Card>
 
@@ -278,7 +298,7 @@ export function DashboardView({ userName }: { userName?: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">{stats.contactados > 0 ? ((stats.vendidos / stats.contactados) * 100).toFixed(1) : 0}%</div>
-            <p className="text-xs text-slate-500">Cierre sobre Contactados ({period === "month" ? "mes" : "año"})</p>
+            <p className="text-xs text-slate-500">Cierre sobre Contactados</p>
           </CardContent>
         </Card>
       </div>
@@ -298,7 +318,7 @@ export function DashboardView({ userName }: { userName?: string }) {
                 <div key={source.name} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
                   <div>
                     <p className="font-bold text-sm">{source.name}</p>
-                    <p className="text-xs text-slate-500">{source.total} leads ({period === "month" ? "mes" : "año"})</p>
+                    <p className="text-xs text-slate-500">{source.total} leads</p>
                   </div>
                   <div className="text-right">
                     <span className="text-green-600 font-bold text-sm">{source.rate}%</span>
@@ -312,50 +332,88 @@ export function DashboardView({ userName }: { userName?: string }) {
           </div>
         </div>
 
-        {/* HISTORIAL DE MOVIMIENTOS */}
+        {/* ✅ CUMPLIDAS (REEMPLAZA "Últimos Movimientos") */}
         <div>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold flex items-center gap-2 text-slate-700 dark:text-slate-200">
-              <History className="h-5 w-5 text-blue-500" /> Últimos Movimientos
-            </h3>
-            {auditLogs.length > 3 && (
-              <Button variant="ghost" size="sm" className="text-slate-500 hover:text-slate-800 dark:hover:text-white" onClick={() => setIsAuditExpanded(!isAuditExpanded)}>
-                {isAuditExpanded ? (
-                  <span className="flex items-center text-xs">
-                    Menos <ChevronUp className="h-4 w-4 ml-1" />
-                  </span>
-                ) : (
-                  <span className="flex items-center text-xs">
-                    Ver más <ChevronDown className="h-4 w-4 ml-1" />
-                  </span>
-                )}
-              </Button>
-            )}
-          </div>
+          <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-700 dark:text-slate-200">
+            <CheckCircle2 className="h-5 w-5 text-green-500" /> Cumplidas
+          </h3>
 
-          <div className="space-y-0 relative">
-            <div className={`absolute left-3 top-0 bottom-0 w-0.5 bg-slate-200 dark:bg-slate-800 ${isAuditExpanded ? "h-full" : "h-20"}`}></div>
-            {visibleLogs.length === 0 ? (
-              <p className="text-sm text-slate-400 italic pl-8">Sin actividad reciente.</p>
-            ) : (
-              visibleLogs.map((log) => (
-                <div key={log.id} className="relative pl-8 pb-4 animate-in fade-in slide-in-from-top-2">
-                  <div className="absolute left-1.5 top-1.5 h-3 w-3 rounded-full bg-blue-500 ring-4 ring-white dark:ring-slate-950"></div>
-                  <div className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm">
-                    <div className="flex justify-between items-center mb-1">
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{log.action}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">
-                        {new Date(log.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </p>
-                    </div>
-                    {log.details && <p className="text-xs text-slate-500">{log.details}</p>}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          <Card
+            className="cursor-pointer hover:border-green-400 transition-all border-2 border-green-500/30 bg-gradient-to-br from-green-50 to-white dark:from-green-950/30 dark:to-slate-900"
+            onClick={() => setCumplidasOpen(true)}
+          >
+            <CardContent className="p-6 text-center">
+              <div className="text-5xl font-black text-green-600 dark:text-green-400 mb-2">{cumplidasCapitas}</div>
+              <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
+                Cápitas para liquidar en <span className="font-bold">{monthNames[parseInt(selectedMonth, 10)]} {selectedYear}</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-2">
+                {cumplidasLeads.length} {cumplidasLeads.length === 1 ? "operación" : "operaciones"} • Click para ver detalle
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      {/* MODAL DRILLDOWN CUMPLIDAS */}
+      <Dialog open={cumplidasOpen} onOpenChange={setCumplidasOpen}>
+        <DialogContent className="max-w-[900px] w-[92vw] max-h-[85vh] overflow-visible p-0 rounded-2xl shadow-2xl border">
+          <DialogHeader className="sticky top-0 z-10 border-b bg-white/90 dark:bg-slate-950/90 backdrop-blur px-6 pt-5 pb-4">
+            <DialogTitle className="flex flex-col gap-1">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                Cumplidas — {monthNames[parseInt(selectedMonth, 10)]} {selectedYear}
+              </span>
+              <span className="text-xs text-slate-500 font-normal">
+                Total: {cumplidasCapitas} cápitas en {cumplidasLeads.length} operaciones
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="px-6 pb-6 overflow-y-auto max-h-[68vh]">
+            <div className="mt-4 w-full overflow-auto rounded-xl border">
+              <Table className="min-w-[700px] w-full">
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="w-[80px]">Capitas</TableHead>
+                    <TableHead className="w-[120px]">Fecha Ingreso</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="w-[130px]">CUIT/DNI</TableHead>
+                    <TableHead className="w-[150px]">Prepaga</TableHead>
+                    <TableHead className="w-[150px]">Plan</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cumplidasLeads.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-slate-500 py-10">
+                        No hay operaciones cumplidas para este período.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    cumplidasLeads.map((l: any) => (
+                      <TableRow key={l.id} className="hover:bg-slate-50/60">
+                        <TableCell className="font-bold text-green-600">{altasPointsOfLead(l)}</TableCell>
+                        <TableCell className="text-xs text-slate-600">{l.fecha_ingreso || "-"}</TableCell>
+                        <TableCell className="font-medium">{l?.full_name || l?.name || "-"}</TableCell>
+                        <TableCell className="font-mono text-xs">{l?.cuit || l?.dni || "-"}</TableCell>
+                        <TableCell className="text-xs">{l?.prepaga || l?.quoted_prepaga || "-"}</TableCell>
+                        <TableCell className="text-xs">{l?.plan || l?.quoted_plan || "-"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <Button variant="outline" onClick={() => setCumplidasOpen(false)}>
+                Cerrar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

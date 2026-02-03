@@ -601,7 +601,8 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
     const handleCallIncrement = async (leadId: string) => {
         const lead = leads.find(l => l.id === leadId); if (!lead) return
         const newCallCount = lead.calls + 1
-        const timestamp = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+        const now = new Date()
+        const timestamp = now.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
         const updatedNotes = (lead.notes || "") + (lead.notes ? "|||" : "") + `SEP_NOTE|${timestamp}|SISTEMA|Llamada realizada #${newCallCount}`
         let newStatus = lead.status
         const isBurned = newCallCount >= 7 && (lead.status === 'nuevo' || lead.status === 'contactado')

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { AlertTriangle, BadgeCheck, Calendar, Database, Download, Eye, FileSpreadsheet, Filter, History, RefreshCw, Search, StickyNote, Trash2, UserCheck, Webhook, X } from "lucide-react"
+import { AlertTriangle, BadgeCheck, Calendar, Database, Download, Eye, FileSpreadsheet, Filter, History, MessageSquare, RefreshCw, Search, StickyNote, Trash2, UserCheck, Webhook, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -219,7 +219,7 @@ export function AdminDatabase() {
   const [currentUserName, setCurrentUserName] = useState("")
 
   useEffect(() => {
-    ;(async () => {
+    ; (async () => {
       try {
         const { data } = await supabase.auth.getUser()
         const u: any = data?.user
@@ -437,7 +437,7 @@ export function AdminDatabase() {
             changed_at: new Date().toISOString(),
           }))
           await supabase.from("lead_status_history").insert(rows as any)
-        } catch (_) {}
+        } catch (_) { }
       }
 
       alert(` ${selectedIds.length} leads reasignados a ${targetAgent}${sendToOps ? " (OPS: ingresado)" : ""}.`)
@@ -559,7 +559,7 @@ export function AdminDatabase() {
             } as any,
           ])
         }
-      } catch {}
+      } catch { }
 
       //  Logs del vendedor/acciones: audit_logs por lead_id
       const { data: lg, error: lgErr } = await supabase
@@ -878,8 +878,8 @@ export function AdminDatabase() {
               </div>
               <div className="md:col-span-5 flex justify-end pt-2 border-t mt-2">
                 <Button variant="ghost" size="sm" onClick={() => {
-                    setFilterAgents([]); setFilterStatuses([]); setFilterSources([]); setFilterLossReasons([]); setSearchTerm(""); setDateFrom(""); setDateTo("")
-                  }} className="text-xs text-red-500">
+                  setFilterAgents([]); setFilterStatuses([]); setFilterSources([]); setFilterLossReasons([]); setSearchTerm(""); setDateFrom(""); setDateTo("")
+                }} className="text-xs text-red-500">
                   <X className="h-3 w-3 mr-1" /> Limpiar Todo
                 </Button>
               </div>
@@ -1174,37 +1174,46 @@ export function AdminDatabase() {
                       <div className="font-black text-slate-800 dark:text-white">Historial completo</div>
                     </CardHeader>
                     <CardContent className="p-4">
-                      <Tabs defaultValue="webhook" className="w-full">
+                      <Tabs defaultValue="chat" className="w-full">
                         <TabsList className="grid w-full grid-cols-3 bg-slate-100 dark:bg-slate-900/40 p-1 rounded-xl">
-                          <TabsTrigger value="webhook" className="gap-2 rounded-lg"><Webhook className="h-4 w-4" /> Webhook</TabsTrigger>
+                          <TabsTrigger value="chat" className="gap-2 rounded-lg"><MessageSquare className="h-4 w-4" /> Chat</TabsTrigger>
                           <TabsTrigger value="logs" className="gap-2 rounded-lg"><History className="h-4 w-4" /> Logs</TabsTrigger>
                           <TabsTrigger value="notes" className="gap-2 rounded-lg"><StickyNote className="h-4 w-4" /> Notas</TabsTrigger>
                         </TabsList>
-                        <TabsContent value="webhook" className="mt-4">
-                          {webhookEvents.length === 0 ? <div className="text-sm text-slate-400 py-8 text-center">No hay eventos.</div> : (
-                            <div className="max-h-[420px] overflow-y-auto space-y-2">
-                              {webhookEvents.map((e: any) => (
-                                <div key={e.id} className="border border-slate-200/70 dark:border-white/10 rounded-xl p-3 bg-white dark:bg-slate-950/20 shadow-sm">
-                                  <div className="flex items-center justify-between">
-                                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                                      {(e.event_type || "Evento").toString()} <span className="text-slate-400 font-normal ml-2">{formatDT(e.created_at)}</span>
+
+                        {/* TAB: Historial de Chat (WATI/Sofia) */}
+                        <TabsContent value="chat" className="mt-4">
+                          {(!leadDetail?.chat || !Array.isArray(leadDetail.chat) || leadDetail.chat.length === 0) ? (
+                            <div className="text-sm text-slate-400 py-8 text-center">No hay historial de chat disponible.</div>
+                          ) : (
+                            <div className="max-h-[420px] overflow-y-auto space-y-3 p-2 bg-slate-50 dark:bg-slate-900/20 rounded-xl">
+                              {leadDetail.chat.map((msg: any, i: number) => {
+                                const isOutgoing = msg.isMe || msg.role === 'assistant' || msg.user === 'Bot'
+                                const messageText = msg.text || msg.content || ''
+                                const timestamp = msg.time || msg.timestamp || ''
+                                const senderName = msg.sender || (isOutgoing ? (msg.role === 'assistant' ? 'Sofía IA' : 'Agente') : 'Cliente')
+
+                                return (
+                                  <div key={i} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${isOutgoing ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
+                                      {!isOutgoing && <span className="text-[10px] font-bold text-slate-500 block mb-1">{senderName}</span>}
+                                      {isOutgoing && msg.role === 'assistant' && <span className="text-[10px] font-bold text-blue-200 block mb-1">🤖 {senderName}</span>}
+                                      <p className="whitespace-pre-wrap">{messageText}</p>
+                                      {timestamp && (
+                                        <span className={`text-[10px] block text-right mt-1 font-medium ${isOutgoing ? 'text-blue-200' : 'text-slate-400'}`}>
+                                          {typeof timestamp === 'string' && timestamp.includes('T')
+                                            ? new Date(timestamp).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
+                                            : timestamp}
+                                        </span>
+                                      )}
                                     </div>
-                                    <Badge variant="outline" className="text-[10px]">{(e.source || "webhook").toString()}</Badge>
                                   </div>
-                                  {(e.summary || e.actor_name) ? (
-                                    <div className="mt-1 text-[11px] text-slate-500">
-                                      {e.summary ? (<><span className="font-bold">Resumen:</span> {String(e.summary)}</>) : null}
-                                      {e.actor_name ? (
-                                        <span className="ml-2 text-slate-400">• <span className="font-bold">Actor:</span> {String(e.actor_name)}</span>
-                                      ) : null}
-                                    </div>
-                                  ) : null}
-                                  <pre className="mt-2 text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-900/40 p-2 rounded-md overflow-x-auto">{JSON.stringify(e.payload || e.body || e.data || e, null, 2)}</pre>
-                                </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           )}
                         </TabsContent>
+
                         <TabsContent value="logs" className="mt-4">
                           {auditLogs.length === 0 ? <div className="text-sm text-slate-400 py-8 text-center">No hay logs.</div> : (
                             <div className="max-h-[420px] overflow-y-auto space-y-2">

@@ -1400,7 +1400,7 @@ export function AdminLeadFactory() {
                               {!isOutgoing && <span className="text-[10px] font-bold text-slate-500 block mb-1">{senderName}</span>}
                               {isOutgoing && msg.role === 'assistant' && <span className="text-[10px] font-bold text-blue-200 block mb-1">🤖 {senderName}</span>}
                               <p className="whitespace-pre-wrap">{messageText}</p>
-                              {timestamp && <span className={`text-[10px] block text-right mt-1 font-medium ${isOutgoing ? 'text-blue-200' : 'text-slate-400'}`}>{typeof timestamp === 'string' && timestamp.includes('T') ? new Date(timestamp).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : timestamp}</span>}
+                              {timestamp && <span className={`text-[10px] block text-right mt-1 font-medium ${isOutgoing ? 'text-blue-200' : 'text-slate-400'}`}>{typeof timestamp === 'string' && timestamp.includes('T') ? new Date(timestamp).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }) : timestamp}</span>}
                             </div>
                           </div>
                         )

@@ -128,14 +128,14 @@ export function AdminConteo() {
 
   // ✅ LISTA DE ESTADOS QUE CUENTAN COMO VENTA
   const SALE_STATUSES = [
-  "ingresado",
-  "precarga",
-  "medicas",
-  "legajo",
-  "demoras",
-  "cumplidas",
-  "rechazado",
-]
+    "ingresado",
+    "precarga",
+    "medicas",
+    "legajo",
+    "demoras",
+    "cumplidas",
+    "rechazado",
+  ]
 
 
   const OPS_STATUSES = SALE_STATUSES
@@ -192,7 +192,7 @@ export function AdminConteo() {
     return Number.isFinite(c) && c > 0 ? c : 1
   }
 
-const startOfWeekMonday = (ref: Date) => {
+  const startOfWeekMonday = (ref: Date) => {
     const d = new Date(ref)
     const day = d.getDay()
     const diffToMonday = day === 0 ? -6 : 1 - day
@@ -253,7 +253,7 @@ const startOfWeekMonday = (ref: Date) => {
         const y = new Date(data[0].created_at).getFullYear()
         if (!Number.isNaN(y) && y < minYear) minYear = y
       }
-    } catch {}
+    } catch { }
 
     const years: string[] = []
     for (let y = minYear; y <= currentYear + 1; y++) years.push(String(y))
@@ -261,7 +261,7 @@ const startOfWeekMonday = (ref: Date) => {
     if (!years.includes(selectedYear)) setSelectedYear(String(currentYear))
   }
 
-  
+
   const periodRange = useMemo(() => {
     if (selectedYear === "all") return null
     const y = parseInt(selectedYear, 10)
@@ -320,7 +320,7 @@ const startOfWeekMonday = (ref: Date) => {
     return d >= weekStart && d <= now
   }
 
-const fetchProfiles = async () => {
+  const fetchProfiles = async () => {
     const { data } = await supabase.from("profiles").select("full_name, avatar_url, email")
     if (data) {
       const map: Record<string, string> = {}
@@ -354,24 +354,24 @@ const fetchProfiles = async () => {
     const endDateStr =
       selectedYear !== "all"
         ? (() => {
-            const y = parseInt(selectedYear, 10)
-            const m = parseInt(selectedMonth, 10)
-            const nextM = m === 12 ? 1 : m + 1
-            const nextY = m === 12 ? y + 1 : y
-            return `${nextY}-${String(nextM).padStart(2, "0")}-01`
-          })()
+          const y = parseInt(selectedYear, 10)
+          const m = parseInt(selectedMonth, 10)
+          const nextM = m === 12 ? 1 : m + 1
+          const nextY = m === 12 ? y + 1 : y
+          return `${nextY}-${String(nextM).padStart(2, "0")}-01`
+        })()
         : null
 
-  // ISO timestamps (UTC) para filtros en DB (creados desde AR -03:00)
-  // Usamos rango completo del mes en hora Argentina y lo convertimos a ISO UTC
-  const startDateISO =
-    selectedYear !== "all" && startDateStr
-      ? new Date(`${startDateStr}T00:00:00-03:00`).toISOString()
-      : null
-  const endDateISO =
-    selectedYear !== "all" && endDateStr
-      ? new Date(`${endDateStr}T23:59:59.999-03:00`).toISOString()
-      : null
+    // ISO timestamps (UTC) para filtros en DB (creados desde AR -03:00)
+    // Usamos rango completo del mes en hora Argentina y lo convertimos a ISO UTC
+    const startDateISO =
+      selectedYear !== "all" && startDateStr
+        ? new Date(`${startDateStr}T00:00:00-03:00`).toISOString()
+        : null
+    const endDateISO =
+      selectedYear !== "all" && endDateStr
+        ? new Date(`${endDateStr}T23:59:59.999-03:00`).toISOString()
+        : null
 
     // A. PRODUCCIÓN (VENTAS por fecha_ingreso: se cuentan cuando llegan a INGRESADO y siguen contando aunque avancen)
     if (selectedYear !== "all") {
@@ -384,7 +384,7 @@ const fetchProfiles = async () => {
 
       if (prodData) productionLeads = prodData
     } else {
-      const { data } = await supabase.from("leads").select("*").in("status", SALE_STATUSES).not("fecha_ingreso","is",null)
+      const { data } = await supabase.from("leads").select("*").in("status", SALE_STATUSES).not("fecha_ingreso", "is", null)
       if (data) productionLeads = data
     }
 
@@ -425,7 +425,7 @@ const fetchProfiles = async () => {
         .map((s: any) => String(s.full_name ?? "").trim())
         .filter(Boolean)
         .filter((n: string) => !manualBucketSet.has(norm(n)))
-    } catch {}
+    } catch { }
 
     const manualNamesThisPeriod = [
       ...new Set(
@@ -467,7 +467,7 @@ const fetchProfiles = async () => {
     }
 
 
-    
+
     const processedAgents = agentNames.map((name) => {
       const agentLeads = safeLeads.filter((l: any) => norm(l.agent_name) === norm(name))
 
@@ -667,42 +667,42 @@ const fetchProfiles = async () => {
           <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm">
             <Filter className="h-4 w-4 text-slate-400 ml-2" />
             <Select value={selectedYear} onValueChange={setSelectedYear}>
-            <SelectTrigger className="w-[140px] border-none shadow-none font-bold">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="font-bold text-indigo-600">
-                Histórico Total
-              </SelectItem>
-              {yearOptions.map((y) => (
-                <SelectItem key={y} value={y}>
-                  {y}
+              <SelectTrigger className="w-[140px] border-none shadow-none font-bold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="font-bold text-indigo-600">
+                  Histórico Total
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                {yearOptions.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          {selectedYear !== "all" && (
-            <>
-              <div className="h-6 w-[1px] bg-slate-200"></div>
-              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                <SelectTrigger className="w-[130px] border-none shadow-none font-bold">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[...Array(12)].map((_, i) => {
-                    const m = new Date(0, i).toLocaleString("es-ES", { month: "long" })
-                    const label = m.charAt(0).toUpperCase() + m.slice(1)
-                    return (
-                      <SelectItem key={i} value={String(i + 1)}>
-                        {label}
-                      </SelectItem>
-                    )
-                  })}
-                </SelectContent>
-              </Select>
-            </>
-          )}
+            {selectedYear !== "all" && (
+              <>
+                <div className="h-6 w-[1px] bg-slate-200"></div>
+                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                  <SelectTrigger className="w-[130px] border-none shadow-none font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[...Array(12)].map((_, i) => {
+                      const m = new Date(0, i).toLocaleString("es-ES", { month: "long" })
+                      const label = m.charAt(0).toUpperCase() + m.slice(1)
+                      return (
+                        <SelectItem key={i} value={String(i + 1)}>
+                          {label}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
             {loading && <RefreshCw className="h-4 w-4 animate-spin text-indigo-500 ml-2" />}
           </div>
         </div>
@@ -809,12 +809,12 @@ const fetchProfiles = async () => {
                         <div className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 rounded-md">
                           <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
                           <button
-                          className="font-black text-green-700 dark:text-green-400 text-lg hover:underline transition-colors"
-                          onClick={() => openDrill(agent.name, "cumplidas", "monthly", "altas")}
-                          title="Ver operaciones"
-                        >
-                          {agent.fulfilled}
-                        </button>
+                            className="font-black text-green-700 dark:text-green-400 text-lg hover:underline transition-colors"
+                            onClick={() => openDrill(agent.name, "cumplidas", "monthly", "altas")}
+                            title="Ver operaciones"
+                          >
+                            {agent.fulfilled}
+                          </button>
                         </div>
                       ) : (
                         <span className="text-slate-300 font-bold text-lg">-</span>
@@ -895,7 +895,7 @@ const fetchProfiles = async () => {
           <div>
             <h3 className="text-xl font-bold tracking-tight">Liquidación</h3>
             <p className="text-slate-400 text-xs font-medium max-w-sm leading-relaxed">
-             Solo CUMPLIDAS auditadas y aprobadas.
+              Solo CUMPLIDAS auditadas y aprobadas.
             </p>
           </div>
         </div>
@@ -910,7 +910,7 @@ const fetchProfiles = async () => {
         </div>
       </div>
 
-      
+
       {/* MODAL DRILLDOWN (operaciones) */}
       <Dialog open={drillOpen} onOpenChange={setDrillOpen}>
         <DialogContent className="max-w-[1100px] w-[92vw] max-h-[85vh] overflow-visible p-0 rounded-2xl shadow-2xl border">
@@ -939,9 +939,9 @@ const fetchProfiles = async () => {
                 PASS ({drillData.pass.length})
               </Button>
 
-              {drillMode === "ventas" && drillTab === "altas" && (
+              {drillTab === "altas" && (
                 <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700">
-                  Puntos: {drillData.altas.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)}
+                  Capitas: {drillData.altas.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)}
                 </span>
               )}
             </div>
@@ -969,7 +969,7 @@ const fetchProfiles = async () => {
                   ) : (
                     (drillTab === "altas" ? drillData.altas : drillData.pass).map((l: any) => {
                       const fi = l?.fecha_ingreso ?? ""
-                      const points = drillMode === "ventas" ? (isPass(l) ? 0 : altasPointsOfLead(l)) : 1
+                      const points = isPass(l) ? 0 : altasPointsOfLead(l)
                       return (
                         <TableRow key={String(l.id)} className="hover:bg-slate-50/60">
                           <TableCell className="font-bold">{points}</TableCell>
@@ -996,7 +996,7 @@ const fetchProfiles = async () => {
         </DialogContent>
       </Dialog>
 
-{/* MODAL DESCARGA (mismo patrón que OpsMetrics) */}
+      {/* MODAL DESCARGA (mismo patrón que OpsMetrics) */}
       <Dialog open={downloadModalOpen} onOpenChange={setDownloadModalOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>

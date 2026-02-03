@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { sendManualWhatsAppMessage } from "@/app/actions/send-whatsapp"
+import { sendNativeNotification, requestNotificationPermission } from "@/utils/notifications"
 
 // --- TIPOS ---
 type Lead = {
@@ -1169,6 +1170,7 @@ export default function AdminIABrain() {
   useEffect(() => {
     fetchCurrentUser()
     fetchProfiles()
+    requestNotificationPermission() // Pedir permisos para notificaciones
   }, [])
 
   useEffect(() => {
@@ -1196,11 +1198,37 @@ export default function AdminIABrain() {
         },
         (payload) => {
           const updatedLead = payload.new as any
+          const oldLead = payload.old as any
 
           // Solo procesar si es de Sofía
           if (updatedLead.chat_source !== 'sofia_ai') return
 
           console.log('📩 Realtime UPDATE recibido:', updatedLead.name)
+
+          // ✅ NOTIFICACIÓN: Mensaje nuevo del cliente
+          const isNewClientMessage =
+            updatedLead.last_message_from === 'client' &&
+            oldLead?.last_message_from !== 'client'
+
+          if (isNewClientMessage) {
+            const title = `💬 Mensaje de ${updatedLead.name || 'Cliente'}`
+            const body = 'Nuevo mensaje en chat de Sofía'
+
+            // Toast visual
+            toast.info(title, { description: body })
+
+            // Sonido + Notificación nativa (campanita)
+            sendNativeNotification(title, body, true)
+
+            // Guardar en tabla de notificaciones para la campanita
+            supabase.from('notifications').insert({
+              type: 'sofia_message',
+              title: title,
+              body: body,
+              target_role: 'admin',
+              created_at: new Date().toISOString()
+            }).then(() => console.log('🔔 Notificación guardada en campanita'))
+          }
 
           // Actualizar en la lista de leads
           setLeads(prev => prev.map(l =>
@@ -1254,7 +1282,24 @@ export default function AdminIABrain() {
             ai_labels: newLead.ai_labels || []
           }, ...prev])
 
-          toast.info(`🆕 Nuevo chat de ${newLead.name || 'Cliente'}`)
+          // ✅ NOTIFICACIÓN: Nuevo lead de Sofia
+          const title = `🆕 Nuevo chat de ${newLead.name || 'Cliente'}`
+          const body = `Desde: ${newLead.source || 'WhatsApp'}`
+
+          // Toast visual
+          toast.info(title, { description: body })
+
+          // Sonido + Notificación nativa (campanita)
+          sendNativeNotification(title, body, true)
+
+          // Guardar en tabla de notificaciones para la campanita
+          supabase.from('notifications').insert({
+            type: 'sofia_new_lead',
+            title: title,
+            body: body,
+            target_role: 'admin',
+            created_at: new Date().toISOString()
+          }).then(() => console.log('🔔 Notificación de nuevo lead guardada'))
         }
       )
       .subscribe((status) => {
@@ -1402,7 +1447,7 @@ export default function AdminIABrain() {
         <div className="flex-none p-5 border-b border-slate-100 bg-gradient-to-br from-violet-50 to-white">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-              <BrainCircuit className="w-5 h-5 text-violet-600" /> Brain IA
+              <BrainCircuit className="w-5 h-5 text-violet-600" /> Sofia Brain
             </h2>
             <div className="flex gap-2">
               <TooltipProvider>

@@ -492,12 +492,12 @@ export function AdminPerformance() {
         .lt("changed_at", endBuf.toISOString())
 
       const map = new Map<string, Date>()
-      ;(hist || []).forEach((ev: any) => {
-        const t = safeDate(ev.changed_at)
-        if (!t) return
-        const prev = map.get(ev.lead_id)
-        if (!prev || t.getTime() < prev.getTime()) map.set(ev.lead_id, t)
-      })
+        ; (hist || []).forEach((ev: any) => {
+          const t = safeDate(ev.changed_at)
+          if (!t) return
+          const prev = map.get(ev.lead_id)
+          if (!prev || t.getTime() < prev.getTime()) map.set(ev.lead_id, t)
+        })
 
       ingresadoAtByLeadRef.current = map
       setLoading(false)
@@ -566,7 +566,7 @@ export function AdminPerformance() {
 
     // 5) Ticket promedio por CÁPITA (igual a AdminRanking: facturación neta / cápitas, basado en liquidación oficial)
     const billingById = new Map<string, any>()
-    ;(billingLeads || []).forEach((b: any) => billingById.set(String(b.id), b))
+      ; (billingLeads || []).forEach((b: any) => billingById.set(String(b.id), b))
     const completedForTicket = completedOfficial.map((op: any) => billingById.get(String(op.id)) || op)
     const netoTotal = completedForTicket.reduce((acc: number, op: any) => acc + calculateNetValueRanking(op), 0)
     const capitasLiquidated = completedForTicket.reduce((acc: number, l: any) => acc + altasPointsOfLead(l), 0)
@@ -711,9 +711,9 @@ export function AdminPerformance() {
   if (loading)
     return <div className="p-10 text-center text-slate-400 animate-pulse">Analizando rendimiento...</div>
 
-  // ✅ SOLO para el Resumen Global del Equipo: efectividad basada únicamente en ALTAS (sin PASS)
-  const conversionRateAltasOnly =
-    currentStats.totalLeads > 0 ? Math.round((currentStats.totalSales / currentStats.totalLeads) * 100) : 0
+  // ✅ Efectividad = Cumplidas / Altas (no conversión de leads)
+  const efectividadGlobal =
+    currentStats.totalSales > 0 ? Math.round((currentStats.totalCompleted / currentStats.totalSales) * 100) : 0
 
   return (
     <div className="p-6 h-full overflow-y-auto max-w-none w-full space-y-8 bg-slate-50/50 min-h-screen">
@@ -959,9 +959,8 @@ export function AdminPerformance() {
                     <Progress
                       value={origin.conversion}
                       max={20}
-                      className={`h-1.5 ${
-                        origin.conversion > 10 ? "bg-green-100 [&>div]:bg-green-500" : "bg-slate-100"
-                      }`}
+                      className={`h-1.5 ${origin.conversion > 10 ? "bg-green-100 [&>div]:bg-green-500" : "bg-slate-100"
+                        }`}
                     />
                   </div>
                 ))}
@@ -1007,8 +1006,8 @@ export function AdminPerformance() {
                   )}
                 </div>
                 <div>
-                  <span className="block text-5xl font-black">{conversionRateAltasOnly}%</span>
-                  <span className="text-sm font-bold text-blue-200 uppercase tracking-widest">Efectividad Media</span>
+                  <span className="block text-5xl font-black">{efectividadGlobal}%</span>
+                  <span className="text-sm font-bold text-blue-200 uppercase tracking-widest">Efectividad</span>
                 </div>
               </div>
             </CardContent>
@@ -1026,128 +1025,134 @@ export function AdminPerformance() {
 
         <CardContent className="p-0">
           <div className="w-full overflow-x-auto">
-                          <Table className="min-w-[980px] w-full">
-            <TableHeader>
-              <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="w-[50px] text-center">#</TableHead>
-                <TableHead>Vendedora</TableHead>
-                <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 1</TableHead>
-                <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 2</TableHead>
-                <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 3</TableHead>
-                <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 4</TableHead>
-                <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 5</TableHead>
-                <TableHead className="text-right font-black">TOTAL</TableHead>
-                <TableHead className="text-right text-green-600 font-black">CUMPLIDAS</TableHead>
-                <TableHead className="text-right">EFECTIVIDAD</TableHead>
-              </TableRow>
-            </TableHeader>
+            <Table className="min-w-[980px] w-full">
+              <TableHeader>
+                <TableRow className="bg-slate-50 hover:bg-slate-50">
+                  <TableHead className="w-[50px] text-center">#</TableHead>
+                  <TableHead>Vendedora</TableHead>
+                  <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 1</TableHead>
+                  <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 2</TableHead>
+                  <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 3</TableHead>
+                  <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 4</TableHead>
+                  <TableHead className="text-center w-16 text-slate-400 font-bold text-xs">SEM 5</TableHead>
+                  <TableHead className="text-right font-black">TOTAL</TableHead>
+                  <TableHead className="text-right text-green-600 font-black">CUMPLIDAS</TableHead>
+                  <TableHead className="text-right">EFECTIVIDAD</TableHead>
+                </TableRow>
+              </TableHeader>
 
-            <TableBody>
-              {globalMatrix.map((seller, index) => (
-                <TableRow key={seller.id} className={seller.id === selectedSellerId ? "bg-blue-50 hover:bg-blue-100" : ""}>
-                  <TableCell className="text-center font-bold text-slate-500">
-                    {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
-                  </TableCell>
+              <TableBody>
+                {globalMatrix.map((seller, index) => (
+                  <TableRow key={seller.id} className={seller.id === selectedSellerId ? "bg-blue-50 hover:bg-blue-100" : ""}>
+                    <TableCell className="text-center font-bold text-slate-500">
+                      {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
+                    </TableCell>
 
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={seller.avatar_url} />
-                        <AvatarFallback>{seller.full_name[0]}</AvatarFallback>
-                      </Avatar>
-                      <span className="font-bold text-slate-700">{seller.full_name}</span>
-                    </div>
-                  </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={seller.avatar_url} />
+                          <AvatarFallback>{seller.full_name[0]}</AvatarFallback>
+                        </Avatar>
+                        <span className="font-bold text-slate-700">{seller.full_name}</span>
+                      </div>
+                    </TableCell>
 
-                  {/* COLUMNAS SEMANALES */}
+                    {/* COLUMNAS SEMANALES */}
+                    {(["w1", "w2", "w3", "w4", "w5"] as const).map((wk) => (
+                      <TableCell key={wk} className="text-center text-slate-500">
+                        <div className="flex flex-col items-center">
+                          <button type="button" className="font-black text-slate-700 hover:underline" onClick={() => openDrill(seller.full_name, (wk === "w1" ? 1 : wk === "w2" ? 2 : wk === "w3" ? 3 : wk === "w4" ? 4 : 5) as any, 'altas', 'ventas')}>
+                            {seller.weekly[wk] || "-"}
+                          </button>
+                          {(seller.weeklyPass?.[wk] || 0) > 0 && (
+                            <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
+                              +{seller.weeklyPass[wk]} pass
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                    ))}
+
+                    <TableCell className="text-right font-black text-base">
+                      <div className="flex flex-col items-end">
+                        <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas')} title="Ver detalle de ventas del mes">{seller.stats.totalSales}</button>
+                        {(seller.stats.salesPass || 0) > 0 && (
+                          <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass')} title="Ver detalle de PASS del mes">+{seller.stats.salesPass} pass</button>
+                        )}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="text-right font-black text-green-600 text-base">
+                      <div className="flex flex-col items-end">
+                        <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'cumplidas')} title="Ver detalle de cumplidas (liquidación oficial) del mes">{seller.stats.totalCompleted}</button>
+                        {(seller.stats.completedPass || 0) > 0 && (
+                          <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'cumplidas')} title="Ver detalle de PASS cumplidas (liquidación oficial) del mes">+{seller.stats.completedPass} pass</button>
+                        )}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="text-right font-medium">
+                      <span className={seller.stats.complianceRate >= 80 ? "text-green-600 font-bold" : seller.stats.complianceRate >= 50 ? "text-yellow-600 font-bold" : "text-red-500"}>
+                        {seller.stats.complianceRate}%
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+
+                <TableRow className="bg-slate-100/60">
+                  <TableCell className="text-center font-black text-slate-400">—</TableCell>
+                  <TableCell className="font-black text-slate-700">TOTAL SEMANA</TableCell>
+
                   {(["w1", "w2", "w3", "w4", "w5"] as const).map((wk) => (
-                    <TableCell key={wk} className="text-center text-slate-500">
+                    <TableCell key={wk} className="text-center font-black text-slate-700">
                       <div className="flex flex-col items-center">
-                        <button type="button" className="font-black text-slate-700 hover:underline" onClick={() => openDrill(seller.full_name, (wk === "w1" ? 1 : wk === "w2" ? 2 : wk === "w3" ? 3 : wk === "w4" ? 4 : 5) as any, 'altas', 'ventas')}>
-                          {seller.weekly[wk] || "-"}
-                        </button>
-                        {(seller.weeklyPass?.[wk] || 0) > 0 && (
+                        <span>{weeklyTotals[wk] || "-"}</span>
+                        {(weeklyPassTotals[wk] || 0) > 0 && (
                           <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                            +{seller.weeklyPass[wk]} pass
+                            +{weeklyPassTotals[wk]} pass
                           </span>
                         )}
                       </div>
                     </TableCell>
                   ))}
 
-                  <TableCell className="text-right font-black text-base">
+                  <TableCell className="text-right font-black text-slate-800">
                     <div className="flex flex-col items-end">
-                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas')} title="Ver detalle de ventas del mes">{seller.stats.totalSales}</button>
-                      {(seller.stats.salesPass || 0) > 0 && (
-                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass')} title="Ver detalle de PASS del mes">+{seller.stats.salesPass} pass</button>
-                      )}
-                    </div>
-                  </TableCell>
-
-                  <TableCell className="text-right font-black text-green-600 text-base">
-                    <div className="flex flex-col items-end">
-                      <button type="button" className="hover:underline underline-offset-2" onClick={() => openDrill(seller.full_name, 0, 'altas', 'cumplidas')} title="Ver detalle de cumplidas (liquidación oficial) del mes">{seller.stats.totalCompleted}</button>
-                      {(seller.stats.completedPass || 0) > 0 && (
-                        <button type="button" className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200 hover:bg-purple-100" onClick={() => openDrill(seller.full_name, 0, 'pass', 'cumplidas')} title="Ver detalle de PASS cumplidas (liquidación oficial) del mes">+{seller.stats.completedPass} pass</button>
-                      )}
-                    </div>
-                  </TableCell>
-
-                  <TableCell className="text-right font-medium">
-                    <span className={seller.stats.conversionRate > 10 ? "text-green-600 font-bold" : ""}>
-                      {seller.stats.conversionRate}%
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
-
-              <TableRow className="bg-slate-100/60">
-                <TableCell className="text-center font-black text-slate-400">—</TableCell>
-                <TableCell className="font-black text-slate-700">TOTAL SEMANA</TableCell>
-
-                {(["w1", "w2", "w3", "w4", "w5"] as const).map((wk) => (
-                  <TableCell key={wk} className="text-center font-black text-slate-700">
-                    <div className="flex flex-col items-center">
-                      <span>{weeklyTotals[wk] || "-"}</span>
-                      {(weeklyPassTotals[wk] || 0) > 0 && (
+                      <span>{globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.totalSales || 0), 0)}</span>
+                      {globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.salesPass || 0), 0) > 0 && (
                         <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                          +{weeklyPassTotals[wk]} pass
+                          +{globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.salesPass || 0), 0)} pass
                         </span>
                       )}
                     </div>
                   </TableCell>
-                ))}
 
-                <TableCell className="text-right font-black text-slate-800">
-                  <div className="flex flex-col items-end">
-                    <span>{globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.totalSales || 0), 0)}</span>
-                    {globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.salesPass || 0), 0) > 0 && (
-                      <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                        +{globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.salesPass || 0), 0)} pass
+                  <TableCell className="text-right font-black text-green-700">
+                    <div className="flex flex-col items-end">
+                      <span>
+                        {globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.totalCompleted || 0), 0)}
                       </span>
-                    )}
-                  </div>
-                </TableCell>
+                      {globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.completedPass || 0), 0) > 0 && (
+                        <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
+                          +{globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.completedPass || 0), 0)}{" "}
+                          pass
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
 
-                <TableCell className="text-right font-black text-green-700">
-                  <div className="flex flex-col items-end">
-                    <span>
-                      {globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.totalCompleted || 0), 0)}
-                    </span>
-                    {globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.completedPass || 0), 0) > 0 && (
-                      <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full mt-1 border border-purple-200">
-                        +{globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.completedPass || 0), 0)}{" "}
-                        pass
-                      </span>
-                    )}
-                  </div>
-                </TableCell>
-
-                <TableCell className="text-right font-bold text-slate-400">-</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-                        </div>
+                  <TableCell className="text-right font-bold text-slate-700">
+                    {(() => {
+                      const totalAltas = globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.totalSales || 0), 0)
+                      const totalCumpl = globalMatrix.reduce((acc: number, s: any) => acc + Number(s.stats?.totalCompleted || 0), 0)
+                      return totalAltas > 0 ? Math.round((totalCumpl / totalAltas) * 100) : 0
+                    })()}%
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -1168,116 +1173,116 @@ export function AdminPerformance() {
           <div className="px-6 pb-6 overflow-y-auto max-h-[68vh]">
 
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700">
-              Registros: <b>{drillItems.length}</b>
-            </span>
-            <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700">
-              Altas: <b>{drillAltas.length}</b> · Capitas: <b>{drillAltasCapitas}</b>
-            </span>
-            <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700">
-              Pass: <b>{drillPass.length}</b> · Capitas: <b>{drillPassCapitas}</b>
-            </span>
-          </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700">
+                Registros: <b>{drillItems.length}</b>
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700">
+                Altas: <b>{drillAltas.length}</b> · Capitas: <b>{drillAltasCapitas}</b>
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700">
+                Pass: <b>{drillPass.length}</b> · Capitas: <b>{drillPassCapitas}</b>
+              </span>
+            </div>
 
-          <Tabs value={drillTab} onValueChange={(v) => setDrillTab(v as any)} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="altas">Altas</TabsTrigger>
-              <TabsTrigger value="pass">Pass</TabsTrigger>
-            </TabsList>
+            <Tabs value={drillTab} onValueChange={(v) => setDrillTab(v as any)} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="altas">Altas</TabsTrigger>
+                <TabsTrigger value="pass">Pass</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="altas" className="mt-4">
-              <div className="rounded-xl border overflow-hidden">
-                <Table className="min-w-[980px] w-full">
-                  <TableHeader>
-                    <TableRow className="bg-slate-50 hover:bg-slate-50">
-                      <TableHead className="w-[80px]">Capitas</TableHead>
-                      <TableHead className="w-[120px]">Fecha ingreso</TableHead>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead className="w-[140px]">CUIT</TableHead>
-                      <TableHead className="w-[160px]">Prepaga</TableHead>
-                      <TableHead className="w-[180px]">Plan</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {drillAltas.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-slate-500 py-8">
-                          No hay ALTAS para esa semana.
-                        </TableCell>
+              <TabsContent value="altas" className="mt-4">
+                <div className="rounded-xl border overflow-hidden">
+                  <Table className="min-w-[980px] w-full">
+                    <TableHeader>
+                      <TableRow className="bg-slate-50 hover:bg-slate-50">
+                        <TableHead className="w-[80px]">Capitas</TableHead>
+                        <TableHead className="w-[120px]">Fecha ingreso</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead className="w-[140px]">CUIT</TableHead>
+                        <TableHead className="w-[160px]">Prepaga</TableHead>
+                        <TableHead className="w-[180px]">Plan</TableHead>
                       </TableRow>
-                    ) : (
-                      drillAltas.map((it: any) => {
-                        const l = it.lead
-                        const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
-                        const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
-                        const cliente = l?.name || "-"
-                        const cuit = l?.cuit || l?.dni || "-"
-                        const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
-                        const plan = l?.quoted_plan || l?.plan || "-"
-                        return (
-                          <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
-                            <TableCell className="text-center">{altasPointsOfLead(l)}</TableCell>
-                            <TableCell className="font-medium">{fechaTxt}</TableCell>
-                            <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
-                            <TableCell className="font-mono text-xs">{cuit}</TableCell>
-                            <TableCell>{prepaga}</TableCell>
-                            <TableCell>{plan}</TableCell>
-                          </TableRow>
-                        )
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </TabsContent>
+                    </TableHeader>
+                    <TableBody>
+                      {drillAltas.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                            No hay ALTAS para esa semana.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        drillAltas.map((it: any) => {
+                          const l = it.lead
+                          const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
+                          const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
+                          const cliente = l?.name || "-"
+                          const cuit = l?.cuit || l?.dni || "-"
+                          const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
+                          const plan = l?.quoted_plan || l?.plan || "-"
+                          return (
+                            <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
+                              <TableCell className="text-center">{altasPointsOfLead(l)}</TableCell>
+                              <TableCell className="font-medium">{fechaTxt}</TableCell>
+                              <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
+                              <TableCell className="font-mono text-xs">{cuit}</TableCell>
+                              <TableCell>{prepaga}</TableCell>
+                              <TableCell>{plan}</TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TabsContent>
 
-            <TabsContent value="pass" className="mt-4">
-              <div className="rounded-xl border overflow-hidden">
-                <Table className="min-w-[980px] w-full">
-                  <TableHeader>
-                    <TableRow className="bg-slate-50 hover:bg-slate-50">
-                      <TableHead className="w-[80px]">Capitas</TableHead>
-                      <TableHead className="w-[120px]">Fecha ingreso</TableHead>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead className="w-[140px]">CUIT</TableHead>
-                      <TableHead className="w-[160px]">Prepaga</TableHead>
-                      <TableHead className="w-[180px]">Plan</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {drillPass.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-slate-500 py-8">
-                          No hay PASS para esa semana.
-                        </TableCell>
+              <TabsContent value="pass" className="mt-4">
+                <div className="rounded-xl border overflow-hidden">
+                  <Table className="min-w-[980px] w-full">
+                    <TableHeader>
+                      <TableRow className="bg-slate-50 hover:bg-slate-50">
+                        <TableHead className="w-[80px]">Capitas</TableHead>
+                        <TableHead className="w-[120px]">Fecha ingreso</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead className="w-[140px]">CUIT</TableHead>
+                        <TableHead className="w-[160px]">Prepaga</TableHead>
+                        <TableHead className="w-[180px]">Plan</TableHead>
                       </TableRow>
-                    ) : (
-                      drillPass.map((it: any) => {
-                        const l = it.lead
-                        const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
-                        const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
-                        const cliente = l?.name || "-"
-                        const cuit = l?.cuit || l?.dni || "-"
-                        const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
-                        const plan = l?.quoted_plan || l?.plan || "-"
-                        return (
-                          <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
-                            <TableCell className="text-center">1</TableCell>
-                            <TableCell className="font-medium">{fechaTxt}</TableCell>
-                            <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
-                            <TableCell className="font-mono text-xs">{cuit}</TableCell>
-                            <TableCell>{prepaga}</TableCell>
-                            <TableCell>{plan}</TableCell>
-                          </TableRow>
-                        )
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </TabsContent>
-          </Tabs>
+                    </TableHeader>
+                    <TableBody>
+                      {drillPass.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                            No hay PASS para esa semana.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        drillPass.map((it: any) => {
+                          const l = it.lead
+                          const fecha = l?.fecha_ingreso || l?.sold_at || it.saleDate
+                          const fechaTxt = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "-"
+                          const cliente = l?.name || "-"
+                          const cuit = l?.cuit || l?.dni || "-"
+                          const prepaga = l?.quoted_prepaga || l?.prepaga || "-"
+                          const plan = l?.quoted_plan || l?.plan || "-"
+                          return (
+                            <TableRow key={`${it.leadId}-${it.kind}-${it.saleDate}`}>
+                              <TableCell className="text-center">1</TableCell>
+                              <TableCell className="font-medium">{fechaTxt}</TableCell>
+                              <TableCell className="max-w-[360px] truncate" title={cliente}>{cliente}</TableCell>
+                              <TableCell className="font-mono text-xs">{cuit}</TableCell>
+                              <TableCell>{prepaga}</TableCell>
+                              <TableCell>{plan}</TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </DialogContent>
       </Dialog>

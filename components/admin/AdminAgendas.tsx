@@ -22,7 +22,7 @@ export function AdminAgendas() {
     const [notesOpen, setNotesOpen] = useState(false)
     const [notesTitle, setNotesTitle] = useState<string>("")
     const [notesRaw, setNotesRaw] = useState<string>("")
-    
+
     // ✅ CAMBIO: Estado para lista dinámica de agentes
     const [agentsList, setAgentsList] = useState<string[]>([])
 
@@ -68,7 +68,7 @@ export function AdminAgendas() {
     // --- CARGA DE DATOS REALES (Leads + Agentes) ---
     const fetchAgendas = async () => {
         setLoading(true)
-        
+
         // 1. Cargar Agendas
         const { data: leadsData } = await supabase
             .from('leads')
@@ -82,7 +82,7 @@ export function AdminAgendas() {
                 return {
                     id: l.id,
                     date: schedDate.toISOString().split('T')[0],
-                    time: schedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    time: schedDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }),
                     lead: l.name,
                     agent: l.agent_name || "Sin asignar",
                     status: schedDate < new Date() && l.status !== 'cumplidas' ? 'vencido' : 'pendiente',
@@ -109,7 +109,7 @@ export function AdminAgendas() {
                 .map((p: any) => p.full_name)
                 .filter(Boolean)
                 .sort()
-            
+
             setAgentsList(realAgents)
         }
     }
@@ -134,14 +134,14 @@ export function AdminAgendas() {
     // --- ACCIÓN DE REASIGNACIÓN REAL EN DB ---
     const handleReassign = async () => {
         if (!targetAgent || selectedTasks.length === 0) return
-        
+
         const { error } = await supabase
             .from('leads')
-                .update({ 
-                    agent_name: targetAgent,
-                    last_update: new Date().toISOString()
-                })
-                .in('id', selectedTasks)
+            .update({
+                agent_name: targetAgent,
+                last_update: new Date().toISOString()
+            })
+            .in('id', selectedTasks)
 
         if (!error) {
             alert(`✅ ${selectedTasks.length} tareas reasignadas a ${targetAgent}`)
@@ -152,7 +152,7 @@ export function AdminAgendas() {
     }
 
     const toggleSelectTask = (id: string) => {
-        setSelectedTasks(prev => 
+        setSelectedTasks(prev =>
             prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
         )
     }
@@ -166,11 +166,11 @@ export function AdminAgendas() {
                     </h2>
                     <p className="text-slate-500 font-medium">Control de cumplimiento diario en tiempo real.</p>
                 </div>
-                
+
                 <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm">
                     <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-fit font-bold text-slate-600 border-none shadow-none" />
                     <div className="h-6 w-px bg-slate-200 mx-1"></div>
-                    
+
                     {/* ✅ FILTRO DINÁMICO */}
                     <Select value={selectedAgent} onValueChange={setSelectedAgent}>
                         <SelectTrigger className="w-[150px] border-none shadow-none font-bold">
@@ -187,19 +187,19 @@ export function AdminAgendas() {
             <Card className="shadow-lg border-none">
                 <CardHeader className="pb-3 border-b bg-slate-50/50 flex flex-row justify-between items-center">
                     <CardTitle className="text-xs font-bold uppercase text-slate-500 tracking-widest">
-                        Tareas del {selectedDate} {loading && <Loader2 className="inline ml-2 h-3 w-3 animate-spin"/>}
+                        Tareas del {selectedDate} {loading && <Loader2 className="inline ml-2 h-3 w-3 animate-spin" />}
                     </CardTitle>
                     <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-slate-400 mr-1 uppercase">{selectedTasks.length} seleccionadas</span>
-                        
+
                         {/* ✅ SELECTOR DINÁMICO PARA REASIGNAR */}
                         <Select value={targetAgent} onValueChange={setTargetAgent}>
                             <SelectTrigger className="w-[160px] h-8 text-xs font-bold"><SelectValue placeholder="Pasar a..." /></SelectTrigger>
                             <SelectContent>{agentsList.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
                         </Select>
-                        
+
                         <Button size="sm" variant="secondary" className="h-8 font-bold text-xs" onClick={handleReassign} disabled={selectedTasks.length === 0 || !targetAgent}>
-                            <ArrowRightLeft className="h-3 w-3 mr-2"/> Reasignar
+                            <ArrowRightLeft className="h-3 w-3 mr-2" /> Reasignar
                         </Button>
                     </div>
                 </CardHeader>
@@ -225,8 +225,8 @@ export function AdminAgendas() {
                                 filteredTasks.map((task) => (
                                     <TableRow key={task.id} className={`${task.status === 'vencido' ? 'bg-red-50/50' : 'hover:bg-slate-50/50'} transition-colors`}>
                                         <TableCell className="pl-6">
-                                            <Checkbox 
-                                                checked={selectedTasks.includes(task.id)} 
+                                            <Checkbox
+                                                checked={selectedTasks.includes(task.id)}
                                                 onCheckedChange={() => toggleSelectTask(task.id)}
                                             />
                                         </TableCell>
@@ -255,8 +255,8 @@ export function AdminAgendas() {
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-center">
-                                            {task.status === 'vencido' ? 
-                                                <Badge variant="destructive" className="animate-pulse">Vencido</Badge> : 
+                                            {task.status === 'vencido' ?
+                                                <Badge variant="destructive" className="animate-pulse">Vencido</Badge> :
                                                 <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-slate-200">Pendiente</Badge>
                                             }
                                         </TableCell>

@@ -5,28 +5,28 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { 
-    Send, Plus, MoreVertical, CheckCheck, 
-    FileText, X, Smile, Trash2, Users 
+import {
+    Send, Plus, MoreVertical, CheckCheck,
+    FileText, X, Smile, Trash2, Users
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 
 export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
     const supabase = createClient()
-    
+
     // --- ESTADOS ---
     const [msg, setMsg] = useState("")
     const [chats, setChats] = useState<any[]>([])
     const [messages, setMessages] = useState<any[]>([])
     const [activeChatId, setActiveChatId] = useState<number | null>(null)
-    
+
     // UI States
     const [showMentions, setShowMentions] = useState(false)
     const [mentionQuery, setMentionQuery] = useState("")
     const [attachedSale, setAttachedSale] = useState<any>(null)
     const [showInfo, setShowInfo] = useState(false)
-    
+
     // Crear Sala States
     const [isCreateOpen, setIsCreateOpen] = useState(false)
     const [newChatName, setNewChatName] = useState("")
@@ -77,7 +77,7 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                     chatId: m.room_id,
                     user: m.user_name || "Usuario",
                     text: m.text,
-                    time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    time: new Date(m.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }),
                     isMe: m.user_name === currentUser,
                     type: m.type,
                     saleData: m.sale_data,
@@ -92,9 +92,9 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
         // SUSCRIPCIÓN REALTIME (Escuchar mensajes de OTROS)
         const msgChannel = supabase
             .channel(`chat_room:${activeChatId}`)
-            .on('postgres_changes', { 
-                event: 'INSERT', 
-                schema: 'public', 
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
                 table: 'chat_messages',
                 filter: `room_id=eq.${activeChatId}`
             }, (payload) => {
@@ -102,13 +102,13 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                 // Evitamos procesar el mensaje si ya lo tenemos (porque lo insertamos nosotros manualmente)
                 setMessages(prev => {
                     if (prev.some(m => m.id === newMsgRaw.id)) return prev
-                    
+
                     const newMsg = {
                         id: newMsgRaw.id,
                         chatId: newMsgRaw.room_id,
                         user: newMsgRaw.user_name,
                         text: newMsgRaw.text,
-                        time: new Date(newMsgRaw.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        time: new Date(newMsgRaw.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }),
                         isMe: newMsgRaw.user_name === currentUser,
                         type: newMsgRaw.type,
                         saleData: newMsgRaw.sale_data,
@@ -132,7 +132,7 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
 
     const handleCreateChat = async () => {
         if (!newChatName.trim()) return
-        
+
         const { error } = await supabase.from('chat_rooms').insert({
             name: newChatName,
             type: 'group',
@@ -161,7 +161,7 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
 
         const textToSend = msg
         const saleToSend = attachedSale
-        
+
         setMsg("")
         setAttachedSale(null)
 
@@ -186,13 +186,13 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                 chatId: data.room_id,
                 user: data.user_name,
                 text: data.text,
-                time: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                time: new Date(data.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }),
                 isMe: true, // Es mío
                 type: data.type,
                 saleData: data.sale_data,
                 status: "sent"
             }
-            
+
             setMessages(prev => {
                 // Doble chequeo por si el Realtime fue más rápido que el .select()
                 if (prev.some(m => m.id === myNewMsg.id)) return prev
@@ -202,10 +202,10 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
 
         // 3. Notificaciones a otros (Menciones)
         if (textToSend.includes("@")) {
-            const mentionedUser = textToSend.split("@")[1]?.split(" ")[0]; 
+            const mentionedUser = textToSend.split("@")[1]?.split(" ")[0];
             if (mentionedUser && mentionedUser !== currentUser) {
-                 await supabase.from('notifications').insert({
-                    user_name: mentionedUser, 
+                await supabase.from('notifications').insert({
+                    user_name: mentionedUser,
                     title: `💬 Mención en Chat`,
                     body: `${currentUser} te mencionó: "${textToSend.substring(0, 30)}..."`,
                     type: 'info',
@@ -219,7 +219,7 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
     const handleInputChange = (e: any) => {
         const val = e.target.value
         setMsg(val)
-        
+
         const lastIndexAt = val.lastIndexOf('@')
         if (lastIndexAt !== -1) {
             const query = val.substring(lastIndexAt + 1)
@@ -242,30 +242,30 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
     }
 
     const activeChatData = chats.find(c => c.id === activeChatId)
-    const mentionOps = operations.filter((o:any) => o.clientName && o.clientName.toLowerCase().includes(mentionQuery.toLowerCase()))
+    const mentionOps = operations.filter((o: any) => o.clientName && o.clientName.toLowerCase().includes(mentionQuery.toLowerCase()))
 
     return (
         <div className="flex h-[calc(100vh-10rem)] w-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden relative">
-            
+
             {/* SIDEBAR IZQUIERDO */}
             <div className="w-80 border-r border-slate-100 flex flex-col bg-slate-50/50">
                 <div className="p-4 flex justify-between items-center bg-white border-b border-slate-100 shrink-0">
                     <h3 className="font-black text-slate-800 text-lg">Chats</h3>
                     <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-600 hover:bg-blue-50" onClick={() => setIsCreateOpen(true)}>
-                        <Plus size={20} strokeWidth={3}/>
+                        <Plus size={20} strokeWidth={3} />
                     </Button>
                 </div>
-                
+
                 <ScrollArea className="flex-1 px-2 pt-2">
                     {chats.length === 0 && (
                         <div className="text-center p-4 text-xs text-slate-400">
-                            No hay grupos.<br/>Creá uno con el botón +
+                            No hay grupos.<br />Creá uno con el botón +
                         </div>
                     )}
                     {chats.map(chat => (
-                        <div 
-                            key={chat.id} 
-                            onClick={() => setActiveChatId(chat.id)} 
+                        <div
+                            key={chat.id}
+                            onClick={() => setActiveChatId(chat.id)}
                             className={`group/item p-3 rounded-lg cursor-pointer flex items-center gap-3 mb-1 transition-all ${activeChatId === chat.id ? 'bg-white shadow-md ring-1 ring-slate-200 z-10' : 'hover:bg-slate-200/50'}`}
                         >
                             <Avatar className="h-10 w-10 border border-slate-200">
@@ -277,10 +277,10 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                                 </div>
                                 <p className="text-[10px] text-slate-400 truncate capitalize font-medium">{chat.type === 'group' ? 'Grupo General' : 'Privado'}</p>
                             </div>
-                            
-                            <Button 
-                                variant="ghost" 
-                                size="icon" 
+
+                            <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-6 w-6 text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-opacity"
                                 onClick={(e) => handleDeleteChat(chat.id, e)}
                             >
@@ -303,13 +303,13 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                                     <p className="text-xs text-green-500 font-medium flex items-center gap-1"><span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> En línea</p>
                                 </div>
                             </div>
-                            <Button variant="ghost" size="icon" onClick={() => setShowInfo(!showInfo)}><MoreVertical size={20}/></Button>
+                            <Button variant="ghost" size="icon" onClick={() => setShowInfo(!showInfo)}><MoreVertical size={20} /></Button>
                         </header>
 
                         <ScrollArea className="flex-1 p-6">
                             {messages.length === 0 && (
                                 <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-50 min-h-[300px]">
-                                    <Smile size={48} strokeWidth={1} className="mb-2"/>
+                                    <Smile size={48} strokeWidth={1} className="mb-2" />
                                     <p className="text-sm font-medium">Escribí el primer mensaje...</p>
                                 </div>
                             )}
@@ -317,17 +317,17 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                                 <div key={m.id} className={`flex ${m.isMe ? 'justify-end' : 'justify-start'} mb-3`}>
                                     <div className={`max-w-[70%] px-4 py-3 rounded-2xl shadow-sm text-sm ${m.isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-slate-700 rounded-bl-none'}`}>
                                         {!m.isMe && <p className="text-[10px] font-black text-orange-500 mb-1 uppercase tracking-wider">{m.user}</p>}
-                                        
+
                                         {m.type === 'sale_link' ? (
                                             <div className="bg-white/10 p-3 rounded-lg border border-white/20 mt-1">
-                                                <p className="font-black text-[10px] uppercase mb-2 flex items-center gap-1 opacity-80"><FileText size={10}/> Operación Vinculada</p>
+                                                <p className="font-black text-[10px] uppercase mb-2 flex items-center gap-1 opacity-80"><FileText size={10} /> Operación Vinculada</p>
                                                 <p className="font-bold text-sm mb-2">{m.saleData?.clientName}</p>
                                                 <Button size="sm" variant="secondary" className="w-full h-7 text-[10px] font-bold bg-white/20 hover:bg-white/30 text-white border-0" onClick={() => onViewSale(m.saleData)}>Ver Detalles</Button>
                                             </div>
                                         ) : <p className="leading-relaxed">{m.text}</p>}
-                                        
+
                                         <div className={`text-[9px] text-right mt-1 flex items-center justify-end gap-1 ${m.isMe ? 'text-blue-200' : 'text-slate-400'}`}>
-                                            {m.time} {m.isMe && <CheckCheck size={12}/>}
+                                            {m.time} {m.isMe && <CheckCheck size={12} />}
                                         </div>
                                     </div>
                                 </div>
@@ -340,7 +340,7 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                             <div className="absolute bottom-24 left-4 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-[100] animate-in zoom-in-95 duration-150">
                                 <div className="bg-slate-50 px-3 py-2 border-b text-[10px] font-bold text-slate-500 uppercase">Mencionar Venta</div>
                                 <ScrollArea className="max-h-60">
-                                    {mentionOps.length > 0 ? mentionOps.map((op:any) => (
+                                    {mentionOps.length > 0 ? mentionOps.map((op: any) => (
                                         <div key={op.id} onClick={() => handleSelectSale(op)} className="px-4 py-3 hover:bg-blue-50 cursor-pointer flex items-center gap-3 border-b last:border-0 transition-colors">
                                             <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xs shrink-0">{op.clientName?.charAt(0)}</div>
                                             <div className="overflow-hidden">
@@ -352,35 +352,35 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
                                 </ScrollArea>
                             </div>
                         )}
-                        
+
                         {/* ATTACHMENT CHIP */}
                         {attachedSale && (
                             <div className="absolute bottom-24 left-6 right-6 bg-blue-600 text-white px-4 py-3 rounded-xl flex items-center justify-between shadow-xl animate-in slide-in-from-bottom-4 z-50">
                                 <div className="flex items-center gap-3 text-xs font-bold">
-                                    <div className="bg-white/20 p-1.5 rounded-lg"><FileText size={16}/></div>
+                                    <div className="bg-white/20 p-1.5 rounded-lg"><FileText size={16} /></div>
                                     <span>Adjuntando: {attachedSale.clientName}</span>
                                 </div>
-                                <X size={18} className="cursor-pointer hover:text-blue-200" onClick={() => setAttachedSale(null)}/>
+                                <X size={18} className="cursor-pointer hover:text-blue-200" onClick={() => setAttachedSale(null)} />
                             </div>
                         )}
 
                         {/* INPUT */}
                         <div className="p-4 bg-white border-t border-slate-200 shrink-0 relative z-10">
                             <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 transition-all shadow-sm">
-                                <Input 
-                                    className="border-0 bg-transparent focus-visible:ring-0 shadow-none h-11 py-2.5 px-4 text-slate-700 font-medium placeholder:text-slate-400" 
-                                    placeholder="Escribí un mensaje o usa @ para citar una venta..." 
-                                    value={msg} 
+                                <Input
+                                    className="border-0 bg-transparent focus-visible:ring-0 shadow-none h-11 py-2.5 px-4 text-slate-700 font-medium placeholder:text-slate-400"
+                                    placeholder="Escribí un mensaje o usa @ para citar una venta..."
+                                    value={msg}
                                     onChange={handleInputChange}
                                     onKeyDown={e => e.key === 'Enter' && handleSend()}
                                 />
-                                <Button size="icon" className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-11 w-11 shadow-sm shrink-0 transition-all active:scale-95" onClick={handleSend}><Send size={20}/></Button>
+                                <Button size="icon" className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-11 w-11 shadow-sm shrink-0 transition-all active:scale-95" onClick={handleSend}><Send size={20} /></Button>
                             </div>
                         </div>
                     </>
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
-                        <div className="bg-slate-200 p-6 rounded-full mb-6 animate-in zoom-in duration-300"><Users size={48} strokeWidth={1.5} className="text-slate-400"/></div>
+                        <div className="bg-slate-200 p-6 rounded-full mb-6 animate-in zoom-in duration-300"><Users size={48} strokeWidth={1.5} className="text-slate-400" /></div>
                         <h3 className="text-xl font-black text-slate-700 mb-2">¡Hola {currentUser}!</h3>
                         <p className="text-sm max-w-xs">Seleccioná un grupo de la izquierda o creá uno nuevo para comenzar a chatear con el equipo.</p>
                     </div>
@@ -390,16 +390,16 @@ export function OpsChat({ currentUser, operations = [], onViewSale }: any) {
             {/* INFO PANEL */}
             {showInfo && activeChatId && (
                 <div className="w-72 border-l border-slate-100 bg-white flex flex-col p-6 animate-in slide-in-from-right-10 shrink-0 shadow-xl z-20">
-                    <div className="flex justify-between items-center mb-10"><h3 className="font-black text-slate-800">Info del Grupo</h3><X size={20} className="cursor-pointer text-slate-400 hover:text-slate-600" onClick={() => setShowInfo(false)}/></div>
+                    <div className="flex justify-between items-center mb-10"><h3 className="font-black text-slate-800">Info del Grupo</h3><X size={20} className="cursor-pointer text-slate-400 hover:text-slate-600" onClick={() => setShowInfo(false)} /></div>
                     <div className="flex flex-col items-center mb-8">
                         <Avatar className="h-24 w-24 bg-slate-900 text-white mb-4 border-4 border-slate-50 shadow-lg"><AvatarFallback className="text-3xl font-black">{activeChatData?.avatar_seed}</AvatarFallback></Avatar>
                         <h4 className="font-bold text-xl text-slate-800 text-center leading-tight">{activeChatData?.name}</h4>
                         <p className="text-xs text-slate-400 mt-1 uppercase font-bold tracking-widest">Grupo Activo</p>
                     </div>
-                    
+
                     <div className="mt-auto pt-6 border-t border-slate-100">
                         <Button variant="outline" className="w-full text-red-500 hover:text-red-600 hover:bg-red-50 border-red-100" onClick={(e) => handleDeleteChat(activeChatId, e)}>
-                            <Trash2 size={16} className="mr-2"/> Eliminar Grupo
+                            <Trash2 size={16} className="mr-2" /> Eliminar Grupo
                         </Button>
                     </div>
                 </div>

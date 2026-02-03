@@ -71,9 +71,8 @@ function ChatBubble({ user, text, time, isMe }: any) {
   return (
     <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} mb-4 animate-in slide-in-from-bottom-2`}>
       <div
-        className={`px-4 py-2 rounded-2xl max-w-[85%] text-[13px] shadow-sm ${
-          isMe ? "bg-blue-600 text-white rounded-br-none" : "bg-white border text-slate-700 rounded-bl-none"
-        }`}
+        className={`px-4 py-2 rounded-2xl max-w-[85%] text-[13px] shadow-sm ${isMe ? "bg-blue-600 text-white rounded-br-none" : "bg-white border text-slate-700 rounded-bl-none"
+          }`}
       >
         {!isMe && <p className="text-[10px] font-black text-blue-500 uppercase mb-1 tracking-tighter">{user}</p>}
         {text}
@@ -290,7 +289,7 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
           id: m.id,
           user: m.sender,
           text: m.text,
-          time: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          time: new Date(m.created_at).toLocaleTimeString('es-AR', { hour: "2-digit", minute: "2-digit", timeZone: 'America/Argentina/Buenos_Aires' }),
           isMe: m.sender === userName,
           rawDate: m.created_at,
         }))
@@ -311,7 +310,7 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
             id: m.id,
             user: m.sender,
             text: m.text,
-            time: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            time: new Date(m.created_at).toLocaleTimeString('es-AR', { hour: "2-digit", minute: "2-digit", timeZone: 'America/Argentina/Buenos_Aires' }),
             isMe: m.sender === userName,
             rawDate: m.created_at,
           },
@@ -574,9 +573,8 @@ export function MySalesView({ userName, supabase, onLogout, openLeadId, openTab 
             <Card
               key={sale.id}
               onClick={() => setSelectedSale(sale)}
-              className={`cursor-pointer hover:shadow-xl hover:translate-x-1 transition-all border-l-[6px] relative group ${borderColorClass} ${
-                isRejected ? "bg-red-50/10" : ""
-              } shadow-sm`}
+              className={`cursor-pointer hover:shadow-xl hover:translate-x-1 transition-all border-l-[6px] relative group ${borderColorClass} ${isRejected ? "bg-red-50/10" : ""
+                } shadow-sm`}
             >
               <CardContent className="p-4 flex items-center gap-4">
                 {/* BLOQUE ICONO */}

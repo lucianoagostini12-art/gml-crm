@@ -687,7 +687,7 @@ export function AdminTeam() {
                               {msg.text}
                             </div>
                             <span className="text-[10px] text-slate-400 mt-1 font-bold px-1">
-                              {msg.sender === 'Supervisión' ? 'Vos' : msg.sender} • {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {msg.sender === 'Supervisión' ? 'Vos' : msg.sender} • {new Date(msg.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}
                             </span>
                           </div>
                         ))

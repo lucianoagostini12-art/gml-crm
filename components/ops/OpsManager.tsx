@@ -382,7 +382,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                         safeChat = rawComments.map((c: any) => ({
                             message: c.text || "",
                             user: c.author || "Sistema",
-                            time: c.date ? new Date(c.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "-",
+                            time: c.date ? new Date(c.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }) : "-",
                             isMe: c.author === userName
                         }));
                     }
@@ -779,7 +779,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                 message: text,
                 text: text,
                 user: userName,
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }),
                 isMe: true
             }
             setSelectedOp(prev => prev ? { ...prev, chat: [...prev.chat, uiMsg] } : null)

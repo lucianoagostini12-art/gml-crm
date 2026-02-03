@@ -552,7 +552,7 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
                             {m.text}
                           </div>
                           <span className="text-[9px] text-slate-400 mt-1 px-1">
-                            {m.time || (m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}
+                            {m.time || (m.created_at ? new Date(m.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }) : '')}
                           </span>
                         </div>
                       ))

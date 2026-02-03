@@ -620,7 +620,7 @@ export function SellerManager({
                         </div>
                         <p className="text-sm font-medium text-slate-700">{task.title}</p>
                         <span className="text-[10px] text-slate-400">
-                          {new Date(task.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} hs
+                          {new Date(task.time).toLocaleTimeString('es-AR', { hour: "2-digit", minute: "2-digit", timeZone: 'America/Argentina/Buenos_Aires' })} hs
                         </span>
                       </div>
                     ))
@@ -695,7 +695,7 @@ export function SellerManager({
 
                           <span className="text-[9px] text-slate-400 whitespace-nowrap">
                             {n.created_at
-                              ? new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                              ? new Date(n.created_at).toLocaleTimeString('es-AR', { hour: "2-digit", minute: "2-digit", timeZone: 'America/Argentina/Buenos_Aires' })
                               : "Ahora"}
                           </span>
                         </div>

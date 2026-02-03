@@ -153,18 +153,17 @@ export function DashboardView({ userName }: { userName?: string }) {
           .sort((a, b) => b.total - a.total)
 
         setSourceStats(sourceArray)
+
+        // B. CALCULAR CUMPLIDAS del período seleccionado (misma lógica que AdminPerformance)
+        // Usamos los leads ya cargados y filtramos por status=cumplidas + billing_approved + billing_period
+        const norm = (s: any) => String(s || "").trim().toLowerCase()
+        const cumplidas = leads.filter((l: any) =>
+          norm(l.status) === "cumplidas" &&
+          l.billing_approved === true &&
+          String(l.billing_period || "") === targetPeriod
+        )
+        setCumplidasLeads(cumplidas)
       }
-
-      // B. TRAER CUMPLIDAS del período seleccionado
-      const { data: cumplidas } = await supabase
-        .from("leads")
-        .select("id, name, full_name, prepaga, quoted_prepaga, plan, quoted_plan, capitas, cuit, dni, fecha_ingreso, billing_period")
-        .eq("agent_name", currentUser)
-        .eq("status", "cumplidas")
-        .eq("billing_approved", true)
-        .eq("billing_period", targetPeriod)
-
-      setCumplidasLeads(cumplidas || [])
     }
 
     fetchData()

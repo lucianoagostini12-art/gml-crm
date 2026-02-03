@@ -4,10 +4,10 @@ import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
-import { 
-    History, Calendar as CalendarIcon, ArrowRight, 
-    Edit3, ShieldAlert, CheckCircle2, Search, 
-    Clock, RefreshCw, FileText, User as UserIcon, 
+import {
+    History, Calendar as CalendarIcon, ArrowRight,
+    Edit3, ShieldAlert, CheckCircle2, Search,
+    Clock, RefreshCw, FileText, User as UserIcon,
     Phone, CreditCard, ArrowRightLeft, Hash
 } from "lucide-react"
 
@@ -50,7 +50,7 @@ const translateField = (field: string) => FIELD_TRANSLATIONS[field] || field
 
 // ✅ A. MAPA MANUAL DE IDs (Detectado en tu JSON)
 const MANUAL_ID_MAP: Record<string, string> = {
-    "8c01b3f6-4b9d-4f52-8df3-3b3cc8b533e7": "Maca Parra", 
+    "8c01b3f6-4b9d-4f52-8df3-3b3cc8b533e7": "Maca Parra",
     // Si aparece otro ID "desconocido", pegalo acá
 }
 
@@ -92,12 +92,12 @@ type HistoryEvent = {
         name: string
         dni: string
         phone: string
-        status: OpStatus 
+        status: OpStatus
         plan?: string
         prepaga?: string
     }
-    context?: string 
-    metadata?: any 
+    context?: string
+    metadata?: any
     icon?: any
     color?: string
 }
@@ -109,26 +109,26 @@ const inferContext = (field: string | null, status: string) => {
     if (f.includes('status') || f.includes('sub_state')) return { label: 'FLUJO / ESTADO', color: 'bg-blue-100 text-blue-700' }
     if (f.includes('doc') || f.includes('file')) return { label: 'DOCUMENTACIÓN', color: 'bg-orange-100 text-orange-700' }
     if (f.includes('dni') || f.includes('name') || f.includes('address') || f.includes('telefono') || f.includes('phone')) return { label: 'DATOS PERSONALES', color: 'bg-purple-100 text-purple-700' }
-    
+
     if (status === 'cumplidas') return { label: 'POST-VENTA', color: 'bg-emerald-100 text-emerald-700' }
     if (status === 'ingresado') return { label: 'MESA DE ENTRADA', color: 'bg-slate-100 text-slate-700' }
-    
+
     return { label: 'OPERATIVA', color: 'bg-gray-100 text-gray-700' }
 }
 
 export function OpsHistory() {
     const supabase = createClient()
-    
+
     // --- ESTADOS ---
     const [events, setEvents] = useState<HistoryEvent[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
     const [selectedOperator, setSelectedOperator] = useState<string>("all")
     const [searchTerm, setSearchTerm] = useState("")
-    
+
     // Data auxiliar
-    const [operatorsMap, setOperatorsMap] = useState<Record<string, any>>({}) 
-    const [operatorsList, setOperatorsList] = useState<any[]>([]) 
+    const [operatorsMap, setOperatorsMap] = useState<Record<string, any>>({})
+    const [operatorsList, setOperatorsList] = useState<any[]>([])
     const [stats, setStats] = useState({ total: 0, changes: 0, edits: 0, alerts: 0 })
 
     // Modal de Detalle
@@ -156,7 +156,7 @@ export function OpsHistory() {
     // ✅ C. RESOLUCIÓN DE USUARIO (ID -> NOMBRE)
     const resolveUser = (identifier: string | null, actorNameFallback?: string) => {
         if (!identifier) return { name: actorNameFallback || "Sistema", avatar: undefined }
-        
+
         // 1. CHEQUEO MANUAL POR ID (Lo que arregla a Maca ahora mismo)
         if (MANUAL_ID_MAP[identifier]) {
             return { name: MANUAL_ID_MAP[identifier], avatar: undefined, email: identifier }
@@ -168,11 +168,11 @@ export function OpsHistory() {
             const email = profile.email?.toLowerCase() || ""
             // Si el perfil tiene mail, chequeamos si es especial (Maca/Iara)
             if (SPECIAL_EMAILS[email]) return { name: SPECIAL_EMAILS[email], avatar: profile.avatar_url, email: email }
-            
-            return { 
-                name: profile.full_name || email.split('@')[0], 
-                avatar: profile.avatar_url, 
-                email: email 
+
+            return {
+                name: profile.full_name || email.split('@')[0],
+                avatar: profile.avatar_url,
+                email: email
             }
         }
 
@@ -180,17 +180,17 @@ export function OpsHistory() {
         if (identifier.includes("@")) {
             const emailLower = identifier.toLowerCase()
             if (SPECIAL_EMAILS[emailLower]) return { name: SPECIAL_EMAILS[emailLower], avatar: undefined }
-            return { name: identifier.split("@")[0], avatar: undefined } 
+            return { name: identifier.split("@")[0], avatar: undefined }
         }
 
         // 4. Si el log trajo un nombre guardado
         if (actorNameFallback && actorNameFallback !== "null") return { name: actorNameFallback, avatar: undefined }
-        
+
         // 5. Desconocido
         if (identifier.length > 20 && identifier.includes('-')) {
-             return { name: "Usuario Desconocido", avatar: undefined }
+            return { name: "Usuario Desconocido", avatar: undefined }
         }
-        
+
         return { name: identifier, avatar: undefined }
     }
 
@@ -198,12 +198,12 @@ export function OpsHistory() {
     const fetchHistory = async () => {
         if (!selectedDate) return
         setIsLoading(true)
-        
+
         const start = new Date(selectedDate)
         start.setHours(0, 0, 0, 0)
         const end = new Date(selectedDate)
         end.setHours(23, 59, 59, 999)
-        
+
         const startIso = start.toISOString()
         const endIso = end.toISOString()
 
@@ -215,7 +215,7 @@ export function OpsHistory() {
 
             const leadIds = new Set<string>()
             statusHistory?.forEach((h: any) => h.lead_id && leadIds.add(h.lead_id))
-            
+
             if (!auditError && auditLogs) {
                 auditLogs.forEach((a: any) => {
                     const lid = a.lead_id || a.metadata?.record_id || a.metadata?.lead_id
@@ -228,9 +228,9 @@ export function OpsHistory() {
             if (leadIds.size > 0) {
                 const { data: leadsData } = await supabase
                     .from('leads')
-                    .select('id, name, dni, phone, status, plan, prepaga') 
+                    .select('id, name, dni, phone, status, plan, prepaga')
                     .in('id', Array.from(leadIds))
-                
+
                 leadsData?.forEach((l: any) => { leadsMap[l.id] = l })
             }
 
@@ -258,17 +258,17 @@ export function OpsHistory() {
                 auditLogs.forEach((a: any) => {
                     const targetLeadId = a.lead_id || a.metadata?.record_id || a.metadata?.lead_id
                     const lead = leadsMap[targetLeadId]
-                    
+
                     const meta = a.metadata || {}
                     const rawField = a.field_changed || meta.field_changed || meta.field || a.action || "Dato"
                     const fieldName = translateField(rawField)
-                    
+
                     // ✅ D. LECTURA DE DATOS (FIX: Leyendo 'from' y 'to')
                     const rawOld = meta.old_value ?? meta.old ?? meta.previous_value ?? meta.from
                     const rawNew = meta.new_value ?? meta.new ?? meta.current_value ?? meta.to
-                    
+
                     const contextInfo = inferContext(fieldName, lead?.status || 'unknown')
-                    
+
                     // Usamos actor_user_id (el UUID)
                     const actorId = a.actor_user_id || a.performed_by
                     const actorName = a.actor_name
@@ -284,10 +284,10 @@ export function OpsHistory() {
                         clientInfo: lead ? { name: lead.name, dni: lead.dni, phone: lead.phone, status: lead.status as OpStatus, plan: lead.plan, prepaga: lead.prepaga } : undefined,
                         context: contextInfo.label,
                         // ✅ Usamos formatValue para evitar vacíos
-                        metadata: { 
-                            old: formatValue(rawOld), 
-                            new: formatValue(rawNew), 
-                            colorClass: contextInfo.color 
+                        metadata: {
+                            old: formatValue(rawOld),
+                            new: formatValue(rawNew),
+                            colorClass: contextInfo.color
                         },
                         icon: Edit3,
                         color: 'text-orange-600 bg-orange-100'
@@ -303,8 +303,8 @@ export function OpsHistory() {
                     const isBilling = m.text.includes("FACTURACION")
                     let typeTitle = "Nota de Gestión"; let icon = FileText; let color = "text-slate-600 bg-slate-100"; let context = "GENERAL"
 
-                    if(isAlert) { typeTitle = "ALERTA DE RECHAZO"; icon = ShieldAlert; color = "text-red-600 bg-red-100"; context = "AUDITORÍA" }
-                    if(isBilling) { typeTitle = "Movimiento Facturación"; icon = CreditCard; color = "text-green-600 bg-green-100"; context = "FACTURACIÓN" }
+                    if (isAlert) { typeTitle = "ALERTA DE RECHAZO"; icon = ShieldAlert; color = "text-red-600 bg-red-100"; context = "AUDITORÍA" }
+                    if (isBilling) { typeTitle = "Movimiento Facturación"; icon = CreditCard; color = "text-green-600 bg-green-100"; context = "FACTURACIÓN" }
 
                     combinedEvents.push({
                         id: `msg-${m.id}`,
@@ -342,7 +342,7 @@ export function OpsHistory() {
 
     useEffect(() => {
         fetchHistory()
-    }, [selectedDate, operatorsMap]) 
+    }, [selectedDate, operatorsMap])
 
     // --- ACCIONES ---
     const handleOpenDetail = async (leadId: string) => {
@@ -359,13 +359,13 @@ export function OpsHistory() {
         return events.filter(e => {
             const matchUser = selectedOperator === 'all' || e.user.name === selectedOperator
             const term = searchTerm.toLowerCase()
-            const matchSearch = searchTerm === '' || 
-                                e.title?.toLowerCase().includes(term) || 
-                                e.actionLabel?.toLowerCase().includes(term) ||
-                                e.user.name.toLowerCase().includes(term) ||
-                                e.clientInfo?.name.toLowerCase().includes(term) ||
-                                e.clientInfo?.dni.includes(term) ||
-                                e.context?.toLowerCase().includes(term)
+            const matchSearch = searchTerm === '' ||
+                e.title?.toLowerCase().includes(term) ||
+                e.actionLabel?.toLowerCase().includes(term) ||
+                e.user.name.toLowerCase().includes(term) ||
+                e.clientInfo?.name.toLowerCase().includes(term) ||
+                e.clientInfo?.dni.includes(term) ||
+                e.context?.toLowerCase().includes(term)
             return matchUser && matchSearch
         })
     }, [events, selectedOperator, searchTerm])
@@ -377,7 +377,7 @@ export function OpsHistory() {
                 <div className="flex justify-between items-start mb-6">
                     <div>
                         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3">
-                            <History className="text-orange-600" size={28}/> 
+                            <History className="text-orange-600" size={28} />
                             Historial Global
                         </h2>
                         <p className="text-slate-500 text-sm mt-1">Auditoría completa con identificación de usuarios y clientes.</p>
@@ -416,9 +416,9 @@ export function OpsHistory() {
 
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                        <Input placeholder="Buscar cliente, DNI, acción..." className="pl-9 bg-slate-50" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+                        <Input placeholder="Buscar cliente, DNI, acción..." className="pl-9 bg-slate-50" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     </div>
-                    <Button variant="ghost" size="icon" onClick={fetchHistory}><RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`}/></Button>
+                    <Button variant="ghost" size="icon" onClick={fetchHistory}><RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /></Button>
                 </div>
             </div>
 
@@ -426,20 +426,20 @@ export function OpsHistory() {
             <ScrollArea className="flex-1 p-8">
                 <div className="max-w-5xl mx-auto relative pl-8 border-l-2 border-slate-200 space-y-6 pb-20">
                     {filteredEvents.length === 0 ? (
-                        <div className="text-center py-20 text-slate-400"><History size={48} className="mx-auto mb-4 opacity-20"/><p>Sin movimientos registrados.</p></div>
+                        <div className="text-center py-20 text-slate-400"><History size={48} className="mx-auto mb-4 opacity-20" /><p>Sin movimientos registrados.</p></div>
                     ) : (
                         filteredEvents.map((event) => {
                             const Icon = event.icon || CheckCircle2
-                            const time = new Date(event.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
-                            
+                            const time = new Date(event.timestamp).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
+
                             return (
                                 <div key={event.id} className="relative group">
                                     <div className={`absolute -left-[41px] top-6 h-5 w-5 rounded-full bg-white border-4 group-hover:scale-110 transition-all z-10 ${event.type === 'audit_log' ? 'border-red-500' : 'border-slate-300 group-hover:border-blue-500'}`}></div>
-                                    
+
                                     <Card className="hover:shadow-xl transition-all border-slate-200 group-hover:border-blue-300 overflow-hidden cursor-default">
                                         <div className="flex">
                                             <div className={`w-1.5 shrink-0 ${event.type === 'status_change' ? 'bg-blue-500' : event.type === 'manual_edit' ? 'bg-orange-500' : event.type === 'audit_log' ? 'bg-red-500' : 'bg-slate-300'}`}></div>
-                                            
+
                                             <div className="flex-1 p-4">
                                                 <div className="flex justify-between items-start mb-3">
                                                     {/* INFO OPERADOR + TÍTULO */}
@@ -459,7 +459,7 @@ export function OpsHistory() {
                                                                 {/* ✅ AVATAR DEL OPERADOR */}
                                                                 <Avatar className="h-5 w-5 border border-slate-200">
                                                                     <AvatarImage src={event.user.avatar} />
-                                                                    <AvatarFallback className="text-[8px] font-bold bg-slate-900 text-white">{event.user.name.substring(0,2)}</AvatarFallback>
+                                                                    <AvatarFallback className="text-[8px] font-bold bg-slate-900 text-white">{event.user.name.substring(0, 2)}</AvatarFallback>
                                                                 </Avatar>
                                                                 <span className="text-[10px] text-slate-400">• {time}</span>
                                                             </div>
@@ -468,7 +468,7 @@ export function OpsHistory() {
 
                                                     {event.leadId && (
                                                         <Button size="sm" variant="ghost" className="text-blue-600 hover:bg-blue-50 text-xs font-bold h-8 px-3 border border-blue-100" onClick={() => handleOpenDetail(event.leadId!)}>
-                                                            Ver Operación <ArrowRight size={12} className="ml-2"/>
+                                                            Ver Operación <ArrowRight size={12} className="ml-2" />
                                                         </Button>
                                                     )}
                                                 </div>
@@ -483,7 +483,7 @@ export function OpsHistory() {
                                                             <div>
                                                                 <p className="text-xs font-black text-slate-700 uppercase">{event.clientInfo.name || "Cliente Desconocido"}</p>
                                                                 <p className="text-[10px] text-slate-500 font-mono flex items-center gap-2">
-                                                                    <Hash size={10}/> {event.clientInfo.dni || "S/DNI"}
+                                                                    <Hash size={10} /> {event.clientInfo.dni || "S/DNI"}
                                                                     {event.clientInfo.prepaga && <span className="bg-white px-1 rounded border border-slate-200">{event.clientInfo.prepaga}</span>}
                                                                 </p>
                                                             </div>
@@ -530,13 +530,13 @@ export function OpsHistory() {
             </ScrollArea>
 
             {selectedOp && (
-                <OpsModal 
+                <OpsModal
                     op={selectedOp} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}
-                    onUpdateOp={()=>{}} currentUser={"Auditor"} role={"admin_god"} 
-                    onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} 
-                    onSubStateChange={()=>{}} onAddNote={()=>{}} onSendChat={()=>{}} onAddReminder={()=>{}} 
+                    onUpdateOp={() => { }} currentUser={"Auditor"} role={"admin_god"}
+                    onStatusChange={() => { }} onRelease={() => { }} requestAdvance={() => { }} requestBack={() => { }} onPick={() => { }}
+                    onSubStateChange={() => { }} onAddNote={() => { }} onSendChat={() => { }} onAddReminder={() => { }}
                     getStatusColor={getStatusColor} getSubStateStyle={getSubStateStyle}
-                    globalConfig={{prepagas:[], subStates:{}}}
+                    globalConfig={{ prepagas: [], subStates: {} }}
                 />
             )}
         </div>

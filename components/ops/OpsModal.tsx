@@ -135,7 +135,7 @@ export function OpsModal({
     op, isOpen, onClose, onRelease, onStatusChange, requestAdvance, requestBack, onPick,
     onAddNote, onAddReminder, currentUser, role, onUpdateOp,
     onMarkSeen,
-    onSubStateChange, getSubStateStyle, getStatusColor,
+    onSubStateChange,
     globalConfig
 }: any) {
     const supabase = createClient()

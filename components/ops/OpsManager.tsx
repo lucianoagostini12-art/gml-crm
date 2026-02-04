@@ -1035,7 +1035,7 @@ export function OpsManager({ role, userName }: OpsManagerProps) {
                                     {['stage_list', 'pool', 'mine'].includes(viewMode) && <OpsList operations={filteredOps} onSelectOp={handleCardClick} updateOp={updateOp} globalConfig={globalConfig} unreadByLead={unreadByLead} />}
 
                                     {viewMode === 'metrics' && (role === 'admin_god' || permissions.accessMetrics) && <OpsMetrics />}
-                                    {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling searchTerm={searchTerm} />}
+                                    {viewMode === 'billing' && (role === 'admin_god' || permissions.accessBilling) && <OpsBilling searchTerm={searchTerm} userName={userName} />}
 
                                     {viewMode === 'post_sale' && (role === 'admin_god' || permissions.accessPostSale) && <OpsPostSale globalConfig={globalConfig} />}
 

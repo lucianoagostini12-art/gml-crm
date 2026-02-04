@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle, Copy, Check, Trash2 } from "lucide-react"
+import { DollarSign, Save, Lock, Settings2, LayoutGrid, Filter, CheckCircle2, Download, Undo2, Calendar, Clock, User, Globe, Phone, Users, Plus, X, ArrowRight, ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info, Eye, EyeOff, BarChart3, AlertTriangle, Copy, Check, Trash2, ExternalLink } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 
@@ -143,7 +143,7 @@ const getCurrentMonth = () => {
 }
 
 
-export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
+export function OpsBilling({ searchTerm = "", userName = "Administración" }: { searchTerm?: string, userName?: string }) {
     const supabase = createClient()
 
     // --- ESTADO ---
@@ -165,6 +165,7 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
 
     // Modals
     const [selectedOp, setSelectedOp] = useState<any>(null) // Para OpsModal
+    const [modalOpen, setModalOpen] = useState(false) // ✅ Estado para controlar apertura del modal
     const [deferOpId, setDeferOpId] = useState<string | null>(null) // ID para mover al PROXIMO mes
     const [retroOpId, setRetroOpId] = useState<string | null>(null) // ID para mover al ANTERIOR mes
     const [manualPortfolio, setManualPortfolio] = useState<any[]>([])
@@ -759,10 +760,24 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                             <TableCell>
                                                 <div className="font-bold text-slate-800 flex items-center gap-1">
                                                     {op.clientName}
+                                                    {/* ✅ Badge PASS si aplica */}
+                                                    {op.type === 'pass' && (
+                                                        <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px] px-1 h-4">PASS</Badge>
+                                                    )}
                                                     <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                                         {op.cuit || op.dni}
                                                     </span>
                                                     <CopyDniButton cuit={op.cuit} dni={op.dni} />
+                                                    {/* ✅ Botón premium para abrir OpsModal */}
+                                                    <Button
+                                                        size="icon"
+                                                        variant="ghost"
+                                                        className="h-6 w-6 ml-2 text-blue-600 hover:bg-blue-50 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-all shadow-sm border border-transparent hover:border-blue-200"
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedOp(op) }}
+                                                        title="Ver detalles"
+                                                    >
+                                                        <ExternalLink size={12} />
+                                                    </Button>
                                                 </div>
                                                 <div className="flex gap-2 mt-1"><Badge variant="secondary" className="text-[9px] h-4 px-1 border-slate-200 font-normal">{getSourceIcon(op.origen || "")} {op.origen || "Dato"}</Badge></div>
                                             </TableCell>
@@ -840,10 +855,24 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                             <TableCell>
                                                 <div className="font-bold text-slate-800 flex items-center gap-1">
                                                     {op.clientName}
+                                                    {/* ✅ Badge PASS si aplica */}
+                                                    {op.type === 'pass' && (
+                                                        <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px] px-1 h-4">PASS</Badge>
+                                                    )}
                                                     <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                                         {op.cuit || op.dni}
                                                     </span>
                                                     <CopyDniButton cuit={op.cuit} dni={op.dni} />
+                                                    {/* ✅ Botón premium para abrir OpsModal */}
+                                                    <Button
+                                                        size="icon"
+                                                        variant="ghost"
+                                                        className="h-6 w-6 ml-2 text-blue-600 hover:bg-blue-50 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-all shadow-sm border border-transparent hover:border-blue-200"
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedOp(op) }}
+                                                        title="Ver detalles"
+                                                    >
+                                                        <ExternalLink size={12} />
+                                                    </Button>
                                                 </div>
                                                 <div className="flex items-center gap-2 text-xs text-slate-500">
                                                     <Badge variant="outline" className={`h-4 px-1 text-[9px] border ${getPrepagaBadgeColor(op.prepaga)}`}>{op.prepaga}</Badge>
@@ -968,6 +997,16 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                                                             {op.cuit || op.dni}
                                                         </span>
                                                         <CopyDniButton cuit={op.cuit} dni={op.dni} />
+                                                        {/* ✅ Botón premium para abrir OpsModal */}
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-6 w-6 ml-2 text-blue-600 hover:bg-blue-50 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-all shadow-sm border border-transparent hover:border-blue-200"
+                                                            onClick={(e) => { e.stopPropagation(); setSelectedOp(op) }}
+                                                            title="Ver detalles"
+                                                        >
+                                                            <ExternalLink size={12} />
+                                                        </Button>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
@@ -1107,7 +1146,21 @@ export function OpsBilling({ searchTerm = "" }: { searchTerm?: string }) {
                 </TabsContent >
             </Tabs >
 
-            {/* --- OpsModal removido: no es necesario en Facturación --- */}
+            {/* ✅ OpsModal restaurado para ver detalles de operaciones (patrón OpsPostsale) */}
+            <OpsModal
+                op={selectedOp}
+                isOpen={!!selectedOp}
+                onClose={() => setSelectedOp(null)}
+                currentUser={userName}
+                role={"admin"}
+                globalConfig={globalConfig}
+                onUpdateOp={(updatedLead: any) => {
+                    // Actualización optimista de la lista local
+                    setOperations(prev => prev.map(op =>
+                        op.id === updatedLead.id ? { ...op, ...updatedLead } : op
+                    ))
+                }}
+            />
 
             {/* CONFIGURACIÓN */}
             <Dialog open={showConfig} onOpenChange={setShowConfig}>

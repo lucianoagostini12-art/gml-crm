@@ -6,12 +6,12 @@ export type OpOrigin = 'Google Ads' | 'Meta Ads' | 'Llamador' | 'Referido' | 'Re
 
 // Orden fijo del flujo (Esto sí conviene dejarlo fijo para mantener el orden visual)
 export const FLOW_STATES: OpStatus[] = [
-    'ingresado', 
-    'precarga', 
-    'medicas', 
-    'legajo', 
-    'demoras', 
-    'cumplidas', 
+    'ingresado',
+    'precarga',
+    'medicas',
+    'legajo',
+    'demoras',
+    'cumplidas',
     'rechazado'
 ]
 
@@ -28,7 +28,7 @@ export type Operation = {
     clientName: string
     dni: string
     cuit?: string
-    dob: string 
+    dob: string
     email?: string
     phone: string
     domicilio?: string
@@ -36,14 +36,14 @@ export type Operation = {
     provincia?: string
     cp?: string
     seller: string
-    entryDate: string 
-    finishedDate?: string 
+    entryDate: string
+    finishedDate?: string
     daysInStatus: number
     plan?: string
-    prepaga?: string 
+    prepaga?: string
     price?: number
     capitas?: number
-    tipoGrupo?: string 
+    tipoGrupo?: string
     conyuge?: { nombre: string, dni: string }
     hijos?: { nombre: string, dni: string }[]
     origenAportes?: string
@@ -55,16 +55,16 @@ export type Operation = {
     cbu_tarjeta?: string
     status: OpStatus
     subState?: string
-    operator: string | null 
+    operator: string | null
     lastUpdate: string
     filesCount: number
     chat: ChatMsg[]
     history: AuditLog[]
-    adminNotes: any[] 
+    adminNotes: any[]
     reminders: Reminder[]
     urgent: boolean
     obs?: string
-    
+
     // Facturación
     fullPrice?: string
     aportes?: string
@@ -73,7 +73,7 @@ export type Operation = {
     billing_period?: string
     billing_price_override?: number
     billing_portfolio_override?: number
-    
+
     // Datos extendidos Modal
     address_street?: string
     address_city?: string
@@ -93,8 +93,9 @@ export const getPrepagaStyles = (p?: string) => {
     return "border-l-slate-400"
 }
 
-export const getStatusColor = (status: OpStatus) => {
-    switch(status) {
+export const getStatusColor = (status?: string | null) => {
+    if (!status) return 'bg-slate-500 text-white'
+    switch (status) {
         case 'ingresado': return 'bg-slate-800 text-white border-slate-900'
         case 'precarga': return 'bg-blue-600 text-white border-blue-700'
         case 'medicas': return 'bg-purple-600 text-white border-purple-700'
@@ -111,12 +112,12 @@ export const getSubStateStyle = (sub?: string) => {
     const danger = ['Documentación faltante', 'Problema Afiliación', 'Baja', 'Desiste', 'No deriva aportes', 'Patologia roja', 'Error página']
     const warning = ['Docu pendiente', 'Auditoria', 'Análisis', 'Ampliación']
     const success = ['Aprobado', 'Completo', 'Finalizado', 'Enviado a Facturación']
-    
+
     if (danger.some(d => sub.includes(d))) return "bg-red-50 text-red-700 border-red-200 font-bold"
     if (warning.some(w => sub.includes(w))) return "bg-amber-50 text-amber-700 border-amber-200 font-bold"
     if (success.some(s => sub.includes(s))) return "bg-emerald-50 text-emerald-700 border-emerald-200 font-bold"
-    
-    return "bg-blue-50 text-blue-700 border-blue-200" 
+
+    return "bg-blue-50 text-blue-700 border-blue-200"
 }
 
 // YA NO EXPORTAMOS PLANES NI MOCK OPS DESDE ACÁ

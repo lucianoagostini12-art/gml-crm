@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle, Archive, Ban, User } from "lucide-react"
+import { Layers, Recycle, RefreshCw, ExternalLink, Flame, Snowflake, Lock, Zap, Skull, Clock, Tag, MessageCircle, Eye, XCircle, DollarSign, ThumbsDown, Trash2, ShieldAlert, Activity, HelpCircle, Archive, Ban, User, UserPlus } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -127,6 +127,8 @@ export function AdminLeadFactory() {
   const [agentsList, setAgentsList] = useState<{ name: string, avatar: string }[]>([])
   // ✅ ESTADO PARA MONITOR DIARIO
   const [dailyAssignments, setDailyAssignments] = useState<Record<string, number>>({})
+  // ✅ PERÍODO PARA FILTRO DE CONTADORES (hoy/semana/mes/año)
+  const [statsPeriod, setStatsPeriod] = useState<'today' | 'week' | 'month' | 'year'>('today')
 
   // SELECCIÓN
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
@@ -158,6 +160,15 @@ export function AdminLeadFactory() {
   const [origLead, setOrigLead] = useState<Lead | null>(null)
   const [triageModalOpen, setTriageModalOpen] = useState(false)
   const [leadToTriage, setLeadToTriage] = useState<Lead | null>(null)
+
+  // ✅ CREACIÓN MANUAL DE LEADS
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [newLeadName, setNewLeadName] = useState('')
+  const [newLeadPhone, setNewLeadPhone] = useState('')
+  const [newLeadEmail, setNewLeadEmail] = useState('')
+  const [newLeadSource, setNewLeadSource] = useState('Manual')
+  const [newLeadAgent, setNewLeadAgent] = useState('')
+  const [sourceOptions, setSourceOptions] = useState<string[]>(['Manual', 'Referido', 'WhatsApp', 'Llamador', 'Google Ads', 'Meta Ads'])
 
   // CARGA INICIAL
   useEffect(() => {
@@ -192,6 +203,41 @@ export function AdminLeadFactory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ✅ Refetch cuando cambia el período seleccionado
+  useEffect(() => {
+    fetchDailyStats(statsPeriod)
+  }, [statsPeriod])
+
+  // ✅ CARGAR ORÍGENES DESDE LA BASE DE DATOS (patrón AdminDatabase)
+  const fetchDistinctSources = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('leads')
+        .select('source')
+        .not('source', 'is', null)
+        .limit(5000)
+
+      if (error || !data) return
+
+      const uniqueSources = Array.from(new Set(
+        (data as any[]).map((r) => r?.source).filter(Boolean)
+      )).sort() as string[]
+
+      // Agregar opciones default si no existen
+      const defaults = ['Manual', 'Referido', 'WhatsApp', 'Llamador']
+      const merged = [...new Set([...uniqueSources, ...defaults])].sort()
+
+      setSourceOptions(merged)
+    } catch (e) {
+      console.error('Error fetching sources:', e)
+    }
+  }
+
+  // ✅ Cargar orígenes al inicio
+  useEffect(() => {
+    fetchDistinctSources()
+  }, [])
+
   // ✅ 1. TRAER SOLO SELLERS REALES CON FOTO
   const fetchRealAgents = async () => {
     const { data, error } = await supabase
@@ -212,20 +258,40 @@ export function AdminLeadFactory() {
     }
   }
 
-  // ✅ 2. CONTADORES DE ASIGNACIÓN DIARIA (LOGICA CRUCE TABLAS)
-  const fetchDailyStats = async () => {
-    const startOfDay = new Date()
-    startOfDay.setHours(0, 0, 0, 0)
+  // ✅ 2. CONTADORES DE ASIGNACIÓN POR PERÍODO (LOGICA CRUCE TABLAS)
+  const fetchDailyStats = async (period: 'today' | 'week' | 'month' | 'year' = statsPeriod) => {
+    // Calcular fecha de inicio según período
+    const now = new Date()
+    let startDate = new Date()
+    switch (period) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0)
+        break
+      case 'week':
+        const dayOfWeek = now.getDay()
+        const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+        startDate.setDate(now.getDate() - diff)
+        startDate.setHours(0, 0, 0, 0)
+        break
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        break
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1)
+        break
+    }
 
     // ✅ OBJETIVO: “Asignaciones hechas hoy” (no “dueño actual”).
     // Para que NO baje/oscile cuando un lead se reasigna después,
     // contamos por el agent_name guardado en lead_status_history en el momento de asignación.
     // IMPORTANTE: en este archivo, cuando asignamos a alguien, insertamos en history con agent_name = DESTINO.
+    // ✅ FIX: Solo contamos primeras asignaciones (from_status = 'ingresado'), no reasignaciones
     const { data: historyData, error } = await supabase
       .from('lead_status_history')
       .select('agent_name')
-      .gte('changed_at', startOfDay.toISOString())
+      .gte('changed_at', startDate.toISOString())
       .eq('to_status', 'nuevo')
+      .eq('from_status', 'sin_asignar') // ✅ SOLO asignaciones desde Factory (marcador único)
       .not('agent_name', 'is', null)
       .neq('agent_name', 'Sin Asignar')
 
@@ -269,7 +335,7 @@ export function AdminLeadFactory() {
         // Forzamos la creación de historial para que el contador lo detecte
         await supabase.from('lead_status_history').insert({
           lead_id: leadToAssign.id,
-          from_status: 'ingresado', // Estado anterior asumido
+          from_status: 'sin_asignar', // ✅ Marcador único para asignaciones desde Factory
           to_status: 'nuevo',
           // ✅ Guardamos el DESTINO (owner asignado) para que el contador de "hoy" sea estable.
           agent_name: agentToAssign,
@@ -537,7 +603,7 @@ export function AdminLeadFactory() {
       // Si el trigger de la base de datos no lo hace, lo hacemos aquí para asegurar que 'fetchDailyStats' lo vea.
       const historyEntries = selectedLeads.map(id => ({
         lead_id: id,
-        from_status: origin === 'cementerio' ? 'perdido' : 'ingresado',
+        from_status: origin === 'cementerio' ? 'perdido' : 'sin_asignar', // ✅ Factory usa 'sin_asignar'
         to_status: 'nuevo',
         // ✅ Guardamos el DESTINO (owner asignado). Esto hace que el conteo de "Asignaciones de hoy" sea estable.
         agent_name: targetAgent,
@@ -624,7 +690,7 @@ export function AdminLeadFactory() {
     // Historial manual para el contador
     await supabase.from('lead_status_history').insert({
       lead_id: leadId,
-      from_status: 'ingresado',
+      from_status: 'sin_asignar', // ✅ Marcador único para asignaciones desde Factory
       to_status: 'nuevo',
       agent_name: targetAgent,
       changed_at: new Date().toISOString()
@@ -698,6 +764,62 @@ export function AdminLeadFactory() {
     setLoading(false)
     setDupModalOpen(false)
     fetchInbox()
+  }
+
+  // ✅ CREAR LEAD MANUAL
+  const createManualLead = async () => {
+    if (!newLeadName.trim() || !newLeadPhone.trim()) {
+      alert('Nombre y teléfono son requeridos')
+      return
+    }
+
+    setLoading(true)
+    const now = new Date().toISOString()
+    const phoneDigits = newLeadPhone.replace(/\D/g, '')
+    const phoneCanon = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits
+
+    // Crear lead
+    const { data: newLead, error } = await supabase.from('leads').insert({
+      name: newLeadName.trim(),
+      phone: phoneDigits,
+      phone_canon: phoneCanon,
+      email: newLeadEmail.trim() || null,
+      source: newLeadSource || 'Manual',
+      status: newLeadAgent ? 'nuevo' : 'nuevo',
+      agent_name: newLeadAgent || null,
+      created_at: now,
+      last_update: now,
+      notes: 'Creado manualmente desde AdminLeadFactory'
+    }).select().single()
+
+    if (error) {
+      console.error('Error creando lead:', error)
+      alert('Error al crear el lead: ' + error.message)
+      setLoading(false)
+      return
+    }
+
+    // Si tiene agente asignado, registrar en historial
+    if (newLeadAgent && newLead) {
+      await supabase.from('lead_status_history').insert({
+        lead_id: newLead.id,
+        from_status: 'sin_asignar',
+        to_status: 'nuevo',
+        agent_name: newLeadAgent,
+        changed_at: now
+      })
+    }
+
+    // Reset form
+    setNewLeadName('')
+    setNewLeadPhone('')
+    setNewLeadEmail('')
+    setNewLeadSource('Manual')
+    setNewLeadAgent('')
+    setCreateModalOpen(false)
+    setLoading(false)
+    fetchInbox()
+    fetchDailyStats()
   }
 
   // --- HELPERS UI ---
@@ -788,9 +910,31 @@ export function AdminLeadFactory() {
           {/* ✅ NUEVO: MONITOR DE DISTRIBUCIÓN DIARIA (Estilo Semáforo ACUMULATIVO) */}
           {agentsList.length > 0 && (
             <div className="mb-4 bg-white p-4 rounded-xl border shadow-sm animate-in fade-in slide-in-from-top-4">
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Activity className="h-4 w-4" /> Asignaciones Totales de Hoy
-              </h4>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Activity className="h-4 w-4" /> Asignaciones Totales
+                </h4>
+                {/* ✅ SELECTOR DE PERÍODO PREMIUM */}
+                <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                  {[
+                    { id: 'today', label: 'Hoy' },
+                    { id: 'week', label: 'Semana' },
+                    { id: 'month', label: 'Mes' },
+                    { id: 'year', label: 'Año' }
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setStatsPeriod(p.id as any)}
+                      className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${statsPeriod === p.id
+                        ? 'bg-white text-emerald-700 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex flex-wrap gap-4">
                 {agentsList.map((agent) => (
                   <div key={agent.name} className="flex flex-col items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 min-w-[80px]">
@@ -834,6 +978,16 @@ export function AdminLeadFactory() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* ✅ BOTÓN CREAR LEAD MANUAL */}
+                <Button
+                  variant="outline"
+                  onClick={() => setCreateModalOpen(true)}
+                  className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Crear Lead
+                </Button>
 
                 <Button onClick={() => executeAssign("inbox")} disabled={selectedLeads.length === 0} className="bg-blue-600">
                   Confirmar ({selectedLeads.length})
@@ -1512,6 +1666,99 @@ export function AdminLeadFactory() {
                 Asignar DUPLICADO a {targetAgent || "…"}
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ✅ MODAL CREACIÓN MANUAL DE LEADS */}
+      <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-emerald-600" />
+              Crear Lead Manual
+            </DialogTitle>
+            <DialogDescription>Crea un lead nuevo y asígnalo a una vendedora o déjalo sin asignar.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Nombre *</label>
+              <Input
+                placeholder="Nombre completo"
+                value={newLeadName}
+                onChange={(e) => setNewLeadName(e.target.value)}
+                className="bg-slate-50"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Teléfono *</label>
+              <Input
+                placeholder="11 1234-5678"
+                value={newLeadPhone}
+                onChange={(e) => setNewLeadPhone(e.target.value)}
+                className="bg-slate-50"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Email (opcional)</label>
+              <Input
+                placeholder="email@ejemplo.com"
+                value={newLeadEmail}
+                onChange={(e) => setNewLeadEmail(e.target.value)}
+                className="bg-slate-50"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Origen</label>
+              <Select value={newLeadSource} onValueChange={setNewLeadSource}>
+                <SelectTrigger className="bg-slate-50">
+                  <SelectValue placeholder="Seleccionar origen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sourceOptions.map((s) => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Asignar a (opcional)</label>
+              <Select value={newLeadAgent || '__none__'} onValueChange={(v) => setNewLeadAgent(v === '__none__' ? '' : v)}>
+                <SelectTrigger className="bg-slate-50">
+                  <SelectValue placeholder="Sin asignar (bandeja)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin asignar</SelectItem>
+                  {agentsList.map((a) => (
+                    <SelectItem key={a.name} value={a.name}>
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-4 w-4">
+                          <AvatarImage src={a.avatar} />
+                          <AvatarFallback>{a.name[0]}</AvatarFallback>
+                        </Avatar>
+                        {a.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateModalOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={createManualLead}
+              disabled={loading || !newLeadName.trim() || !newLeadPhone.trim()}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {loading ? 'Creando...' : 'Crear Lead'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

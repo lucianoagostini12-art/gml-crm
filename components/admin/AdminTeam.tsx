@@ -15,6 +15,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { toast } from "sonner"
+import { ArrowRight } from "lucide-react"
 
 // --- COLUMNAS DEL VENDEDOR (IGUAL QUE EN KANBANBOARD) ---
 const SELLER_COLUMNS = [
@@ -103,6 +106,13 @@ export function AdminTeam() {
   const [chatMessage, setChatMessage] = useState("")
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // ✅ Estado Modal Reasignación
+  const [reassignModalOpen, setReassignModalOpen] = useState(false)
+  const [targetSeller, setTargetSeller] = useState("")
+  const [targetColumn, setTargetColumn] = useState("contactado")
+  const [allSellers, setAllSellers] = useState<any[]>([])
+  const [reassignLeadData, setReassignLeadData] = useState<any>(null) // Lead para reasignar sin abrir sheet
+
   // --- 1. CARGA DE EQUIPO ---
   const fetchTeam = async () => {
     setLoading(true)
@@ -147,6 +157,10 @@ export function AdminTeam() {
           }
         })
       setSalesAgents(sellers)
+      // ✅ Guardar lista de sellers para modal de reasignación
+      setAllSellers(profiles?.filter((u: any) =>
+        u.role === 'seller' || u.role === 'gestor'
+      ) || [])
     }
     setLoading(false)
   }
@@ -252,6 +266,27 @@ export function AdminTeam() {
     })
 
     setChatMessage("")
+  }
+
+  // ✅ Reasignar Lead a otra vendedora / columna
+  const handleReassignLead = async () => {
+    if (!reassignLeadData || !targetSeller) return
+
+    const { error } = await supabase.from('leads').update({
+      agent_name: targetSeller,
+      status: targetColumn,
+      last_update: new Date().toISOString()
+    }).eq('id', reassignLeadData.id)
+
+    if (error) {
+      toast.error("Error al reasignar lead")
+    } else {
+      toast.success(`Lead reasignado a ${targetSeller}`)
+      setReassignModalOpen(false)
+      // Quitar del tablero actual ya que cambió de vendedora
+      setSpyLeads(prev => prev.filter(l => l.id !== reassignLeadData.id))
+      setReassignLeadData(null)
+    }
   }
 
   // Editar staff
@@ -431,6 +466,23 @@ export function AdminTeam() {
                                 <div className="pl-2">
                                   <div className="flex justify-between items-start mb-2">
                                     <p className="font-bold text-sm text-slate-800 line-clamp-1">{lead.name}</p>
+                                    {/* ✅ Botón Reasignar (aparece al hover) */}
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-6 w-6 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 transition-opacity shrink-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        // ✅ Usar reassignLeadData para NO abrir sheet de detalles
+                                        setReassignLeadData(lead)
+                                        setTargetSeller(spyAgent?.name || "")
+                                        setTargetColumn(lead.status || "contactado")
+                                        setReassignModalOpen(true)
+                                      }}
+                                      title="Reasignar Lead"
+                                    >
+                                      <ArrowRight className="h-3 w-3" />
+                                    </Button>
                                   </div>
 
                                   {/* ✅ PREPAGA con colores como pediste */}
@@ -489,6 +541,55 @@ export function AdminTeam() {
               </ScrollArea>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ✅ MODAL REASIGNACIÓN */}
+      <Dialog open={reassignModalOpen} onOpenChange={setReassignModalOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRight className="h-5 w-5 text-blue-600" /> Reasignar Lead
+            </DialogTitle>
+            <DialogDescription>
+              Seleccioná la vendedora y la columna de destino para <b>{reassignLeadData?.name}</b>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label>Vendedora de Destino</Label>
+              <Select value={targetSeller} onValueChange={setTargetSeller}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar vendedora..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {allSellers.map((s: any) => (
+                    <SelectItem key={s.id} value={s.full_name}>{s.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Columna de Destino</Label>
+              <Select value={targetColumn} onValueChange={setTargetColumn}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SELLER_COLUMNS.map((col) => (
+                    <SelectItem key={col.id} value={col.id}>{col.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleReassignLead} className="bg-blue-600 hover:bg-blue-700">Reasignar</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -714,6 +815,6 @@ export function AdminTeam() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+    </div >
   )
 }

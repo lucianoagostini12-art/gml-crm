@@ -57,11 +57,11 @@ type StatusEvent = {
 }
 
 type AgentPulse = {
-    name: string
-    avatar: string
-    lastSaleDate: Date | null
-    businessDays: number // Días hábiles sin vender
-    status: 'green' | 'yellow' | 'red' | 'gray'
+  name: string
+  avatar: string
+  lastSaleDate: Date | null
+  businessDays: number // Días hábiles sin vender
+  status: 'green' | 'yellow' | 'red' | 'gray'
 }
 
 const AR_TZ = "America/Argentina/Buenos_Aires"
@@ -102,20 +102,20 @@ const salesDateOf = (l: any) => l.fecha_ingreso || l.sold_at || l.activation_dat
 
 // ✅ HELPER: DÍAS HÁBILES (Sin Sábados ni Domingos)
 function getBusinessDaysDiff(startDate: Date, endDate: Date) {
-    if (startDate >= endDate) return 0;
+  if (startDate >= endDate) return 0;
 
-    let count = 0;
-    const curDate = new Date(startDate.getTime());
-    curDate.setHours(0,0,0,0);
-    const end = new Date(endDate.getTime());
-    end.setHours(0,0,0,0);
+  let count = 0;
+  const curDate = new Date(startDate.getTime());
+  curDate.setHours(0, 0, 0, 0);
+  const end = new Date(endDate.getTime());
+  end.setHours(0, 0, 0, 0);
 
-    while (curDate < end) {
-        curDate.setDate(curDate.getDate() + 1);
-        const dayOfWeek = curDate.getDay();
-        if (dayOfWeek !== 0 && dayOfWeek !== 6) count++; // 0 = Domingo, 6 = Sábado
-    }
-    return count;
+  while (curDate < end) {
+    curDate.setDate(curDate.getDate() + 1);
+    const dayOfWeek = curDate.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) count++; // 0 = Domingo, 6 = Sábado
+  }
+  return count;
 }
 
 
@@ -244,11 +244,11 @@ export function AdminMetrics() {
   const [dateStart, setDateStart] = useState<string>(toISODate(firstDay))
   const [dateEnd, setDateEnd] = useState<string>(toISODate(today))
   const [agent, setAgent] = useState("global")
-  
+
   const [agentsList, setAgentsList] = useState<any[]>([])
   const [metrics, setMetrics] = useState<any>(null)
   const [teamPulse, setTeamPulse] = useState<AgentPulse[]>([])
-  
+
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -265,18 +265,18 @@ export function AdminMetrics() {
   // 1. CARGA DE AGENTES (Vendedores y Gestores)
   useEffect(() => {
     const loadAgents = async () => {
-        const { data } = await supabase.from('profiles').select('*')
-        if (data) {
-            const sellers = data.filter((p: any) => {
-                const r = (p.role || "").toLowerCase()
-                return r === 'seller' || r === 'gestor' || r === 'vendedor'
-            })
-            
-            setAgentsList(sellers.map(p => ({
-                name: p.full_name || p.email,
-                avatar: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
-            })).sort((a: any, b: any) => a.name.localeCompare(b.name)))
-        }
+      const { data } = await supabase.from('profiles').select('*')
+      if (data) {
+        const sellers = data.filter((p: any) => {
+          const r = (p.role || "").toLowerCase()
+          return r === 'seller' || r === 'gestor' || r === 'vendedor'
+        })
+
+        setAgentsList(sellers.map(p => ({
+          name: p.full_name || p.email,
+          avatar: p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.email}`
+        })).sort((a: any, b: any) => a.name.localeCompare(b.name)))
+      }
     }
     loadAgents()
   }, [])
@@ -312,8 +312,8 @@ export function AdminMetrics() {
 
   const InfoTooltip = ({ text }: { text: string }) => (
     <Popover>
-        <PopoverTrigger><HelpCircle className="h-3.5 w-3.5 text-slate-400 cursor-help hover:text-blue-500 transition-colors ml-1" /></PopoverTrigger>
-        <PopoverContent className="text-xs bg-slate-800 text-white border-none p-3 w-64 shadow-xl z-50"><p className="leading-relaxed">{text}</p></PopoverContent>
+      <PopoverTrigger><HelpCircle className="h-3.5 w-3.5 text-slate-400 cursor-help hover:text-blue-500 transition-colors ml-1" /></PopoverTrigger>
+      <PopoverContent className="text-xs bg-slate-800 text-white border-none p-3 w-64 shadow-xl z-50"><p className="leading-relaxed">{text}</p></PopoverContent>
     </Popover>
   )
 
@@ -346,7 +346,7 @@ export function AdminMetrics() {
     const currentStart = new Date(`${dateStart}T00:00:00-03:00`)
     const currentEnd = new Date(`${dateEnd}T23:59:59-03:00`)
     const diffTime = Math.abs(currentEnd.getTime() - currentStart.getTime());
-    const prevEnd = new Date(currentStart.getTime() - 86400000); 
+    const prevEnd = new Date(currentStart.getTime() - 86400000);
     const prevStart = new Date(prevEnd.getTime() - diffTime);
 
     // ✅ Rango en formato YYYY-MM-DD (para columnas DATE como fecha_ingreso)
@@ -402,14 +402,14 @@ export function AdminMetrics() {
         .select("id, agent_name, status, fecha_ingreso, prepaga, quoted_prepaga, capitas, type, sub_state, source")
         .in("status", SALE_STATUSES)
         .not("fecha_ingreso", "is", null)
-                .gte("fecha_ingreso", fechaIngresoStartStr)
+        .gte("fecha_ingreso", fechaIngresoStartStr)
         .lt("fecha_ingreso", fechaIngresoEndExclusiveStr)
 
       if (agent !== "global") salesQ = salesQ.eq("agent_name", agent)
 
       const { data: salesData } = await salesQ
       if (salesData) salesOps = salesData
-    } catch {}
+    } catch { }
 
     // ✅ Liquidación oficial del mes (OpsBilling) para Ticket Promedio por Cápita
     let billingOps: any[] = []
@@ -420,13 +420,13 @@ export function AdminMetrics() {
         .select("id, agent_name, status, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, capitas, type, sub_state, source")
         .eq("status", "cumplidas")
         .eq("billing_approved", true)
-                .in("billing_period", targetPeriods)
+        .in("billing_period", targetPeriods)
 
       if (agent !== "global") billQ = billQ.eq("agent_name", agent)
 
       const { data: billData } = await billQ
       if (billData) billingOps = billData
-    } catch {}
+    } catch { }
 
     try {
       let prevBillQ = supabase
@@ -434,111 +434,112 @@ export function AdminMetrics() {
         .select("id, agent_name, status, billing_approved, billing_period, billing_price_override, full_price, price, aportes, descuento, prepaga, quoted_prepaga, plan, quoted_plan, labor_condition, capitas, type, sub_state, source")
         .eq("status", "cumplidas")
         .eq("billing_approved", true)
-                .in("billing_period", prevPeriods)
+        .in("billing_period", prevPeriods)
 
       if (agent !== "global") prevBillQ = prevBillQ.eq("agent_name", agent)
 
       const { data: prevBillData } = await prevBillQ
       if (prevBillData) prevBillingOps = prevBillData
-    } catch {}
+    } catch { }
 
 
     // --- 🚦 CÁLCULO DE SEMÁFORO (TEAM PULSE) ---
-// La forma robusta es NO inferir desde leads (porque el lead sigue moviéndose),
-// sino leer un evento persistente de ventas (sales_events) que se registra cuando entra a INGRESADO (OPS).
-let lastSaleByAgent = new Map<string, Date>()
+    // ✅ CORREGIDO: Lee de lead_status_history donde to_status = 'ingresado'
+    // Esto es donde KanbanBoard registra el momento exacto del cierre de venta
+    let lastSaleByAgent = new Map<string, Date>()
 
-try {
-  const { data: seData, error: seErr } = await supabase
-    .from("sales_events")
-    .select("agent_name, sale_at")
-    .eq("event_type", "sale_ingresado")
-    .order("sale_at", { ascending: false })
-    .limit(5000)
+    try {
+      // ✅ Buscar en lead_status_history donde el lead pasó a 'ingresado'
+      const { data: historyData, error: histErr } = await supabase
+        .from("lead_status_history")
+        .select("agent_name, changed_at")
+        .eq("to_status", "ingresado")
+        .order("changed_at", { ascending: false })
+        .limit(5000)
 
-  if (!seErr && seData) {
-    // Tomamos el MAX por agente (no dependemos del orden del SELECT)
-    const tmp = new Map<string, Date>()
-    for (const row of seData as any[]) {
-      const name = String(row?.agent_name || "").trim()
-      const d = safeDate(row?.sale_at || null)
-      if (!name || !d) continue
-      const key = normKey(name)
-      const prev = tmp.get(key)
-      if (!prev || d.getTime() > prev.getTime()) tmp.set(key, d)
-    }
-    lastSaleByAgent = tmp
-  } else {
-    // Fallback (por si todavía no creaste la tabla)
-    const { data: allSales } = await supabase
-      .from("leads")
-      .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
-      .in("status", SALE_STATUSES)
+      if (!histErr && historyData) {
+        // Tomamos el MAX por agente (última venta de cada vendedor)
+        const tmp = new Map<string, Date>()
+        for (const row of historyData as any[]) {
+          const name = String(row?.agent_name || "").trim()
+          const d = safeDate(row?.changed_at || null)
+          if (!name || !d) continue
+          const key = normKey(name)
+          const prev = tmp.get(key)
+          if (!prev || d.getTime() > prev.getTime()) tmp.set(key, d)
+        }
+        lastSaleByAgent = tmp
+      } else {
+        // Fallback a leads si falla lead_status_history
+        const { data: allSales } = await supabase
+          .from("leads")
+          .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
+          .in("status", SALE_STATUSES)
 
-    for (const s of (allSales || []) as any[]) {
-      const name = String(s?.agent_name || "").trim()
-      const d = safeDate(salesDateOf(s) || null)
-      if (!name || !d) continue
-      const key = normKey(name)
-      const prev = lastSaleByAgent.get(key)
-      if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
-    }
-  }
-} catch {
-  // Fallback seguro
-  const { data: allSales } = await supabase
-    .from("leads")
-    .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
-    .in("status", SALE_STATUSES)
+        for (const s of (allSales || []) as any[]) {
+          const name = String(s?.agent_name || "").trim()
+          const d = safeDate(salesDateOf(s) || null)
+          if (!name || !d) continue
+          const key = normKey(name)
+          const prev = lastSaleByAgent.get(key)
+          if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
+        }
+      }
+    } catch {
+      // Fallback seguro a leads
+      const { data: allSales } = await supabase
+        .from("leads")
+        .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
+        .in("status", SALE_STATUSES)
 
-  for (const s of (allSales || []) as any[]) {
-    const name = String(s?.agent_name || "").trim()
-    const d = safeDate(salesDateOf(s) || null)
-    if (!name || !d) continue
-    const key = normKey(name)
-    const prev = lastSaleByAgent.get(key)
-    if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
-  }
-}
-
-if (agentsList.length > 0) {
-  const pulseMap: AgentPulse[] = agentsList.map(a => {
-    const lastDate = lastSaleByAgent.get(normKey(a.name)) || null
-
-    let businessDays = 999
-    if (lastDate) {
-      const now = new Date()
-      businessDays = getBusinessDaysDiffAR(lastDate, now)
+      for (const s of (allSales || []) as any[]) {
+        const name = String(s?.agent_name || "").trim()
+        const d = safeDate(salesDateOf(s) || null)
+        if (!name || !d) continue
+        const key = normKey(name)
+        const prev = lastSaleByAgent.get(key)
+        if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
+      }
     }
 
-    let status: AgentPulse['status'] = 'gray'
-    if (businessDays <= 1) status = 'green'      // Hoy o Ayer (Hábil)
-    else if (businessDays === 2) status = 'yellow' // 2 Días hábiles
-    else if (businessDays >= 3) status = 'red'     // 3 o más
-    if (businessDays === 999) status = 'gray'
+    if (agentsList.length > 0) {
+      const pulseMap: AgentPulse[] = agentsList.map(a => {
+        const lastDate = lastSaleByAgent.get(normKey(a.name)) || null
 
-    return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, businessDays, status }
-  })
-  setTeamPulse(pulseMap.sort((a,b) => a.businessDays - b.businessDays))
-}
+        let businessDays = 999
+        if (lastDate) {
+          const now = new Date()
+          businessDays = getBusinessDaysDiffAR(lastDate, now)
+        }
+
+        let status: AgentPulse['status'] = 'gray'
+        if (businessDays <= 1) status = 'green'      // Hoy o Ayer (Hábil)
+        else if (businessDays === 2) status = 'yellow' // 2 Días hábiles
+        else if (businessDays >= 3) status = 'red'     // 3 o más
+        if (businessDays === 999) status = 'gray'
+
+        return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, businessDays, status }
+      })
+      setTeamPulse(pulseMap.sort((a, b) => a.businessDays - b.businessDays))
+    }
 
     // --- CÁLCULOS MÉTRICAS ---
-    const counts: Record<string, number> = { 
-        nuevo: 0, contactado: 0, cotizacion: 0, ingresado: 0, 
-        precarga: 0, medicas: 0, legajo: 0, demoras: 0, 
-        cumplidas: 0, rechazado: 0, documentacion: 0, vendido: 0 
+    const counts: Record<string, number> = {
+      nuevo: 0, contactado: 0, cotizacion: 0, ingresado: 0,
+      precarga: 0, medicas: 0, legajo: 0, demoras: 0,
+      cumplidas: 0, rechazado: 0, documentacion: 0, vendido: 0
     }
     let totalRevenue = 0
 
     leads.forEach((l) => {
       let s = norm(l.status)
-      if(s.includes('doc')) s = 'documentacion'
-      if(s.includes('cotiz')) s = 'cotizacion'
+      if (s.includes('doc')) s = 'documentacion'
+      if (s.includes('cotiz')) s = 'cotizacion'
       // ✅ "Sin trabajar" cuenta como NUEVO
       if (s.includes('sin trabajar') || s.includes('sin_trabajar') || s.includes('sintrabajar')) s = 'nuevo'
 
       if (counts[s] !== undefined) counts[s]++
-      else if (SALE_STATUSES.includes(s)) counts['ingresado']++ 
+      else if (SALE_STATUSES.includes(s)) counts['ingresado']++
     })
 
     const totalNeto = billingOps.reduce((acc: number, op: any) => acc + calculateBillingNeto(op), 0)
@@ -555,63 +556,63 @@ if (agentsList.length > 0) {
     const totalLeads = leads.length
     const activeLeads = counts.contactado + counts.cotizacion + counts.documentacion
     const salesCapitasTotal = pointsByCapitas(salesOps)
-    const salesCapitasPass = pointsByCapitas(salesOps.filter((l:any) => isPass(l)))
+    const salesCapitasPass = pointsByCapitas(salesOps.filter((l: any) => isPass(l)))
     const salesCapitasAltas = Math.max(0, salesCapitasTotal - salesCapitasPass)
 
     const salesCount = salesCapitasTotal
 
     // ✅ Ventas por prepaga (ALTAS ONLY) + Cumplidas oficiales (ALTAS ONLY) + % Cumplimiento
-// - Ventas: por fecha_ingreso + CAPITAS (excluye PASS)
-// - Cumplidas: liquidación oficial (billing_approved + billing_period del rango) + CAPITAS (excluye PASS)
-const prepLabel = (v: any) => {
-  const raw = String(v ?? "").trim()
-  if (!raw) return "Sin prepaga"
-  const low = raw.toLowerCase()
-  if (low.includes("preven")) return "Prevención"
-  if (low.includes("docto")) return "DoctoRed"
-  if (low.includes("avalian")) return "Avalian"
-  if (low.includes("swiss")) return "Swiss"
-  if (low.includes("galeno")) return "Galeno"
-  if (low.includes("ampf")) return "AMPF"
-  // Título simple
-  return raw.charAt(0).toUpperCase() + raw.slice(1)
-}
+    // - Ventas: por fecha_ingreso + CAPITAS (excluye PASS)
+    // - Cumplidas: liquidación oficial (billing_approved + billing_period del rango) + CAPITAS (excluye PASS)
+    const prepLabel = (v: any) => {
+      const raw = String(v ?? "").trim()
+      if (!raw) return "Sin prepaga"
+      const low = raw.toLowerCase()
+      if (low.includes("preven")) return "Prevención"
+      if (low.includes("docto")) return "DoctoRed"
+      if (low.includes("avalian")) return "Avalian"
+      if (low.includes("swiss")) return "Swiss"
+      if (low.includes("galeno")) return "Galeno"
+      if (low.includes("ampf")) return "AMPF"
+      // Título simple
+      return raw.charAt(0).toUpperCase() + raw.slice(1)
+    }
 
-const prepBadgeClass = (p: any) => {
-  const name = String(p ?? "")
-  if (name.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
-  if (name.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
-  if (name.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
-  if (name.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
-  if (name.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
-  if (name.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
-  return "bg-slate-50 dark:bg-[#3A3B3C] border-slate-200 text-slate-700"
-}
+    const prepBadgeClass = (p: any) => {
+      const name = String(p ?? "")
+      if (name.includes("Prevención")) return "bg-pink-50 dark:bg-[#3A3B3C] border-pink-100 text-pink-800"
+      if (name.includes("DoctoRed")) return "bg-violet-50 dark:bg-[#3A3B3C] border-violet-100 text-violet-800"
+      if (name.includes("Avalian")) return "bg-green-50 dark:bg-[#3A3B3C] border-green-100 text-green-800"
+      if (name.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
+      if (name.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
+      if (name.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
+      return "bg-slate-50 dark:bg-[#3A3B3C] border-slate-200 text-slate-700"
+    }
 
-const prepAgg = new Map<string, { ventas: number; cumplidas: number }>()
-// Ventas (ALTAS)
-for (const l of salesOps as any[]) {
-  if (isPass(l)) continue // ✅ SOLO ALTAS
-  const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
-  if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, cumplidas: 0 })
-  const pts = pointsByCapitas([l])
-  prepAgg.get(name)!.ventas += pts
-}
-// Cumplidas oficiales (ALTAS)
-for (const l of billingOps as any[]) {
-  if (isPass(l)) continue // ✅ SOLO ALTAS
-  const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
-  if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, cumplidas: 0 })
-  const pts = pointsByCapitas([l])
-  prepAgg.get(name)!.cumplidas += pts
-}
+    const prepAgg = new Map<string, { ventas: number; cumplidas: number }>()
+    // Ventas (ALTAS)
+    for (const l of salesOps as any[]) {
+      if (isPass(l)) continue // ✅ SOLO ALTAS
+      const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
+      if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, cumplidas: 0 })
+      const pts = pointsByCapitas([l])
+      prepAgg.get(name)!.ventas += pts
+    }
+    // Cumplidas oficiales (ALTAS)
+    for (const l of billingOps as any[]) {
+      if (isPass(l)) continue // ✅ SOLO ALTAS
+      const name = prepLabel(l?.prepaga || l?.quoted_prepaga)
+      if (!prepAgg.has(name)) prepAgg.set(name, { ventas: 0, cumplidas: 0 })
+      const pts = pointsByCapitas([l])
+      prepAgg.get(name)!.cumplidas += pts
+    }
 
-const salesByPrepaga = Array.from(prepAgg.entries())
-  .map(([name, v]) => {
-    const pct = v.ventas > 0 ? Math.round((v.cumplidas / v.ventas) * 100) : 0
-    return { name, ventas: v.ventas, cumplidas: v.cumplidas, pct, className: prepBadgeClass(name) }
-  })
-  .sort((a, b) => b.ventas - a.ventas)
+    const salesByPrepaga = Array.from(prepAgg.entries())
+      .map(([name, v]) => {
+        const pct = v.ventas > 0 ? Math.round((v.cumplidas / v.ventas) * 100) : 0
+        return { name, ventas: v.ventas, cumplidas: v.cumplidas, pct, className: prepBadgeClass(name) }
+      })
+      .sort((a, b) => b.ventas - a.ventas)
 
 
     let prevSalesCapitasTotal = 0
@@ -621,19 +622,19 @@ const salesByPrepaga = Array.from(prepAgg.entries())
         .select("id, prepaga, quoted_prepaga, capitas, type, sub_state, source")
         .in("status", SALE_STATUSES)
         .not("fecha_ingreso", "is", null)
-                .gte("fecha_ingreso", prevStartStr)
+        .gte("fecha_ingreso", prevStartStr)
         .lt("fecha_ingreso", prevEndExclusiveStr)
       if (agent !== "global") prevSalesQ = prevSalesQ.eq("agent_name", agent)
       const { data: prevSalesData } = await prevSalesQ
       if (prevSalesData) prevSalesCapitasTotal = pointsByCapitas(prevSalesData as any[])
-    } catch {}
+    } catch { }
     const prevSalesCount = prevSalesCapitasTotal
     const prevRevenue = prevAvgTicketPerCapita
 
     const getTrend = (curr: number, prev: number) => {
-        if (prev === 0) return { val: 100, dir: 'up' }
-        const diff = ((curr - prev) / prev) * 100
-        return { val: Math.abs(Math.round(diff)), dir: diff >= 0 ? 'up' : 'down' }
+      if (prev === 0) return { val: 100, dir: 'up' }
+      const diff = ((curr - prev) / prev) * 100
+      return { val: Math.abs(Math.round(diff)), dir: diff >= 0 ? 'up' : 'down' }
     }
 
     const salesTrend = getTrend(salesCount, prevSalesCount)
@@ -725,24 +726,24 @@ const salesByPrepaga = Array.from(prepAgg.entries())
       { name: "Cierres", value: salesCount, fill: "#10b981" },
     ]
 
-// ✅ Auditoría (Mesa de Entradas) debe reaccionar al calendario:
-// usamos el mismo criterio del tablero (OPS por fecha_ingreso) y NO created_at.
-const auditCounts: Record<string, number> = {
-  ingresado: 0,
-  precarga: 0,
-  medicas: 0,
-  legajo: 0,
-  demoras: 0,
-  cumplidas: 0,
-  rechazado: 0,
-}
-;(salesOps || []).forEach((l: any) => {
-  let s = norm(l?.status)
-  if (!s) return
-  if (s.includes("rechaz")) s = "rechazado"
-  if (s.includes("cumpl")) s = "cumplidas"
-  if ((auditCounts as any)[s] !== undefined) (auditCounts as any)[s] += 1
-})
+    // ✅ Auditoría (Mesa de Entradas) debe reaccionar al calendario:
+    // usamos el mismo criterio del tablero (OPS por fecha_ingreso) y NO created_at.
+    const auditCounts: Record<string, number> = {
+      ingresado: 0,
+      precarga: 0,
+      medicas: 0,
+      legajo: 0,
+      demoras: 0,
+      cumplidas: 0,
+      rechazado: 0,
+    }
+      ; (salesOps || []).forEach((l: any) => {
+        let s = norm(l?.status)
+        if (!s) return
+        if (s.includes("rechaz")) s = "rechazado"
+        if (s.includes("cumpl")) s = "cumplidas"
+        if ((auditCounts as any)[s] !== undefined) (auditCounts as any)[s] += 1
+      })
 
     const auditSteps = [
       { label: "INGRESADO", count: auditCounts.ingresado, icon: FolderInput, color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-200" },
@@ -786,7 +787,7 @@ const auditCounts: Record<string, number> = {
     setMetrics({
       sales: { count: salesCount, pass: salesCapitasPass, altas: salesCapitasAltas, trend: salesTrend },
       salesByPrepaga,
-      revenue: { total: totalRevenue, neto: totalNeto, capitas: billingCapitas, trend: revTrend },   
+      revenue: { total: totalRevenue, neto: totalNeto, capitas: billingCapitas, trend: revTrend },
       inventory: { newLeads: counts.nuevo, activeLeads, sales: salesCount, goal },
       killerMetrics: { speed: { value: speedValue, status: speedSt, sample: speedSample }, rpl, strikeRate },
       advanced: { radar: radarData, coach: coachAdvice, daily },
@@ -855,7 +856,7 @@ const auditCounts: Record<string, number> = {
 
   return (
     <div className="p-6 h-full overflow-y-auto max-w-[1600px] mx-auto space-y-8 pb-20">
-      
+
       {/* HEADER & FILTROS */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
         <div>
@@ -895,8 +896,8 @@ const auditCounts: Record<string, number> = {
                 </div>
                 <div className="p-4 space-y-4">
                   <div className="grid gap-2">
-                    <div className="grid grid-cols-3 items-center gap-4"><Label className="text-xs">Desde</Label><Input type="date" value={dateStart} onChange={(e) => setDateStart(e.target.value)} className="col-span-2 h-8 text-xs"/></div>
-                    <div className="grid grid-cols-3 items-center gap-4"><Label className="text-xs">Hasta</Label><Input type="date" value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} className="col-span-2 h-8 text-xs"/></div>
+                    <div className="grid grid-cols-3 items-center gap-4"><Label className="text-xs">Desde</Label><Input type="date" value={dateStart} onChange={(e) => setDateStart(e.target.value)} className="col-span-2 h-8 text-xs" /></div>
+                    <div className="grid grid-cols-3 items-center gap-4"><Label className="text-xs">Hasta</Label><Input type="date" value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} className="col-span-2 h-8 text-xs" /></div>
                   </div>
                   <Button className="w-full h-8 text-xs bg-slate-900 text-white" onClick={() => { fetchData(); setIsCalendarOpen(false) }}>Aplicar</Button>
                 </div>
@@ -916,7 +917,7 @@ const auditCounts: Record<string, number> = {
               {agentsList.map(a => <SelectItem key={a.name} value={a.name}>{a.name}</SelectItem>)}
             </SelectContent>
           </Select>
-</div>
+        </div>
       </div>
 
       {/* --- MODAL DESCARGA (misma linea OpsMetrics) --- */}
@@ -982,71 +983,71 @@ const auditCounts: Record<string, number> = {
 
       {/* --- 🚦 SEMÁFORO (TEAM PULSE) --- */}
       {teamPulse.length > 0 && (
-          <Card className="border-none shadow-sm bg-white mb-6 animate-in fade-in slide-in-from-top-4 duration-700">
-              <CardHeader className="pb-3 border-b border-slate-100">
-                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                      <CardTitle className="text-sm font-black uppercase text-slate-600 flex items-center gap-2">
-                          <Users className="h-4 w-4"/> Pulso de Ventas (Tiempo real)
-                      </CardTitle>
-                      <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-400">
-                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500 shadow-sm shadow-green-200"></div> Hoy/Ayer (Hábil)</span>
-                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-yellow-400 shadow-sm shadow-yellow-200"></div> 2 Días</span>
-                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500 shadow-sm shadow-red-200"></div> +3 Días</span>
-                      </div>
-                  </div>
-              </CardHeader>
-              <CardContent className="p-4 pt-6">
-                  <div className="flex flex-wrap gap-6 justify-center">
-                      {teamPulse.map((p, i) => (
-                          <div key={i} className="flex flex-col items-center gap-2 group cursor-help relative">
-                              {/* Círculo indicador de estado */}
-                              <div className={`
+        <Card className="border-none shadow-sm bg-white mb-6 animate-in fade-in slide-in-from-top-4 duration-700">
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <CardTitle className="text-sm font-black uppercase text-slate-600 flex items-center gap-2">
+                <Users className="h-4 w-4" /> Pulso de Ventas (Tiempo real)
+              </CardTitle>
+              <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-400">
+                <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500 shadow-sm shadow-green-200"></div> Hoy/Ayer (Hábil)</span>
+                <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-yellow-400 shadow-sm shadow-yellow-200"></div> 2 Días</span>
+                <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500 shadow-sm shadow-red-200"></div> +3 Días</span>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-4 pt-6">
+            <div className="flex flex-wrap gap-6 justify-center">
+              {teamPulse.map((p, i) => (
+                <div key={i} className="flex flex-col items-center gap-2 group cursor-help relative">
+                  {/* Círculo indicador de estado */}
+                  <div className={`
                                   relative p-1 rounded-full border-4 transition-all duration-300
-                                  ${p.status === 'green' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)] scale-110 z-10' : 
-                                    p.status === 'yellow' ? 'border-yellow-400' : 
-                                    p.status === 'red' ? 'border-red-500 grayscale-[0.3] hover:grayscale-0' : 'border-slate-200 grayscale opacity-50'}
+                                  ${p.status === 'green' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)] scale-110 z-10' :
+                      p.status === 'yellow' ? 'border-yellow-400' :
+                        p.status === 'red' ? 'border-red-500 grayscale-[0.3] hover:grayscale-0' : 'border-slate-200 grayscale opacity-50'}
                               `}>
-                                  <Avatar className="h-12 w-12 border-2 border-white bg-slate-100">
-                                      <AvatarImage src={p.avatar} />
-                                      <AvatarFallback className="font-bold text-slate-400">{p.name[0]}</AvatarFallback>
-                                  </Avatar>
-                                  
-                                  {/* Iconos de estado */}
-                                  {p.status === 'green' && (
-                                      <div className="absolute -bottom-1 -right-1 bg-green-500 text-white rounded-full p-1 border-2 border-white shadow-sm animate-pulse">
-                                          <Zap size={10} fill="currentColor"/>
-                                      </div>
-                                  )}
-                                  {p.status === 'red' && (
-                                      <div className="absolute -bottom-1 -right-1 bg-red-500 text-white rounded-full p-1 border-2 border-white shadow-sm">
-                                          <Siren size={10} fill="currentColor"/>
-                                      </div>
-                                  )}
-                              </div>
-                              
-                              <span className="text-[10px] font-bold text-slate-600 max-w-[80px] truncate text-center leading-tight">
-                                  {p.name}
-                              </span>
-                              
-                              {/* TOOLTIP FLOTANTE */}
-                              <div className="absolute bottom-full mb-3 bg-slate-900 text-white text-[10px] py-1.5 px-3 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap z-50 -translate-y-1 group-hover:translate-y-0">
-                                  {p.businessDays === 999 
-                                      ? "Sin ventas recientes" 
-                                      : p.businessDays === 0 
-                                          ? "🔥 ¡Venta HOY!" 
-                                          : `Hace ${p.businessDays} días hábiles`
-                                  }
-                                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
-                              </div>
-                          </div>
-                      ))}
+                    <Avatar className="h-12 w-12 border-2 border-white bg-slate-100">
+                      <AvatarImage src={p.avatar} />
+                      <AvatarFallback className="font-bold text-slate-400">{p.name[0]}</AvatarFallback>
+                    </Avatar>
+
+                    {/* Iconos de estado */}
+                    {p.status === 'green' && (
+                      <div className="absolute -bottom-1 -right-1 bg-green-500 text-white rounded-full p-1 border-2 border-white shadow-sm animate-pulse">
+                        <Zap size={10} fill="currentColor" />
+                      </div>
+                    )}
+                    {p.status === 'red' && (
+                      <div className="absolute -bottom-1 -right-1 bg-red-500 text-white rounded-full p-1 border-2 border-white shadow-sm">
+                        <Siren size={10} fill="currentColor" />
+                      </div>
+                    )}
                   </div>
-              </CardContent>
-          </Card>
+
+                  <span className="text-[10px] font-bold text-slate-600 max-w-[80px] truncate text-center leading-tight">
+                    {p.name}
+                  </span>
+
+                  {/* TOOLTIP FLOTANTE */}
+                  <div className="absolute bottom-full mb-3 bg-slate-900 text-white text-[10px] py-1.5 px-3 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap z-50 -translate-y-1 group-hover:translate-y-0">
+                    {p.businessDays === 999
+                      ? "Sin ventas recientes"
+                      : p.businessDays === 0
+                        ? "🔥 ¡Venta HOY!"
+                        : `Hace ${p.businessDays} días hábiles`
+                    }
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* ... RESTO DE COMPONENTES ... */}
-      
+
       <Tabs defaultValue="commercial" className="w-full">
         <TabsList className="grid w-full max-w-[400px] grid-cols-2 h-10 mb-6 bg-slate-100 p-1 rounded-lg">
           <TabsTrigger value="commercial" className="text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-700 shadow-sm rounded-md">📊 Gestión Comercial</TabsTrigger>
@@ -1054,65 +1055,65 @@ const auditCounts: Record<string, number> = {
         </TabsList>
 
         <TabsContent value="commercial" className="space-y-6 animate-in fade-in-50">
-          
+
           {/* 1. METRICAS PRINCIPALES (CON TENDENCIAS) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            
+
             {/* VENTAS */}
             <Card className="border-0 shadow-lg bg-white relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Target size={60} className="text-blue-600"/></div>
-                <CardContent className="p-6">
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Ventas Cerradas</span>
-                        <InfoTooltip text="Total de ventas que llegaron a estados finales (Ingresado, Médicas, Cumplida, etc)." />
-                    </div>
-                    <div className="flex items-end gap-3">
-                        <span className="text-4xl font-black text-slate-800">{metrics.sales.count}</span>
-                        {/* ✅ TENDENCIA VENTAS */}
-                        <Badge variant="outline" className={`mb-1.5 ${metrics.sales.trend.dir === 'up' ? 'text-green-600 bg-green-50 border-green-200' : 'text-red-600 bg-red-50 border-red-200'}`}>
-                            {metrics.sales.trend.dir === 'up' ? <ArrowUp size={10} className="mr-1"/> : <ArrowDown size={10} className="mr-1"/>} 
-                            {metrics.sales.trend.val}%
-                        </Badge>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-2">Vs. periodo anterior</p>
-                </CardContent>
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Target size={60} className="text-blue-600" /></div>
+              <CardContent className="p-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Ventas Cerradas</span>
+                  <InfoTooltip text="Total de ventas que llegaron a estados finales (Ingresado, Médicas, Cumplida, etc)." />
+                </div>
+                <div className="flex items-end gap-3">
+                  <span className="text-4xl font-black text-slate-800">{metrics.sales.count}</span>
+                  {/* ✅ TENDENCIA VENTAS */}
+                  <Badge variant="outline" className={`mb-1.5 ${metrics.sales.trend.dir === 'up' ? 'text-green-600 bg-green-50 border-green-200' : 'text-red-600 bg-red-50 border-red-200'}`}>
+                    {metrics.sales.trend.dir === 'up' ? <ArrowUp size={10} className="mr-1" /> : <ArrowDown size={10} className="mr-1" />}
+                    {metrics.sales.trend.val}%
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2">Vs. periodo anterior</p>
+              </CardContent>
             </Card>
 
             {/* FACTURACIÓN */}
             <Card className="border-0 shadow-lg bg-slate-900 text-white relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10"><DollarSign size={60} className="text-white"/></div>
-                <CardContent className="p-6">
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Facturación Est.</span>
-                        <InfoTooltip text="Suma del valor (Price o Quoted Price) de todas las ventas cerradas en el período." />
-                    </div>
-                    <div className="flex items-end gap-3">
-                        <span className="text-4xl font-black text-green-400">$ {parseInt(metrics.revenue.total).toLocaleString()}</span>
-                        <Badge variant="secondary" className={`mb-1.5 border-0 ${metrics.revenue.trend.dir === 'up' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>
-                            {metrics.revenue.trend.dir === 'up' ? <ArrowUp size={10} className="mr-1"/> : <ArrowDown size={10} className="mr-1"/>}
-                            {metrics.revenue.trend.val}%
-                        </Badge>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-2">Vs. periodo anterior</p>
-                </CardContent>
+              <div className="absolute top-0 right-0 p-4 opacity-10"><DollarSign size={60} className="text-white" /></div>
+              <CardContent className="p-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Facturación Est.</span>
+                  <InfoTooltip text="Suma del valor (Price o Quoted Price) de todas las ventas cerradas en el período." />
+                </div>
+                <div className="flex items-end gap-3">
+                  <span className="text-4xl font-black text-green-400">$ {parseInt(metrics.revenue.total).toLocaleString()}</span>
+                  <Badge variant="secondary" className={`mb-1.5 border-0 ${metrics.revenue.trend.dir === 'up' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>
+                    {metrics.revenue.trend.dir === 'up' ? <ArrowUp size={10} className="mr-1" /> : <ArrowDown size={10} className="mr-1" />}
+                    {metrics.revenue.trend.val}%
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">Vs. periodo anterior</p>
+              </CardContent>
             </Card>
 
             {/* VELOCIDAD */}
             <Card className={`border-0 shadow-lg text-white relative overflow-hidden ${metrics.killerMetrics.speed.status === 'optimo' ? 'bg-blue-600' : metrics.killerMetrics.speed.status === 'normal' ? 'bg-indigo-600' : 'bg-slate-600'}`}>
-                <div className="absolute top-0 right-0 p-4 opacity-10"><Timer size={60} className="text-white"/></div>
-                <CardContent className="p-6">
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-blue-200">Velocidad Gestión</span>
-                        <InfoTooltip text="Tiempo promedio desde que el lead entra (Nuevo) hasta el primer cambio de estado." />
-                    </div>
-                    <div className="flex items-end gap-3">
-                        <span className="text-4xl font-black">{metrics.killerMetrics.speed.value} min</span>
-                        <Badge variant="secondary" className="mb-1.5 bg-white/20 text-white border-0">
-                            {metrics.killerMetrics.speed.status === 'optimo' ? '⚡ RAYO' : metrics.killerMetrics.speed.status === 'normal' ? '👍 BIEN' : '🐢 LENTO'}
-                        </Badge>
-                    </div>
-                    <p className="text-[10px] text-blue-200 mt-2">Objetivo: &lt; 20 min</p>
-                </CardContent>
+              <div className="absolute top-0 right-0 p-4 opacity-10"><Timer size={60} className="text-white" /></div>
+              <CardContent className="p-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-blue-200">Velocidad Gestión</span>
+                  <InfoTooltip text="Tiempo promedio desde que el lead entra (Nuevo) hasta el primer cambio de estado." />
+                </div>
+                <div className="flex items-end gap-3">
+                  <span className="text-4xl font-black">{metrics.killerMetrics.speed.value} min</span>
+                  <Badge variant="secondary" className="mb-1.5 bg-white/20 text-white border-0">
+                    {metrics.killerMetrics.speed.status === 'optimo' ? '⚡ RAYO' : metrics.killerMetrics.speed.status === 'normal' ? '👍 BIEN' : '🐢 LENTO'}
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-blue-200 mt-2">Objetivo: &lt; 20 min</p>
+              </CardContent>
             </Card>
           </div>
 
@@ -1215,9 +1216,8 @@ const auditCounts: Record<string, number> = {
                       <div className="w-1/6 text-right">
                         <Badge
                           variant="outline"
-                          className={`font-bold ${
-                            source.tasa > 10 ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-50 text-slate-600"
-                          }`}
+                          className={`font-bold ${source.tasa > 10 ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-50 text-slate-600"
+                            }`}
                         >
                           {source.tasa}%
                         </Badge>
@@ -1296,35 +1296,35 @@ const auditCounts: Record<string, number> = {
 
             {/* 6. HEATMAP (REPARADO: GRILLA FIJA) */}
             <Card className="shadow-md lg:col-span-1 border-slate-200">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base"><Flame className="h-5 w-5 text-orange-500"/> Horarios de Oro (Heatmap)</CardTitle>
-                    <CardDescription>Intensidad de gestión real (cambios de estado) por hora y día.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="w-full overflow-x-auto">
-                        <div className="min-w-[720px]">
-                            {/* Header de horas Fijo */}
-                            <div className="grid grid-cols-[40px_repeat(13,1fr)] gap-1 mb-2">
-                                <span></span>
-                                {HEAT_KEYS.map(k => <span key={k} className="text-[10px] font-bold text-slate-400 text-center">{k.replace('h','')}hs</span>)}
-                            </div>
-                            {/* Filas de días */}
-                            <div className="space-y-1">
-                                {metrics.heatMap.map((d:any, i:number) => (
-                                    <div key={i} className="grid grid-cols-[40px_repeat(13,1fr)] gap-1 items-center">
-                                        <span className="text-[10px] font-bold text-slate-600 uppercase text-right pr-2">{d.day}</span>
-                                        {HEAT_KEYS.map(k => (
-                                            <div key={k} className={`h-8 rounded-sm flex items-center justify-center text-[10px] transition-all hover:scale-110 cursor-default ${getHeatColor(d[k])}`}>
-                                                {d[k] > 0 ? d[k] : ''}
-                                            </div>
-                                        ))}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base"><Flame className="h-5 w-5 text-orange-500" /> Horarios de Oro (Heatmap)</CardTitle>
+                <CardDescription>Intensidad de gestión real (cambios de estado) por hora y día.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="w-full overflow-x-auto">
+                  <div className="min-w-[720px]">
+                    {/* Header de horas Fijo */}
+                    <div className="grid grid-cols-[40px_repeat(13,1fr)] gap-1 mb-2">
+                      <span></span>
+                      {HEAT_KEYS.map(k => <span key={k} className="text-[10px] font-bold text-slate-400 text-center">{k.replace('h', '')}hs</span>)}
                     </div>
-                </CardContent>
-             </Card>
+                    {/* Filas de días */}
+                    <div className="space-y-1">
+                      {metrics.heatMap.map((d: any, i: number) => (
+                        <div key={i} className="grid grid-cols-[40px_repeat(13,1fr)] gap-1 items-center">
+                          <span className="text-[10px] font-bold text-slate-600 uppercase text-right pr-2">{d.day}</span>
+                          {HEAT_KEYS.map(k => (
+                            <div key={k} className={`h-8 rounded-sm flex items-center justify-center text-[10px] transition-all hover:scale-110 cursor-default ${getHeatColor(d[k])}`}>
+                              {d[k] > 0 ? d[k] : ''}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* --- ZONA PRO --- */}

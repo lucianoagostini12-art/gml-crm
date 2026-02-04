@@ -162,6 +162,12 @@ export function DashboardView({ userName }: { userName?: string }) {
           l.billing_approved === true &&
           String(l.billing_period || "") === targetPeriod
         )
+        // ✅ Ordenar por fecha_ingreso ascendente (primera a última)
+        cumplidas.sort((a: any, b: any) => {
+          const dateA = a?.fecha_ingreso || a?.sold_at || a?.created_at || ""
+          const dateB = b?.fecha_ingreso || b?.sold_at || b?.created_at || ""
+          return new Date(dateA).getTime() - new Date(dateB).getTime()
+        })
         setCumplidasLeads(cumplidas)
       }
     }

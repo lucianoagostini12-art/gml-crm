@@ -571,7 +571,12 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
                 else standardOps.push(op)
             })
 
-            standardOps.sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
+            // ✅ Ordenar por fecha_ingreso (fecha real de ingreso a la prepaga) para determinar absorbidos
+            standardOps.sort((a, b) => {
+                const dateA = a.fecha_ingreso ? new Date(a.fecha_ingreso).getTime() : new Date(a.entryDate).getTime()
+                const dateB = b.fecha_ingreso ? new Date(b.fecha_ingreso).getTime() : new Date(b.entryDate).getTime()
+                return dateA - dateB
+            })
             const totalStandardCount = standardOps.reduce((acc, op) => {
                 const isAMPF = op.prepaga?.toUpperCase().includes("AMPF")
                 return acc + (isAMPF ? 1 : (op.capitas || 1))
@@ -586,8 +591,24 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
                 const tier = shiftRules.tiers.find(t => totalStandardCount >= t.min && totalStandardCount <= t.max)
                 const finalTier = tier || shiftRules.tiers[shiftRules.tiers.length - 1]
                 scalePercentage = finalTier.pct
-                payableCount = standardOps.slice(absorbableLimit).length
-                const totalLiquidatedStandard = standardOps.slice(absorbableLimit).reduce((acc, op) => acc + calculate(op).val, 0)
+
+                // ✅ FIX: Calcular payableOps acumulando capitas hasta llegar al límite absorbido
+                let accumulatedCapitas = 0
+                let absorbedIndex = 0
+                for (let i = 0; i < standardOps.length; i++) {
+                    const op = standardOps[i]
+                    const isAMPF = op.prepaga?.toUpperCase().includes("AMPF")
+                    const opCapitas = isAMPF ? 1 : (op.capitas || 1)
+                    if (accumulatedCapitas + opCapitas <= absorbableLimit) {
+                        accumulatedCapitas += opCapitas
+                        absorbedIndex = i + 1
+                    } else {
+                        break
+                    }
+                }
+                const payableOps = standardOps.slice(absorbedIndex)
+                payableCount = payableOps.length
+                const totalLiquidatedStandard = payableOps.reduce((acc, op) => acc + calculate(op).val, 0)
                 variableCommission = totalLiquidatedStandard * scalePercentage
                 const totalLiquidatedSpecial = specialOps.reduce((acc, op) => acc + calculate(op).val, 0)
                 specialCommission = totalLiquidatedSpecial * commissionRules.special.percentage
@@ -598,7 +619,11 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
                 payableCount, specialCommission, variableCommission, scalePercentage, total: specialCommission + variableCommission, isThresholdMet
             })
         })
-        return result.sort((a, b) => b.total - a.total)
+        // ✅ Filtrar usuarios de testing/admin (iara, calle) y ordenar por total
+        const excludedNames = ['iara', 'calle']
+        return result
+            .filter(s => !excludedNames.some(ex => s.name.toLowerCase().includes(ex)))
+            .sort((a, b) => b.total - a.total)
     }, [approvedOps, commissionRules, calcRules, sellersMap])
 
     const handlePriceChange = (id: string, v: string) => updateOpBilling(id, { billing_price_override: parseFloat(v) })
@@ -694,16 +719,45 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
         const standardOps = ops.filter(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""
             return !commissionRules.special.plans.some(k => plan.includes(k) || prepaga.includes(k))
-        }).sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime())
-        const isThresholdMet = standardOps.length > threshold
+            // ✅ FIX: Ordenar por fecha_ingreso (con fallback a entryDate)
+        }).sort((a, b) => {
+            const dateA = a.fecha_ingreso ? new Date(a.fecha_ingreso).getTime() : new Date(a.entryDate).getTime()
+            const dateB = b.fecha_ingreso ? new Date(b.fecha_ingreso).getTime() : new Date(b.entryDate).getTime()
+            return dateA - dateB
+        })
+
+        // ✅ FIX: Contar capitas para determinar threshold (igual que sellersCommissions)
+        const totalStandardCapitas = standardOps.reduce((acc, op) => {
+            const isAMPF = op.prepaga?.toUpperCase().includes("AMPF")
+            return acc + (isAMPF ? 1 : (op.capitas || 1))
+        }, 0)
+        const isThresholdMet = totalStandardCapitas > threshold
+
+        // ✅ FIX: Marcar absorbidos acumulando capitas (no por índice)
         const statusMap: Record<string, string> = {}
+        let accumulatedCapitas = 0
+        standardOps.forEach(op => {
+            const isAMPF = op.prepaga?.toUpperCase().includes("AMPF")
+            const opCapitas = isAMPF ? 1 : (op.capitas || 1)
+            if (accumulatedCapitas + opCapitas <= threshold) {
+                statusMap[op.id] = "absorbed"
+                accumulatedCapitas += opCapitas
+            } else {
+                statusMap[op.id] = "paid"
+            }
+        })
+
         ops.forEach(op => {
             const plan = op.plan?.toUpperCase() || ""; const prepaga = op.prepaga?.toUpperCase() || ""
             const isSpecial = commissionRules.special.plans.some(k => plan.includes(k) || prepaga.includes(k))
             if (isSpecial) statusMap[op.id] = isThresholdMet ? "special_paid" : "special_locked"
         })
-        standardOps.forEach((op, index) => { statusMap[op.id] = index < threshold ? "absorbed" : "paid" })
-        return ops.map((op: any) => ({ ...op, payStatus: statusMap[op.id] }))
+        // ✅ Ordenar la lista final por fecha_ingreso para visualización
+        return ops.map((op: any) => ({ ...op, payStatus: statusMap[op.id] })).sort((a, b) => {
+            const dateA = a.fecha_ingreso ? new Date(a.fecha_ingreso).getTime() : new Date(a.entryDate).getTime()
+            const dateB = b.fecha_ingreso ? new Date(b.fecha_ingreso).getTime() : new Date(b.entryDate).getTime()
+            return dateA - dateB
+        })
     }
 
     if (loading && operations.length === 0) return <div className="h-screen flex items-center justify-center text-slate-400 gap-2"><Loader2 className="animate-spin" /> Cargando...</div>
@@ -1256,18 +1310,19 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
                                         <div className={`absolute top-0 left-0 w-full h-1.5 ${seller.isThresholdMet ? 'bg-gradient-to-r from-pink-500 to-purple-600' : 'bg-slate-300'}`}></div>
                                         {!seller.isThresholdMet && <div className="absolute top-3 left-3 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 z-20"><Lock size={10} /> Objetivo No Cumplido</div>}
                                         <div className="absolute top-2 right-2 z-10"><Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setViewingSeller(seller.name)}><Eye size={16} /></Button></div>
-                                        <CardContent className="p-6">
-                                            <div className="flex items-start justify-between mb-4 mt-4">
+                                        <CardContent className="p-5 pt-6">
+                                            {/* ✅ Layout mejorado: flex-col en mobile, flex-row en desktop */}
+                                            <div className="flex flex-col gap-4 mb-4 mt-4">
                                                 <div className="flex items-center gap-3">
-                                                    <Avatar className="h-14 w-14 border-2 border-white shadow-md"><AvatarImage src={seller.info.photo} /><AvatarFallback className="bg-pink-100 text-pink-600 font-black">{seller.name.substring(0, 2).toUpperCase()}</AvatarFallback></Avatar>
-                                                    <div>
-                                                        <h3 className="font-black text-lg text-slate-800 leading-tight">{seller.name}</h3>
+                                                    <Avatar className="h-12 w-12 border-2 border-white shadow-md shrink-0"><AvatarImage src={seller.info.photo} /><AvatarFallback className="bg-pink-100 text-pink-600 font-black">{seller.name.substring(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+                                                    <div className="min-w-0">
+                                                        <h3 className="font-black text-base text-slate-800 leading-tight truncate">{seller.name}</h3>
                                                         <div className="flex gap-2 mt-1"><Badge variant="outline" className="bg-slate-50 text-[10px] flex w-fit items-center gap-1 border-slate-200"><Clock size={10} /> {seller.info.shift}</Badge><Badge className="bg-slate-100 text-slate-600 text-[10px]">Abs: {seller.absorbableCount}</Badge></div>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    {/* ✅ REDONDEADO EN LA TARJETA */}
-                                                    <div className={`text-3xl font-black ${seller.isThresholdMet ? 'text-slate-800' : 'text-slate-400'}`}>{formatMoney(seller.total, true)}</div>
+                                                <div className="text-center bg-slate-50 rounded-lg py-2 px-3">
+                                                    {/* ✅ Monto centrado con más espacio */}
+                                                    <div className={`text-2xl font-black ${seller.isThresholdMet ? 'text-slate-800' : 'text-slate-400'}`}>{formatMoney(seller.total, true)}</div>
                                                     <div className="text-[10px] font-bold text-green-600 uppercase tracking-wider">A Pagar</div>
                                                 </div>
                                             </div>
@@ -1393,7 +1448,7 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
 
             <Dialog open={showHistory} onOpenChange={setShowHistory}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Historial Anual</DialogTitle></DialogHeader><div className="py-4"><Table><TableHeader><TableRow><TableHead>Mes</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-[50%]">Gráfico</TableHead></TableRow></TableHeader><TableBody>{historyData.map((data) => { const max = Math.max(...historyData.map(d => d.total)); const w = max > 0 ? (data.total / max) * 100 : 0; return (<TableRow key={data.month}><TableCell className="capitalize font-bold">{formatMonth(data.month)}</TableCell><TableCell className="text-right font-mono">${data.total.toLocaleString()}</TableCell><TableCell><div className="h-4 bg-slate-100 rounded-full w-full overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${w}%` }}></div></div></TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
 
-            <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc = calculate(op); return (<TableRow key={op.id} className={op.payStatus === 'absorbed' || op.payStatus === 'special_locked' ? 'opacity-50 bg-slate-50' : ''}><TableCell className="text-xs">{op.entryDate}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-right font-mono text-xs">{formatMoney(calc.val)}</TableCell><TableCell>{op.payStatus === 'special_paid' && <Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus === 'special_locked' && <Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus === 'absorbed' && <Badge variant="outline">Absorbida</Badge>}{op.payStatus === 'paid' && <Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
+            <Dialog open={!!viewingSeller} onOpenChange={() => setViewingSeller(null)}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>Detalle: {viewingSeller}</DialogTitle></DialogHeader><div className="max-h-[60vh] overflow-y-auto"><Table><TableHeader><TableRow><TableHead>Fecha Ingreso</TableHead><TableHead>Cliente</TableHead><TableHead>Plan</TableHead><TableHead>Cápitas</TableHead><TableHead className="text-right">Liquidado</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader><TableBody>{getSellerOpsDetail(viewingSeller).map((op: any) => { const calc = calculate(op); const fechaIngreso = op.fecha_ingreso ? new Date(op.fecha_ingreso).toLocaleDateString('es-AR') : '-'; const isAMPF = op.prepaga?.toUpperCase().includes('AMPF'); const opCapitas = isAMPF ? 1 : (op.capitas || 1); return (<TableRow key={op.id} className={op.payStatus === 'absorbed' || op.payStatus === 'special_locked' ? 'opacity-50 bg-slate-50' : ''}><TableCell className="text-xs font-mono">{fechaIngreso}</TableCell><TableCell className="font-bold text-xs">{op.clientName}</TableCell><TableCell className="text-xs"><Badge variant="outline">{op.prepaga} {op.plan}</Badge></TableCell><TableCell className="text-xs text-center"><Badge variant="secondary" className="text-[10px]">{opCapitas}</Badge></TableCell><TableCell className="text-right font-mono text-xs">{formatMoney(calc.val)}</TableCell><TableCell>{op.payStatus === 'special_paid' && <Badge className="bg-yellow-100 text-yellow-700">Especial OK</Badge>}{op.payStatus === 'special_locked' && <Badge variant="outline" className="text-red-400 border-red-200">Bloqueado</Badge>}{op.payStatus === 'absorbed' && <Badge variant="outline">Absorbida</Badge>}{op.payStatus === 'paid' && <Badge className="bg-purple-100 text-purple-700">Pagada</Badge>}</TableCell></TableRow>) })}</TableBody></Table></div></DialogContent></Dialog>
 
             <Dialog open={isAddingClient} onOpenChange={setIsAddingClient}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Agregar Manual</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-6 py-4"><div className="space-y-4"><div className="space-y-1"><Label>Nombre</Label><Input value={newClient.name} onChange={e => setNewClient({ ...newClient, name: e.target.value })} /></div><div className="space-y-1"><Label>DNI</Label><Input value={newClient.dni} onChange={e => setNewClient({ ...newClient, dni: e.target.value })} /></div></div><div className="space-y-4 bg-slate-50 p-4 rounded"><div className="space-y-1"><Label>Full Price</Label><Input type="number" value={newClient.fullPrice} onChange={e => setNewClient({ ...newClient, fullPrice: e.target.value })} /></div><div className="grid grid-cols-2 gap-2"><div><Label>Aportes</Label><Input type="number" value={newClient.aportes} onChange={e => setNewClient({ ...newClient, aportes: e.target.value })} /></div><div><Label>Desc.</Label><Input type="number" value={newClient.descuento} onChange={e => setNewClient({ ...newClient, descuento: e.target.value })} /></div></div><div className="pt-2 flex justify-between text-sm font-bold text-blue-600"><span>Cartera Est:</span><span>${Math.round((parseFloat(newClient.fullPrice) - parseFloat(newClient.descuento) - parseFloat(newClient.aportes)) * calcRules.portfolioRate).toLocaleString()}</span></div></div></div><DialogFooter><Button onClick={handleAddClient}>Guardar</Button></DialogFooter></DialogContent></Dialog>
         </div >

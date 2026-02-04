@@ -59,6 +59,8 @@ type Operation = {
     metodoPago?: string
     cuitEmpleador?: string
     capitas?: number
+    fecha_ingreso?: string
+    fecha_alta?: string
 }
 
 // --- REGLAS INICIALES ---
@@ -187,6 +189,15 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
     const [filterVerificadoLiq, setFilterVerificadoLiq] = useState<'all' | 'verified' | 'pending'>('all')
     const [filterVerificadoCartera, setFilterVerificadoCartera] = useState<'all' | 'verified' | 'pending'>('all')
 
+    // ✅ Filtros de fecha
+    const [filterFechaIngresoDesde, setFilterFechaIngresoDesde] = useState<string>('')
+    const [filterFechaIngresoHasta, setFilterFechaIngresoHasta] = useState<string>('')
+    const [filterFechaAltaDesde, setFilterFechaAltaDesde] = useState<string>('')
+    const [filterFechaAltaHasta, setFilterFechaAltaHasta] = useState<string>('')
+    // ✅ Ordenamiento por fecha
+    const [sortFechaField, setSortFechaField] = useState<'none' | 'fecha_ingreso' | 'fecha_alta'>('none')
+    const [sortFechaDir, setSortFechaDir] = useState<'asc' | 'desc'>('asc')
+
     // MAPA DE VENDEDORES (Para horas y fotos)
     const [sellersMap, setSellersMap] = useState<Record<string, { shift: '5hs' | '8hs', photo: string }>>({})
 
@@ -262,7 +273,10 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
                 chat: [],
                 reminders: [],
                 history: [],
-                adminNotes: d.admin_notes || []
+                adminNotes: d.admin_notes || [],
+                // ✅ Fechas para filtros
+                fecha_ingreso: d.fecha_ingreso,
+                fecha_alta: d.fecha_alta
             }))
             setOperations(mapped)
         }
@@ -363,7 +377,7 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
 
     const opsInPeriod = useMemo(() => {
         const term = searchTerm.toLowerCase().trim()
-        return operations.filter((op: any) => {
+        const filtered = operations.filter((op: any) => {
             // ✅ QUIRÚRGICO: Usar cumplida_at para período de liquidación (solo en OpsBilling)
             const opDate = new Date(op.cumplida_at || op.entryDate)
             const defaultMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
@@ -372,6 +386,22 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
             if (targetMonth !== selectedMonth) return false
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
+
+            // ✅ Filtro de fecha_ingreso (rango)
+            if (filterFechaIngresoDesde || filterFechaIngresoHasta) {
+                const fechaIng = op.fecha_ingreso ? new Date(op.fecha_ingreso) : null
+                if (!fechaIng) return false
+                if (filterFechaIngresoDesde && fechaIng < new Date(filterFechaIngresoDesde)) return false
+                if (filterFechaIngresoHasta && fechaIng > new Date(filterFechaIngresoHasta + 'T23:59:59')) return false
+            }
+
+            // ✅ Filtro de fecha_alta (rango)
+            if (filterFechaAltaDesde || filterFechaAltaHasta) {
+                const fechaAlta = op.fecha_alta ? new Date(op.fecha_alta) : null
+                if (!fechaAlta) return false
+                if (filterFechaAltaDesde && fechaAlta < new Date(filterFechaAltaDesde)) return false
+                if (filterFechaAltaHasta && fechaAlta > new Date(filterFechaAltaHasta + 'T23:59:59')) return false
+            }
 
             // ✅ Filtro de búsqueda global
             if (term) {
@@ -385,7 +415,16 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
             }
             return true
         })
-    }, [operations, selectedMonth, filters, searchTerm])
+        // ✅ Aplicar ordenamiento por fecha
+        if (sortFechaField !== 'none') {
+            filtered.sort((a: any, b: any) => {
+                const dateA = a[sortFechaField] ? new Date(a[sortFechaField]).getTime() : 0
+                const dateB = b[sortFechaField] ? new Date(b[sortFechaField]).getTime() : 0
+                return sortFechaDir === 'asc' ? dateA - dateB : dateB - dateA
+            })
+        }
+        return filtered
+    }, [operations, selectedMonth, filters, searchTerm, filterFechaIngresoDesde, filterFechaIngresoHasta, filterFechaAltaDesde, filterFechaAltaHasta, sortFechaField, sortFechaDir])
 
     // ✅ CARTERA ACUMULATIVA: Todas las operaciones de Prevención aprobadas (snowball)
     const allPortfolioOps = useMemo(() => {
@@ -413,6 +452,22 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
             if (filters.seller !== 'all' && op.seller !== filters.seller) return false
             if (filters.prepaga !== 'all' && op.prepaga !== filters.prepaga) return false
 
+            // ✅ Filtro de fecha_ingreso (rango)
+            if (filterFechaIngresoDesde || filterFechaIngresoHasta) {
+                const fechaIng = op.fecha_ingreso ? new Date(op.fecha_ingreso) : null
+                if (!fechaIng) return false
+                if (filterFechaIngresoDesde && fechaIng < new Date(filterFechaIngresoDesde)) return false
+                if (filterFechaIngresoHasta && fechaIng > new Date(filterFechaIngresoHasta + 'T23:59:59')) return false
+            }
+
+            // ✅ Filtro de fecha_alta (rango)
+            if (filterFechaAltaDesde || filterFechaAltaHasta) {
+                const fechaAlta = op.fecha_alta ? new Date(op.fecha_alta) : null
+                if (!fechaAlta) return false
+                if (filterFechaAltaDesde && fechaAlta < new Date(filterFechaAltaDesde)) return false
+                if (filterFechaAltaHasta && fechaAlta > new Date(filterFechaAltaHasta + 'T23:59:59')) return false
+            }
+
             // ✅ Filtro de búsqueda global
             if (term) {
                 const matchesSearch =
@@ -430,7 +485,7 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
             const carteraMes = op.billing_period || defaultMonth
             return { ...op, cartera_inicio_mes: carteraMes }
         })
-    }, [operations, selectedMonth, filters, searchTerm])
+    }, [operations, selectedMonth, filters, searchTerm, filterFechaIngresoDesde, filterFechaIngresoHasta, filterFechaAltaDesde, filterFechaAltaHasta])
 
     // ✅ Meses únicos de cartera para el filtro
     const uniqueCarteraMeses = useMemo(() => {
@@ -678,6 +733,91 @@ export function OpsBilling({ searchTerm = "", userName = "Administración" }: { 
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {/* ✅ FILTROS DE FECHA */}
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className={`gap-2 ${(filterFechaIngresoDesde || filterFechaIngresoHasta || filterFechaAltaDesde || filterFechaAltaHasta) ? 'border-blue-400 bg-blue-50 text-blue-700' : ''}`}>
+                                <Calendar size={14} />
+                                Fechas
+                                {(filterFechaIngresoDesde || filterFechaIngresoHasta || filterFechaAltaDesde || filterFechaAltaHasta) && (
+                                    <Badge variant="secondary" className="h-4 px-1 text-[10px] bg-blue-100">Activo</Badge>
+                                )}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 p-4" align="end">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h4 className="font-bold text-sm">Filtros de Fecha</h4>
+                                    {(filterFechaIngresoDesde || filterFechaIngresoHasta || filterFechaAltaDesde || filterFechaAltaHasta) && (
+                                        <Button variant="ghost" size="sm" className="h-6 text-xs text-red-500 hover:text-red-700" onClick={() => {
+                                            setFilterFechaIngresoDesde('')
+                                            setFilterFechaIngresoHasta('')
+                                            setFilterFechaAltaDesde('')
+                                            setFilterFechaAltaHasta('')
+                                        }}>
+                                            <X size={12} className="mr-1" /> Limpiar
+                                        </Button>
+                                    )}
+                                </div>
+                                <Separator />
+                                <div className="space-y-3">
+                                    <div>
+                                        <Label className="text-xs font-bold text-slate-600">Fecha Ingreso</Label>
+                                        <div className="grid grid-cols-2 gap-2 mt-1">
+                                            <div>
+                                                <span className="text-[10px] text-slate-400">Desde</span>
+                                                <Input type="date" value={filterFechaIngresoDesde} onChange={(e) => setFilterFechaIngresoDesde(e.target.value)} className="h-8 text-xs" />
+                                            </div>
+                                            <div>
+                                                <span className="text-[10px] text-slate-400">Hasta</span>
+                                                <Input type="date" value={filterFechaIngresoHasta} onChange={(e) => setFilterFechaIngresoHasta(e.target.value)} className="h-8 text-xs" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs font-bold text-slate-600">Fecha Alta</Label>
+                                        <div className="grid grid-cols-2 gap-2 mt-1">
+                                            <div>
+                                                <span className="text-[10px] text-slate-400">Desde</span>
+                                                <Input type="date" value={filterFechaAltaDesde} onChange={(e) => setFilterFechaAltaDesde(e.target.value)} className="h-8 text-xs" />
+                                            </div>
+                                            <div>
+                                                <span className="text-[10px] text-slate-400">Hasta</span>
+                                                <Input type="date" value={filterFechaAltaHasta} onChange={(e) => setFilterFechaAltaHasta(e.target.value)} className="h-8 text-xs" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <Separator />
+                                {/* ✅ ORDENAMIENTO */}
+                                <div>
+                                    <Label className="text-xs font-bold text-slate-600">Ordenar por</Label>
+                                    <div className="grid grid-cols-2 gap-2 mt-1">
+                                        <Select value={sortFechaField} onValueChange={(v: any) => setSortFechaField(v)}>
+                                            <SelectTrigger className="h-8 text-xs">
+                                                <SelectValue placeholder="Campo" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="none">Sin ordenar</SelectItem>
+                                                <SelectItem value="fecha_ingreso">Fecha Ingreso</SelectItem>
+                                                <SelectItem value="fecha_alta">Fecha Alta</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <Select value={sortFechaDir} onValueChange={(v: any) => setSortFechaDir(v)} disabled={sortFechaField === 'none'}>
+                                            <SelectTrigger className="h-8 text-xs">
+                                                <SelectValue placeholder="Dirección" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="asc">↑ Ascendente</SelectItem>
+                                                <SelectItem value="desc">↓ Descendente</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+
                     {/* BOTÓN DE PRIVACIDAD */}
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => setShowValues(!showValues)} title={showValues ? "Ocultar Valores" : "Mostrar Valores"}>
                         {showValues ? <Eye size={16} /> : <EyeOff size={16} />}

@@ -151,6 +151,8 @@ export async function GET(request: Request) {
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
+  console.log('🔍 WEBHOOK VERIFY:', { mode, token, challenge, envSecret: process.env.META_WEBHOOK_SECRET ? `${process.env.META_WEBHOOK_SECRET.substring(0, 4)}...` : 'UNDEFINED' });
+
   if (mode === 'subscribe' && token === (process.env.META_WEBHOOK_SECRET || '')) {
     return new NextResponse(challenge ?? '', { status: 200, headers: { 'Content-Type': 'text/plain' } });
   }

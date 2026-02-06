@@ -8,14 +8,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Search, Download, Filter, Eye, Trash2, X, MessageSquare, StickyNote, RefreshCw, Database, Users } from "lucide-react"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label"
 export function OpsDatabase({ onSelectOp }: any) {
     const supabase = createClient()
     const [searchTerm, setSearchTerm] = useState("")
-    
+
     // --- ESTADO DE DATOS PROPIO (GLOBAL) ---
     const [fullDatabase, setFullDatabase] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -38,25 +38,26 @@ export function OpsDatabase({ onSelectOp }: any) {
             .from('leads')
             .select('*')
             .order('created_at', { ascending: false })
-        
+
         if (data) {
             // Normalizamos datos si es necesario
-            setFullDatabase(data.map((l:any) => ({
+            setFullDatabase(data.map((l: any) => ({
                 id: l.id,
                 entryDate: l.created_at,
                 status: l.status ? l.status.toLowerCase() : 'desconocido',
-                clientName: l.client_name || l.name, 
+                clientName: l.client_name || l.name,
                 dni: l.dni,
                 seller: l.agent_name,
                 prepaga: l.prepaga || l.quoted_prepaga || 'Sin Dato',
                 plan: l.plan || l.quoted_plan || 'General',
                 origen: l.source,
                 billing_period: l.billing_period,
-                chat: l.chat_history || [], 
+                chat: l.chat_history || [],
                 adminNotes: l.admin_notes || [],
                 history: l.history || [],
                 capitas: l.capitas || 1,
-                familia: l.family_members || l.hijos || []
+                familia: l.family_members || l.hijos || [],
+                is_pass: l.is_pass === true || l.pass === true // ✅ Agregado para filtro Pass/Alta
             })))
         }
         setLoading(false)
@@ -65,7 +66,7 @@ export function OpsDatabase({ onSelectOp }: any) {
     useEffect(() => {
         fetchFullData()
     }, [])
-    
+
     // Estados para eliminación
     const [deleteId, setDeleteId] = useState<string | null>(null)
     const [isDeleteOpen, setIsDeleteOpen] = useState(false)
@@ -74,10 +75,11 @@ export function OpsDatabase({ onSelectOp }: any) {
     // --- FILTROS AVANZADOS ---
     const [filterStatus, setFilterStatus] = useState("all")
     const [filterSeller, setFilterSeller] = useState("all")
-    const [filterPrepaga, setFilterPrepaga] = useState("all") 
-    const [filterPlan, setFilterPlan] = useState("all")       
-    const [filterOrigin, setFilterOrigin] = useState("all")   
-    
+    const [filterPrepaga, setFilterPrepaga] = useState("all")
+    const [filterPlan, setFilterPlan] = useState("all")
+    const [filterOrigin, setFilterOrigin] = useState("all")
+    const [filterOpType, setFilterOpType] = useState("all") // ✅ Nuevo: filtro Pass/Alta
+
     const [filterDateStart, setFilterDateStart] = useState("")
     const [filterDateEnd, setFilterDateEnd] = useState("")
 
@@ -153,15 +155,20 @@ export function OpsDatabase({ onSelectOp }: any) {
                 const filterOriginLower = safeStr(filterOrigin)
                 if (opOrigin !== filterOriginLower) return false
             }
+            // ✅ Filtro por tipo de operación (Pass/Alta)
+            if (filterOpType !== "all") {
+                if (filterOpType === "pass" && !op.is_pass) return false
+                if (filterOpType === "alta" && op.is_pass) return false
+            }
 
             // 3. BUSCADOR GLOBAL (Ahora incluye familiares)
             if (searchTerm) {
                 const searchLower = searchTerm.toLowerCase()
-                
+
                 const chatContent = op.chat?.map((c: any) => safeStr(c.text) + " " + safeStr(c.message)).join(" ") || ""
                 const notesContent = op.adminNotes?.map((n: any) => safeStr(n.text) + " " + safeStr(n.action)).join(" ") || ""
                 const historyContent = op.history?.map((h: any) => safeStr(h.action) + " " + safeStr(h.details)).join(" ") || ""
-                
+
                 // ✅ NUEVO: Concatenamos nombres y DNIs de la familia
                 const familyContent = op.familia?.map((f: any) => safeStr(f.nombre) + " " + safeStr(f.dni)).join(" ") || ""
 
@@ -179,36 +186,36 @@ export function OpsDatabase({ onSelectOp }: any) {
                     ${historyContent}
                     ${familyContent} 
                 `
-                
+
                 if (!fullSearchString.includes(searchLower)) return false
             }
 
             return true
         })
-    }, [fullDatabase, searchTerm, filterStatus, filterSeller, filterPrepaga, filterPlan, filterOrigin, filterDateStart, filterDateEnd])
+    }, [fullDatabase, searchTerm, filterStatus, filterSeller, filterPrepaga, filterPlan, filterOrigin, filterOpType, filterDateStart, filterDateEnd])
 
     // --- EXPORTAR CSV ---
     const handleExportCSV = () => {
         if (filteredOps.length === 0) return alert("No hay datos para exportar")
 
         const headers = ["ID", "Fecha Ingreso", "Mes Liquidado", "Cliente", "DNI", "Estado", "Prepaga", "Plan", "Vendedor", "Origen", "Notas"]
-        
+
         const csvRows = filteredOps.map((op: any) => [
             op.id,
             op.entryDate ? new Date(op.entryDate).toLocaleDateString() : "-",
-            op.billing_period || "-", 
+            op.billing_period || "-",
             `"${safeStr(op.clientName).toUpperCase()}"`,
             op.dni || "-",
             op.status,
             op.prepaga || "-",
             op.plan || "-",
             op.seller || "-",
-            op.origen || "-", 
+            op.origen || "-",
             `"${(op.history?.[0]?.action || "").replace(/"/g, '""')}"`
         ])
 
         const csvContent = [headers.join(","), ...csvRows.map((r: any) => r.join(","))].join("\n")
-        
+
         const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
         const url = URL.createObjectURL(blob)
         const link = document.createElement("a")
@@ -244,12 +251,13 @@ export function OpsDatabase({ onSelectOp }: any) {
         setFilterPrepaga('all')
         setFilterPlan('all')
         setFilterOrigin('all')
+        setFilterOpType('all') // ✅ Limpiar filtro Pass/Alta
         setFilterDateStart('')
         setFilterDateEnd('')
         setSearchTerm('')
     }
 
-    const hasActiveFilters = filterStatus !== 'all' || filterSeller !== 'all' || filterPrepaga !== 'all' || filterPlan !== 'all' || filterOrigin !== 'all' || filterDateStart !== '' || filterDateEnd !== ''
+    const hasActiveFilters = filterStatus !== 'all' || filterSeller !== 'all' || filterPrepaga !== 'all' || filterPlan !== 'all' || filterOrigin !== 'all' || filterOpType !== 'all' || filterDateStart !== '' || filterDateEnd !== ''
 
     return (
         <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -259,7 +267,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                     <div>
                         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
                             Base de Datos Global
-                            <Database size={20} className="text-blue-500"/>
+                            <Database size={20} className="text-blue-500" />
                         </h2>
                         <p className="text-xs text-slate-500 mt-1">
                             {loading ? "Cargando datos completos del sistema..." : `Acceso total: ${fullDatabase.length} registros.`}
@@ -268,10 +276,10 @@ export function OpsDatabase({ onSelectOp }: any) {
                     </div>
                     <div className="flex gap-2">
                         <Button variant="ghost" size="sm" onClick={fetchFullData} disabled={loading} className="text-slate-500 hover:text-blue-600">
-                            <RefreshCw size={16} className={`${loading ? 'animate-spin' : ''} mr-2`}/> Actualizar
+                            <RefreshCw size={16} className={`${loading ? 'animate-spin' : ''} mr-2`} /> Actualizar
                         </Button>
                         <Button variant="outline" onClick={handleExportCSV} disabled={loading} className="gap-2 text-xs font-bold border-slate-300 hover:bg-slate-100">
-                            <Download size={16}/> Exportar
+                            <Download size={16} /> Exportar
                         </Button>
                     </div>
                 </div>
@@ -279,14 +287,14 @@ export function OpsDatabase({ onSelectOp }: any) {
                 <div className="flex gap-3">
                     {/* BUSCADOR POTENCIADO */}
                     <div className="relative flex-1 group">
-                         <div className="absolute left-0 top-0 bottom-0 w-10 flex items-center justify-center pointer-events-none z-10">
-                            <Search className="h-5 w-5 text-slate-400/80 group-focus-within:text-blue-500 transition-colors" strokeWidth={2}/>
+                        <div className="absolute left-0 top-0 bottom-0 w-10 flex items-center justify-center pointer-events-none z-10">
+                            <Search className="h-5 w-5 text-slate-400/80 group-focus-within:text-blue-500 transition-colors" strokeWidth={2} />
                         </div>
-                        <Input 
-                            className="pl-10 bg-white border-slate-200 h-10 shadow-sm focus:bg-white transition-all font-medium focus:ring-2 focus:ring-blue-500/20" 
-                            placeholder="Buscar en TODO el sistema: ID, Cliente, Vendedor, Notas, Familiares..." 
+                        <Input
+                            className="pl-10 bg-white border-slate-200 h-10 shadow-sm focus:bg-white transition-all font-medium focus:ring-2 focus:ring-blue-500/20"
+                            placeholder="Buscar en TODO el sistema: ID, Cliente, Vendedor, Notas, Familiares..."
                             value={searchTerm}
-                            onChange={e=>setSearchTerm(e.target.value)}
+                            onChange={e => setSearchTerm(e.target.value)}
                             disabled={loading}
                         />
                     </div>
@@ -295,17 +303,17 @@ export function OpsDatabase({ onSelectOp }: any) {
                     <Popover>
                         <PopoverTrigger asChild>
                             <Button variant="secondary" disabled={loading} className={`border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-600 ${hasActiveFilters ? 'text-blue-600 border-blue-200 bg-blue-50' : ''}`}>
-                                <Filter size={16} className="mr-2"/> 
+                                <Filter size={16} className="mr-2" />
                                 {hasActiveFilters ? 'Filtros Activos' : 'Filtrar'}
                             </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-[600px] p-6" align="end">
                             <div className="space-y-6">
                                 <div className="flex justify-between items-center border-b pb-2">
-                                    <h4 className="font-bold text-base flex items-center gap-2"><Filter size={16}/> Filtros Avanzados</h4>
+                                    <h4 className="font-bold text-base flex items-center gap-2"><Filter size={16} /> Filtros Avanzados</h4>
                                     {hasActiveFilters && (
                                         <Button variant="ghost" size="sm" className="h-6 text-xs text-red-500 hover:text-red-700" onClick={clearFilters}>
-                                            <X size={12} className="mr-1"/> Limpiar Todo
+                                            <X size={12} className="mr-1" /> Limpiar Todo
                                         </Button>
                                     )}
                                 </div>
@@ -314,7 +322,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                                     <div className="space-y-1">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Estado</Label>
                                         <Select value={filterStatus} onValueChange={setFilterStatus}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">Todos (Ventas + Ops)</SelectItem>
                                                 <SelectItem value="nuevo">Nuevo</SelectItem>
@@ -330,18 +338,18 @@ export function OpsDatabase({ onSelectOp }: any) {
                                     <div className="space-y-1">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Vendedor</Label>
                                         <Select value={filterSeller} onValueChange={setFilterSeller}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">Todos</SelectItem>
                                                 {uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    
+
                                     <div className="space-y-1">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Prepaga</Label>
                                         <Select value={filterPrepaga} onValueChange={setFilterPrepaga}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">Todas</SelectItem>
                                                 {uniquePrepagas.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -352,7 +360,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                                     <div className="space-y-1">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Plan</Label>
                                         <Select value={filterPlan} onValueChange={setFilterPlan}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">Todos</SelectItem>
                                                 {uniquePlans.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -363,7 +371,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                                     <div className="space-y-1 col-span-2">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Origen</Label>
                                         <Select value={filterOrigin} onValueChange={setFilterOrigin}>
-                                            <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">Todos</SelectItem>
                                                 {uniqueOrigins.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
@@ -371,13 +379,26 @@ export function OpsDatabase({ onSelectOp }: any) {
                                         </Select>
                                     </div>
 
+                                    {/* ✅ NUEVO: Filtro Pass/Alta */}
+                                    <div className="space-y-1 col-span-2">
+                                        <Label className="text-[10px] text-slate-500 uppercase font-bold">Tipo de Operación</Label>
+                                        <Select value={filterOpType} onValueChange={setFilterOpType}>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Todas (Pass + Alta)</SelectItem>
+                                                <SelectItem value="pass">🔄 Solo PASS (Cambio de prepaga)</SelectItem>
+                                                <SelectItem value="alta">✨ Solo ALTA (Afiliación nueva)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
                                     <div className="space-y-1">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Desde</Label>
-                                        <Input type="date" className="h-8 text-xs" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)}/>
+                                        <Input type="date" className="h-8 text-xs" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
                                     </div>
                                     <div className="space-y-1">
                                         <Label className="text-[10px] text-slate-500 uppercase font-bold">Hasta</Label>
-                                        <Input type="date" className="h-8 text-xs" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)}/>
+                                        <Input type="date" className="h-8 text-xs" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
                                     </div>
                                 </div>
                             </div>
@@ -407,26 +428,26 @@ export function OpsDatabase({ onSelectOp }: any) {
                             {loading && (
                                 <TableRow>
                                     <TableCell colSpan={9} className="text-center py-20 text-slate-400">
-                                        <RefreshCw className="animate-spin h-8 w-8 mx-auto mb-2 opacity-50"/>
+                                        <RefreshCw className="animate-spin h-8 w-8 mx-auto mb-2 opacity-50" />
                                         Cargando base completa...
                                     </TableCell>
                                 </TableRow>
                             )}
-                            
+
                             {!loading && filteredOps.map((op: any) => (
                                 <TableRow key={op.id} className="hover:bg-slate-50 cursor-pointer transition-colors group border-b border-slate-100" onClick={() => onSelectOp(op)}>
                                     <TableCell className="flex gap-1 justify-center">
                                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50" title="Ver Detalle">
-                                            <Eye size={14}/>
+                                            <Eye size={14} />
                                         </Button>
-                                        <Button 
-                                            variant="ghost" 
-                                            size="icon" 
-                                            className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50" 
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50"
                                             title="Eliminar"
                                             onClick={(e) => { e.stopPropagation(); confirmDelete(op.id); }}
                                         >
-                                            <Trash2 size={14}/>
+                                            <Trash2 size={14} />
                                         </Button>
                                     </TableCell>
                                     <TableCell>
@@ -434,25 +455,25 @@ export function OpsDatabase({ onSelectOp }: any) {
                                             <div>
                                                 <div className="font-bold text-slate-700 text-sm">{op.clientName || "Sin Nombre"}</div>
                                                 <div className="flex gap-1 mt-0.5">
-                                                    {op.chat?.length > 0 && <MessageSquare size={10} className="text-blue-400"/>}
-                                                    {op.adminNotes?.length > 0 && <StickyNote size={10} className="text-yellow-500"/>}
+                                                    {op.chat?.length > 0 && <MessageSquare size={10} className="text-blue-400" />}
+                                                    {op.adminNotes?.length > 0 && <StickyNote size={10} className="text-yellow-500" />}
                                                 </div>
                                             </div>
                                         </div>
                                     </TableCell>
                                     <TableCell className="font-mono text-xs text-slate-500">{op.dni || "-"}</TableCell>
-                                    
+
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                         <div className="flex flex-col items-start gap-1">
                                             <Badge variant="outline" className="bg-white border-slate-200 text-slate-600 font-medium text-[10px]">
                                                 {op.prepaga || "S/D"} {op.plan && op.plan !== 'General' ? op.plan : ''}
                                             </Badge>
-                                            
+
                                             {op.capitas > 1 && (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
                                                         <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 cursor-help hover:bg-blue-100 transition-colors">
-                                                            <Users size={10} className="text-blue-500"/>
+                                                            <Users size={10} className="text-blue-500" />
                                                             <span className="text-[10px] font-bold text-blue-700">{op.capitas} Cápitas</span>
                                                         </div>
                                                     </PopoverTrigger>
@@ -489,7 +510,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                                             {op.status || "Desconocido"}
                                         </span>
                                     </TableCell>
-                                    
+
                                     <TableCell className="text-center">
                                         {op.status === 'cumplidas' && op.billing_period ? (
                                             <Badge variant="secondary" className="bg-green-50 text-green-700 border-green-200 font-bold capitalize text-[10px]">
@@ -510,11 +531,11 @@ export function OpsDatabase({ onSelectOp }: any) {
                                 <TableRow>
                                     <TableCell colSpan={9} className="text-center py-12">
                                         <div className="flex flex-col items-center text-slate-400">
-                                            <Database size={32} className="mb-2 opacity-20"/>
+                                            <Database size={32} className="mb-2 opacity-20" />
                                             <p className="font-medium text-slate-500">No se encontraron resultados.</p>
                                             <p className="text-xs mb-4">Intenta ajustar los filtros o el término de búsqueda.</p>
                                             <Button variant="outline" onClick={clearFilters} className="text-blue-600 border-blue-200 hover:bg-blue-50">
-                                                <RefreshCw size={14} className="mr-2"/> Limpiar Filtros
+                                                <RefreshCw size={14} className="mr-2" /> Limpiar Filtros
                                             </Button>
                                         </div>
                                     </TableCell>
@@ -524,7 +545,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                     </Table>
                 </ScrollArea>
             </div>
-            
+
             <div className="p-2 border-t border-slate-100 bg-slate-50 text-[10px] text-center text-slate-400 font-medium">
                 {loading ? "Sincronizando..." : `Visualizando ${filteredOps.length} registros de toda la base.`}
             </div>
@@ -534,12 +555,12 @@ export function OpsDatabase({ onSelectOp }: any) {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle className="text-red-600 flex items-center gap-2">
-                            <Trash2 size={20}/> Confirmar Eliminación Global
+                            <Trash2 size={20} /> Confirmar Eliminación Global
                         </AlertDialogTitle>
                         <AlertDialogDescription>
                             Estás a punto de borrar un registro de la base de datos global.
-                            <br/>Se eliminará el historial, chat y métricas asociadas.
-                            <br/>Esta acción no se puede deshacer.
+                            <br />Se eliminará el historial, chat y métricas asociadas.
+                            <br />Esta acción no se puede deshacer.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

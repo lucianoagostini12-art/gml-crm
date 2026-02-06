@@ -16,7 +16,7 @@ import { SetterDashboard } from "@/components/setter/SetterDashboard" // Gestora
 export default function Home() {
   const supabase = createClient()
   const router = useRouter()
-  
+
   const [session, setSession] = useState<any>(null)
   const [role, setRole] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
@@ -27,7 +27,7 @@ export default function Home() {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       setSession(session)
-      
+
       if (session) {
         await fetchProfile(session.user.id)
       } else {
@@ -63,7 +63,7 @@ export default function Home() {
         .single()
 
       if (data) {
-        setRole(data.role) 
+        setRole(data.role)
         setUserName(data.full_name || "Usuario")
         // Guardamos en local para acceso rápido en otros componentes
         localStorage.setItem("gml_user_role", data.role)
@@ -79,7 +79,7 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     localStorage.clear()
-    window.location.href = "/" 
+    window.location.href = "/"
   }
 
   if (loading) {
@@ -92,6 +92,16 @@ export default function Home() {
   }
 
   if (!session) return <LoginView />
+
+  // ✅ Si hay sesión pero aún no se cargó el rol, mostrar loading
+  if (!role) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
+        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+        <p className="text-slate-400 text-sm font-medium animate-pulse">Verificando permisos...</p>
+      </div>
+    )
+  }
 
   // --- DISTRIBUCIÓN DE ROLES ---
 
@@ -108,7 +118,7 @@ export default function Home() {
 
   // 3. GESTORA DE LEADS -> Setter
   if (role === "setter") {
-    return <SetterDashboard userName={userName} onLogout={handleLogout} /> 
+    return <SetterDashboard userName={userName} onLogout={handleLogout} />
   }
 
   // 4. VENDEDORA -> Seller

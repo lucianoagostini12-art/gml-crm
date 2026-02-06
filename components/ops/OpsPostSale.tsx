@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -10,9 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, RefreshCw, Trash2, Undo2, Users, LayoutList, Copy, Check } from "lucide-react"
+import { Search, AlertTriangle, Cake, MessageCircle, HeartHandshake, MapPin, Filter, RefreshCw, Trash2, Undo2, Users, LayoutList, Copy, Check, Clock, CalendarCheck } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
+import { toast } from "sonner"
+import { Textarea } from "@/components/ui/textarea"
+
+// SONIDO DE NOTIFICACIÓN (mismo que ventas en OpsManager)
+const ALARM_SOUND = "https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3"
 
 // IMPORTAMOS EL MODAL COMPLETO Y SUS HELPERS
 import { OpsModal } from "./OpsModal"
@@ -20,7 +25,7 @@ import { getStatusColor, getSubStateStyle } from "./data"
 
 // --- HELPERS COLORES POSTVENTA (MEJORADOS CON DEFAULT) ---
 const getFinancialColor = (status: string) => {
-    switch(status) {
+    switch (status) {
         case 'SIN MORA': return "bg-green-100 text-green-700 ring-green-600/20"
         case 'PRE MORA': return "bg-yellow-100 text-yellow-700 ring-yellow-600/20"
         case 'MORA 1': return "bg-orange-100 text-orange-700 ring-orange-600/20"
@@ -33,7 +38,7 @@ const getFinancialColor = (status: string) => {
 }
 
 const getActionColor = (status: string) => {
-    switch(status) {
+    switch (status) {
         case 'PRESENTACION': return "text-blue-600 border-blue-200 bg-blue-50"
         case 'CAMBIO DE PASS': return "text-purple-600 border-purple-200 bg-purple-50"
         case 'MENSAJE MORA': return "text-red-600 border-red-200 bg-red-50"
@@ -52,7 +57,7 @@ const getPrepagaBadgeColor = (prepaga: string) => {
     if (p.includes("Swiss")) return "bg-red-50 dark:bg-[#3A3B3C] border-red-100 text-red-800"
     if (p.includes("Galeno")) return "bg-blue-50 dark:bg-[#3A3B3C] border-blue-100 text-blue-800"
     if (p.includes("AMPF")) return "bg-sky-50 dark:bg-[#3A3B3C] border-sky-100 text-sky-800"
-    
+
     return "bg-slate-50 border-slate-100 text-slate-800"
 }
 
@@ -63,7 +68,7 @@ function CopyDniButton({ cuit, dni }: { cuit?: string, dni: string }) {
     const handleCopy = (e: React.MouseEvent) => {
         e.stopPropagation() // Evitar abrir el modal al clickear
         let textToCopy = dni
-        
+
         // Lógica: Si hay CUIT, extraemos DNI.
         // Caso estándar (11 dígitos): 20-12345678-9 -> 12345678 (quita 2 adelante + 1 verificador)
         // Caso legacy (10 dígitos, sin verificador): 20-12345678 -> 12345678 (quita 2 adelante)
@@ -89,10 +94,10 @@ function CopyDniButton({ cuit, dni }: { cuit?: string, dni: string }) {
     }
 
     return (
-        <Button 
-            variant="ghost" 
-            size="icon" 
-            className="h-4 w-4 ml-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50" 
+        <Button
+            variant="ghost"
+            size="icon"
+            className="h-4 w-4 ml-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50"
             onClick={handleCopy}
             title="Copiar DNI (Extraído del CUIT)"
         >
@@ -107,12 +112,27 @@ export function OpsPostSale({ globalConfig }: any) {
     const [clients, setClients] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
-    
+
     // --- ESTADO PARA MODAL COMPLETO ---
     const [selectedOp, setSelectedOp] = useState<any>(null)
-    
+
     // --- ESTADO PARA ELIMINAR DE CARTERA ---
     const [clientToRemove, setClientToRemove] = useState<any>(null)
+
+    // --- ESTADO PARA DIALOG DE REVISIÓN 6 MESES ---
+    const [reviewingClient, setReviewingClient] = useState<any>(null)
+    const [reviewNotes, setReviewNotes] = useState("")
+    const [reviewCommunicated, setReviewCommunicated] = useState<boolean | null>(null)
+
+    // --- REF DE AUDIO PARA SONIDO ---
+    const audioRef = useRef<HTMLAudioElement | null>(null)
+
+    // Inicializar audio
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            audioRef.current = new Audio(ALARM_SOUND)
+        }
+    }, [])
 
     // --- FILTROS AVANZADOS ---
     const [filters, setFilters] = useState({
@@ -124,7 +144,7 @@ export function OpsPostSale({ globalConfig }: any) {
         date: "" // ✅ Nuevo Filtro de Fecha (Mes de Ingreso)
     })
     const [isFilterOpen, setIsFilterOpen] = useState(false)
-    
+
     // Obtener listas dinámicas o usar defaults si aún no cargaron
     const financialOptions = globalConfig?.postventa?.financial_status || ['SIN MORA', 'PRE MORA', 'MORA 1', 'MORA 2', 'MORA 3', 'IMPAGO']
     const actionOptions = globalConfig?.postventa?.action_status || ['OK', 'PRESENTACION', 'CAMBIO DE PASS', 'MENSAJE MORA']
@@ -137,29 +157,29 @@ export function OpsPostSale({ globalConfig }: any) {
         const { data, error } = await supabase
             .from('leads')
             .select('*')
-            .eq('status', 'cumplidas') 
-            .eq('billing_approved', true) 
+            .eq('status', 'cumplidas')
+            .eq('billing_approved', true)
             .order('created_at', { ascending: false })
 
         if (data) {
             const mappedClients = data.map((c: any) => ({
                 // Mapeamos todo lo necesario para OpsModal y la Tabla
-                ...c, 
+                ...c,
                 id: c.id,
-                clientName: c.name || "Sin Nombre", 
+                clientName: c.name || "Sin Nombre",
                 name: c.name || "Sin Nombre",
                 dni: c.dni || "-",
                 cuit: c.cuit, // ✅ Agregamos CUIT al mapa
                 phone: c.phone || "", // ✅ Aseguramos que el teléfono esté mapeado
                 email: c.email || "", // ✅ Aseguramos que el email esté mapeado
-                dob: c.dob || "2000-01-01", 
+                dob: c.dob || "2000-01-01",
                 prepaga: c.prepaga || c.quoted_prepaga || "Sin Asignar",
                 plan: c.plan || c.quoted_plan || "-",
                 price: c.price || c.quoted_price || 0,
                 seller: c.agent_name || "Desconocido",
                 status: c.status,
                 saleDate: new Date(c.created_at).toISOString().split('T')[0],
-                activationDate: c.fecha_alta || "-", 
+                activationDate: c.fecha_alta || "-",
                 financialStatus: c.financial_status || "SIN MORA",
                 actionStatus: c.action_status || "OK",
                 province: c.province || "Sin Datos",
@@ -169,7 +189,7 @@ export function OpsPostSale({ globalConfig }: any) {
                 capitas: c.capitas || 1,
                 familia: c.family_members || c.hijos || [],
                 // Agregados para que OpsModal no falle
-                chat: [], 
+                chat: [],
                 reminders: [],
                 history: []
             }))
@@ -187,49 +207,49 @@ export function OpsPostSale({ globalConfig }: any) {
     const updateClientField = async (id: string, field: string, value: any) => {
         // Actualización Optimista
         setClients(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
-        
+
         // Update DB (snake_case y nombres corregidos)
         const dbUpdates: any = {}
-        
+
         if (field === 'financialStatus') dbUpdates.financial_status = value
         else if (field === 'actionStatus') dbUpdates.action_status = value
         else dbUpdates[field] = value
-        
+
         await supabase.from('leads').update(dbUpdates).eq('id', id)
     }
 
     // --- ELIMINAR DE CARTERA ---
     const handleRemoveFromPortfolio = async () => {
         if (!clientToRemove) return
-        await supabase.from('leads').update({ 
+        await supabase.from('leads').update({
             status: 'demoras',
             billing_approved: false,
             notes: (clientToRemove.observations || "") + "\n[SISTEMA]: Sacado de cartera postventa."
         }).eq('id', clientToRemove.id)
-        
+
         setClients(prev => prev.filter(c => c.id !== clientToRemove.id))
         setClientToRemove(null)
     }
 
     // --- CUMPLEAÑOS ---
-    const today = new Date() 
+    const today = new Date()
     const currentMonth = today.getMonth()
     const currentDay = today.getDate()
 
     const isBirthdayToday = (dobString: string) => {
-        if(!dobString) return false
+        if (!dobString) return false
         const [y, m, d] = dobString.split('-').map(Number)
         return m - 1 === currentMonth && d === currentDay
     }
 
     const isBirthdayThisMonth = (dobString: string) => {
-        if(!dobString) return false
+        if (!dobString) return false
         const [y, m, d] = dobString.split('-').map(Number)
         return m - 1 === currentMonth
     }
 
     const getAge = (dobString: string) => {
-        if(!dobString) return 0
+        if (!dobString) return 0
         const birth = new Date(dobString)
         let age = today.getFullYear() - birth.getFullYear()
         const m = today.getMonth() - birth.getMonth()
@@ -245,30 +265,134 @@ export function OpsPostSale({ globalConfig }: any) {
             .slice(0, 3)
     }, [clients])
 
+    // ✅ CLIENTES QUE CUMPLEN 6 MESES DESDE FECHA_ALTA (en el mes actual)
+    const sixMonthAnniversaries = useMemo(() => {
+        return clients.filter(c => {
+            if (!c.activationDate || c.activationDate === '-') return false
+            const altaDate = new Date(c.activationDate)
+            if (isNaN(altaDate.getTime())) return false
+
+            // Calcular meses desde el alta
+            const monthsDiff = (today.getFullYear() - altaDate.getFullYear()) * 12 +
+                (today.getMonth() - altaDate.getMonth())
+
+            // Mostrar si cumplen exactamente 6 meses este mes
+            return monthsDiff === 6
+        })
+    }, [clients])
+
+    // ✅ REF para evitar toasts múltiples
+    const toastShownRef = useRef<string | null>(null)
+
+    // ✅ TOASTS PREMIUM + NOTIFICACIONES (Cumpleaños y 6 Meses)
+    useEffect(() => {
+        const todayKey = new Date().toDateString()
+        if (toastShownRef.current === todayKey) return
+        if (clients.length === 0) return
+
+        const showNotifications = async () => {
+            // 🔊 REPRODUCIR SONIDO
+            if ((todaysBirthdays.length > 0 || sixMonthAnniversaries.length > 0) && audioRef.current) {
+                audioRef.current.currentTime = 0
+                audioRef.current.play().catch(e => console.log("Audio blocked:", e))
+            }
+
+            // 🎂 CUMPLEAÑOS HOY
+            if (todaysBirthdays.length > 0) {
+                const names = todaysBirthdays.map(c => c.name.split(' ')[0]).join(', ')
+
+                toast(
+                    <div className="flex items-center gap-3">
+                        <div className="bg-pink-100 p-2 rounded-full">
+                            <Cake className="h-5 w-5 text-pink-600" />
+                        </div>
+                        <div>
+                            <p className="font-bold text-slate-800">🎂 ¡Cumpleaños Hoy!</p>
+                            <p className="text-sm text-slate-600">{names}</p>
+                        </div>
+                    </div>,
+                    { duration: 8000, className: "bg-pink-50 border-pink-200" }
+                )
+
+                // Guardar en campanita
+                for (const c of todaysBirthdays) {
+                    await supabase.from('notifications').insert({
+                        user_name: 'Administración',
+                        title: `🎂 Cumpleaños: ${c.name}`,
+                        body: `${c.name} cumple ${getAge(c.dob)} años hoy. No olvides felicitarlo/a!`,
+                        type: 'info',
+                        event_type: 'birthday',
+                        lead_id: c.id,
+                        read: false,
+                        created_at: new Date().toISOString()
+                    })
+                }
+            }
+
+            // 🗓️ 6 MESES DE ALTA
+            if (sixMonthAnniversaries.length > 0) {
+                const count = sixMonthAnniversaries.length
+
+                toast(
+                    <div className="flex items-center gap-3">
+                        <div className="bg-amber-100 p-2 rounded-full">
+                            <CalendarCheck className="h-5 w-5 text-amber-600" />
+                        </div>
+                        <div>
+                            <p className="font-bold text-slate-800">📅 6 Meses de Alta</p>
+                            <p className="text-sm text-slate-600">{count} cliente{count > 1 ? 's' : ''} para revisar</p>
+                        </div>
+                    </div>,
+                    { duration: 8000, className: "bg-amber-50 border-amber-200" }
+                )
+
+                // Guardar en campanita
+                for (const c of sixMonthAnniversaries) {
+                    await supabase.from('notifications').insert({
+                        user_name: 'Administración',
+                        title: `📅 6 Meses: ${c.name}`,
+                        body: `${c.name} cumple 6 meses desde el alta (${c.activationDate}). Revisar posible aumento o cambio.`,
+                        type: 'info',
+                        event_type: 'anniversary_6m',
+                        lead_id: c.id,
+                        read: false,
+                        created_at: new Date().toISOString()
+                    })
+                }
+            }
+
+            toastShownRef.current = todayKey
+        }
+
+        // Pequeño delay para que carguen los datos
+        const timer = setTimeout(showNotifications, 1500)
+        return () => clearTimeout(timer)
+    }, [clients, todaysBirthdays, sixMonthAnniversaries])
+
     // --- FILTRADO AVANZADO (BUSCADOR GLOBAL) ---
     const filteredClients = useMemo(() => {
         return clients.filter(c => {
             const term = searchTerm.toLowerCase()
-            const matchesSearch = 
-                (c.name && c.name.toLowerCase().includes(term)) || 
-                (c.dni && c.dni.includes(term)) || 
+            const matchesSearch =
+                (c.name && c.name.toLowerCase().includes(term)) ||
+                (c.dni && c.dni.includes(term)) ||
                 (c.cuit && c.cuit.includes(term)) || // Busqueda por CUIT
                 (c.phone && c.phone.includes(term)) || // ✅ Busqueda por Teléfono
                 (c.email && c.email.toLowerCase().includes(term)) || // ✅ Busqueda por Email
                 (c.plan && c.plan.toLowerCase().includes(term)) || // ✅ Busqueda por Plan
                 (c.province && c.province.toLowerCase().includes(term)) ||
                 (c.prepaga && c.prepaga.toLowerCase().includes(term))
-            
+
             if (!matchesSearch) return false
             if (filters.seller !== "all" && c.seller !== filters.seller) return false
             if (filters.prepaga !== "all" && c.prepaga !== filters.prepaga) return false
             if (filters.mora !== "all" && c.financialStatus !== filters.mora) return false
             if (filters.action !== "all" && c.actionStatus !== filters.action) return false
             if (filters.province !== "all" && c.province !== filters.province) return false
-            
+
             // ✅ Filtro de Fecha (Mes de Ingreso)
             if (filters.date && !c.saleDate.startsWith(filters.date)) return false
-            
+
             return true
         })
     }, [clients, searchTerm, filters])
@@ -278,33 +402,71 @@ export function OpsPostSale({ globalConfig }: any) {
 
     const getWhatsAppLink = (client: any) => {
         const msg = `¡Hola ${client.name.split(' ')[0]}! 🎂 Desde GML Salud te deseamos un muy feliz cumpleaños. ¡Que tengas un día excelente!`
-        return `https://wa.me/549${client.dni}?text=${encodeURIComponent(msg)}` 
+        return `https://wa.me/549${client.dni}?text=${encodeURIComponent(msg)}`
+    }
+
+    // ✅ FUNCIÓN PARA MARCAR CLIENTE DE 6 MESES COMO REVISADO
+    const handleReviewComplete = async () => {
+        if (!reviewingClient) return
+
+        const dateStr = new Date().toLocaleDateString('es-AR')
+        const communicated = reviewCommunicated === true ? 'SÍ' : reviewCommunicated === false ? 'NO' : 'Sin respuesta'
+        const noteText = `[REVISIÓN 6 MESES - ${dateStr}]\nSe comunicó: ${communicated}\nObservaciones: ${reviewNotes || 'Sin observaciones'}`
+
+        // Obtener notas actuales
+        const { data: currentData } = await supabase
+            .from('leads')
+            .select('notes')
+            .eq('id', reviewingClient.id)
+            .single()
+
+        const currentNotes = currentData?.notes || ''
+        const updatedNotes = currentNotes ? currentNotes + '\n|||' + noteText : noteText
+
+        // Guardar en DB
+        await supabase.from('leads').update({
+            notes: updatedNotes,
+            last_update: new Date().toISOString()
+        }).eq('id', reviewingClient.id)
+
+        // Actualizar lista local
+        setClients(prev => prev.map(c =>
+            c.id === reviewingClient.id
+                ? { ...c, observations: updatedNotes }
+                : c
+        ))
+
+        // Cerrar y limpiar
+        toast.success(`✅ Revisión guardada para ${reviewingClient.name}`)
+        setReviewingClient(null)
+        setReviewNotes('')
+        setReviewCommunicated(null)
     }
 
     return (
         <div className="p-6 h-full flex flex-col gap-6 overflow-hidden max-w-[1900px] mx-auto pb-20 bg-slate-50/30">
-            
+
             {/* KPIS & CUMPLES */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
                 <Card className="bg-white border-slate-200 shadow-sm border-l-4 border-l-blue-500">
                     <CardContent className="p-4 flex items-center justify-between">
                         <div><p className="text-xs font-bold text-slate-400 uppercase">Cartera Activa</p><div className="text-2xl font-black text-slate-800">{clients.length}</div></div>
-                        <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600"><HeartHandshake/></div>
+                        <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600"><HeartHandshake /></div>
                     </CardContent>
                 </Card>
                 <Card className="bg-white border-slate-200 shadow-sm border-l-4 border-l-red-500">
                     <CardContent className="p-4 flex items-center justify-between">
                         <div><p className="text-xs font-bold text-slate-400 uppercase">Cartera en Mora</p><div className="text-2xl font-black text-red-600">{clients.filter(c => c.financialStatus !== 'SIN MORA').length}</div></div>
-                        <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center text-red-600"><AlertTriangle/></div>
+                        <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center text-red-600"><AlertTriangle /></div>
                     </CardContent>
                 </Card>
-                
+
                 <Card className="bg-white border-slate-200 shadow-md border-l-4 border-l-pink-500 col-span-2 overflow-hidden">
                     <CardContent className="p-0 h-full flex">
                         <div className="flex-1 p-4 border-r border-slate-100 bg-pink-50/30 flex flex-col justify-center">
-                            <div className="flex items-center gap-2 mb-3"><div className="bg-pink-100 text-pink-600 p-1.5 rounded-full"><Cake size={16}/></div><span className="text-xs font-bold text-pink-600 uppercase tracking-wider">Hoy ({todaysBirthdays.length})</span></div>
+                            <div className="flex items-center gap-2 mb-3"><div className="bg-pink-100 text-pink-600 p-1.5 rounded-full"><Cake size={16} /></div><span className="text-xs font-bold text-pink-600 uppercase tracking-wider">Hoy ({todaysBirthdays.length})</span></div>
                             {todaysBirthdays.length > 0 ? (
-                                <div className="space-y-2">{todaysBirthdays.map(c => (<div key={c.id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-pink-100 shadow-sm"><div className="flex items-center gap-2"><Avatar className="h-6 w-6"><AvatarFallback className="text-[9px] bg-pink-600 text-white font-bold">{c.name.substring(0,2)}</AvatarFallback></Avatar><div><p className="text-xs font-bold text-slate-700 leading-none">{c.name}</p><p className="text-[9px] text-slate-400">{getAge(c.dob)} años</p></div></div><Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:bg-green-50 rounded-full" onClick={() => window.open(getWhatsAppLink(c), '_blank')}><MessageCircle size={14}/></Button></div>))}</div>
+                                <div className="space-y-2">{todaysBirthdays.map(c => (<div key={c.id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-pink-100 shadow-sm"><div className="flex items-center gap-2"><Avatar className="h-6 w-6"><AvatarFallback className="text-[9px] bg-pink-600 text-white font-bold">{c.name.substring(0, 2)}</AvatarFallback></Avatar><div><p className="text-xs font-bold text-slate-700 leading-none">{c.name}</p><p className="text-[9px] text-slate-400">{getAge(c.dob)} años</p></div></div><Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:bg-green-50 rounded-full" onClick={() => window.open(getWhatsAppLink(c), '_blank')}><MessageCircle size={14} /></Button></div>))}</div>
                             ) : <p className="text-xs text-slate-400 italic pl-1">No hay cumpleaños hoy.</p>}
                         </div>
                         <div className="flex-1 p-4 flex flex-col justify-center">
@@ -315,22 +477,77 @@ export function OpsPostSale({ globalConfig }: any) {
                 </Card>
             </div>
 
+            {/* ✅ SECCIÓN 6 MESES DE ALTA */}
+            {sixMonthAnniversaries.length > 0 && (
+                <Card className="bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-l-amber-500 shadow-md">
+                    <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-amber-100 text-amber-600 p-2 rounded-full">
+                                    <CalendarCheck size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-800">📅 Cumplen 6 Meses de Alta</h3>
+                                    <p className="text-xs text-slate-500">Clientes para revisar aumento o cambio de plan</p>
+                                </div>
+                            </div>
+                            <Badge className="bg-amber-500 text-white font-bold">{sixMonthAnniversaries.length}</Badge>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[200px] overflow-y-auto pr-2">
+                            {sixMonthAnniversaries.map(c => (
+                                <div
+                                    key={c.id}
+                                    className="flex items-center justify-between p-3 bg-white rounded-lg border border-amber-200 cursor-pointer hover:bg-amber-50 hover:border-amber-400 transition-all shadow-sm group"
+                                    onClick={() => setSelectedOp(c)}
+                                >
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                        <Avatar className="h-8 w-8 border-2 border-amber-300">
+                                            <AvatarFallback className="text-[10px] bg-amber-500 text-white font-bold">{c.name.substring(0, 2)}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-bold text-slate-800 text-sm truncate">{c.name}</p>
+                                            <p className="text-[10px] text-slate-500 font-mono">{c.cuit || c.dni}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="text-right shrink-0">
+                                            <Badge variant="outline" className={`text-[9px] ${getPrepagaBadgeColor(c.prepaga)}`}>{c.prepaga}</Badge>
+                                            <p className="text-[9px] text-amber-600 font-bold mt-1">Alta: {c.activationDate}</p>
+                                        </div>
+                                        {/* Botón de marcar revisado */}
+                                        <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-8 w-8 text-green-600 hover:bg-green-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => { e.stopPropagation(); setReviewingClient(c) }}
+                                            title="Marcar como revisado"
+                                        >
+                                            <Check size={16} />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* TOOLBAR & FILTROS */}
             <div className="flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-                <div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-2.5 text-slate-400 h-4 w-4"/><Input placeholder="Buscar por Nombre, DNI, Teléfono..." className="pl-9 bg-slate-50 border-slate-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/></div>
+                <div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-2.5 text-slate-400 h-4 w-4" /><Input placeholder="Buscar por Nombre, DNI, Teléfono..." className="pl-9 bg-slate-50 border-slate-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
                 <div className="h-8 w-px bg-slate-200"></div>
                 <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-                    <PopoverTrigger asChild><Button variant={activeFiltersCount>0?"default":"outline"} className="gap-2 relative"><Filter size={16}/> Filtros {activeFiltersCount>0 && <span className="bg-pink-500 text-white text-[10px] h-5 w-5 rounded-full flex items-center justify-center absolute -top-2 -right-2">{activeFiltersCount}</span>}</Button></PopoverTrigger>
+                    <PopoverTrigger asChild><Button variant={activeFiltersCount > 0 ? "default" : "outline"} className="gap-2 relative"><Filter size={16} /> Filtros {activeFiltersCount > 0 && <span className="bg-pink-500 text-white text-[10px] h-5 w-5 rounded-full flex items-center justify-center absolute -top-2 -right-2">{activeFiltersCount}</span>}</Button></PopoverTrigger>
                     <PopoverContent className="w-[320px] p-4" align="end">
                         <div className="space-y-4">
-                            <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2"><LayoutList size={16}/> Filtrar Cartera</h4>
-                            <Separator/>
+                            <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2"><LayoutList size={16} /> Filtrar Cartera</h4>
+                            <Separator />
                             <div className="space-y-3">
                                 {/* ✅ FILTRO POR PREPAGA (Desde Supabase) */}
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Prepaga</label>
-                                    <Select value={filters.prepaga} onValueChange={v => setFilters({...filters, prepaga: v})}>
-                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todas"/></SelectTrigger>
+                                    <Select value={filters.prepaga} onValueChange={v => setFilters({ ...filters, prepaga: v })}>
+                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todas" /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="all">Todas</SelectItem>
                                             {prepagasOptions.map((p: any) => (
@@ -339,15 +556,15 @@ export function OpsPostSale({ globalConfig }: any) {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                
+
                                 {/* ✅ FILTRO POR FECHA (Mes de Ingreso) */}
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Mes de Ingreso</label>
-                                    <Input 
-                                        type="month" 
-                                        className="h-8 text-xs" 
-                                        value={filters.date} 
-                                        onChange={(e) => setFilters({...filters, date: e.target.value})}
+                                    <Input
+                                        type="month"
+                                        className="h-8 text-xs"
+                                        value={filters.date}
+                                        onChange={(e) => setFilters({ ...filters, date: e.target.value })}
                                     />
                                 </div>
 
@@ -355,21 +572,21 @@ export function OpsPostSale({ globalConfig }: any) {
 
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Estado Mora</label>
-                                    <Select value={filters.mora} onValueChange={v => setFilters({...filters, mora: v})}>
-                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger>
+                                    <Select value={filters.mora} onValueChange={v => setFilters({ ...filters, mora: v })}>
+                                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="all">Todos</SelectItem>
                                             {financialOptions.map((f: string) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Vendedor</label><Select value={filters.seller} onValueChange={v => setFilters({...filters, seller: v})}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos"/></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem>{uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
+                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Vendedor</label><Select value={filters.seller} onValueChange={v => setFilters({ ...filters, seller: v })}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem>{uniqueSellers.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
                             </div>
                             <Button className="w-full h-8 text-xs bg-slate-900 text-white" onClick={() => setIsFilterOpen(false)}>Aplicar</Button>
                         </div>
                     </PopoverContent>
                 </Popover>
-                <Button variant="ghost" size="icon" onClick={fetchPortfolio}><RefreshCw className={`h-4 w-4 text-slate-400 ${loading?'animate-spin':''}`}/></Button>
+                <Button variant="ghost" size="icon" onClick={fetchPortfolio}><RefreshCw className={`h-4 w-4 text-slate-400 ${loading ? 'animate-spin' : ''}`} /></Button>
             </div>
 
             {/* TABLA */}
@@ -378,106 +595,106 @@ export function OpsPostSale({ globalConfig }: any) {
                     <Table>
                         <TableHeader className="bg-slate-50 sticky top-0 z-10"><TableRow><TableHead>Cliente</TableHead><TableHead>Ubicación</TableHead><TableHead>Plan & Familia</TableHead><TableHead>Vendedor</TableHead><TableHead>Fechas</TableHead><TableHead>Estado</TableHead><TableHead>Acción</TableHead><TableHead></TableHead></TableRow></TableHeader>
                         <TableBody>
-                            {loading ? <TableRow><TableCell colSpan={8} className="text-center py-10 text-slate-400">Cargando...</TableCell></TableRow> : 
-                             filteredClients.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-10 text-slate-400">Sin resultados.</TableCell></TableRow> : 
-                             filteredClients.map((client) => (
-                                <TableRow key={client.id} className="hover:bg-slate-50 cursor-pointer group" onClick={() => setSelectedOp(client)}>
-                                    <TableCell>
-                                        <div className="flex items-start gap-3">
-                                            <div className="relative"><Avatar className="h-9 w-9 border border-slate-200"><AvatarFallback className="bg-slate-100 text-xs font-bold text-slate-600">{client.name.substring(0,2)}</AvatarFallback></Avatar>{isBirthdayThisMonth(client.dob) && <div className="absolute -top-1 -right-1 bg-pink-100 p-0.5 rounded-full text-pink-500"><Cake size={10}/></div>}</div>
-                                            <div>
-                                                <div className="font-bold text-slate-800 text-sm flex items-center gap-2">{client.name}{isBirthdayToday(client.dob) && <Badge className="bg-pink-500 text-[9px] h-4 px-1">Hoy!</Badge>}</div>
-                                                
-                                                {/* ✅ CAMBIO AQUÍ: MOSTRAR CUIT Y BOTÓN DE COPIAR DNI */}
-                                                <div className="flex items-center gap-1 mt-0.5">
-                                                    <span className="text-[11px] font-mono text-slate-400">{client.cuit || client.dni}</span>
-                                                    <CopyDniButton cuit={client.cuit} dni={client.dni} />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </TableCell>
-                                    <TableCell><div className="flex items-center gap-1 text-xs text-slate-600"><MapPin size={12} className="text-slate-400"/> {client.province}</div></TableCell>
-                                    
-                                    {/* COLUMNA PLAN & FAMILIA CON POPOVER */}
-                                    <TableCell onClick={(e) => e.stopPropagation()}>
-                                        <div className="flex flex-col items-start gap-1">
-                                            {/* Badge con Color Personalizado */}
-                                            <Badge variant="outline" className={`w-fit border ${getPrepagaBadgeColor(client.prepaga)}`}>
-                                                {client.prepaga} - {client.plan}
-                                            </Badge>
-                                            
-                                            {/* Reemplazo de HoverCard por Popover (Click para ver) */}
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 cursor-help hover:bg-blue-100 transition-colors">
-                                                        <Users size={10} className="text-blue-500"/>
-                                                        <span className="text-[10px] font-bold text-blue-700">{client.capitas} Cápitas</span>
-                                                    </div>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-60 p-3 bg-white border-slate-200 shadow-xl">
-                                                    <h4 className="text-xs font-black text-slate-600 uppercase mb-2 border-b pb-1">Grupo Familiar</h4>
-                                                    <div className="space-y-2">
-                                                        <div className="text-xs">
-                                                            <span className="font-bold text-slate-800 block">{client.name}</span>
-                                                            <span className="text-[10px] text-slate-400">Titular</span>
-                                                        </div>
-                                                        {client.familia && client.familia.length > 0 ? client.familia.map((f: any, i: number) => (
-                                                            <div key={i} className="text-xs border-t border-slate-50 pt-1 mt-1">
-                                                                <span className="font-medium text-slate-700 block">{f.nombre}</span>
-                                                                <div className="flex justify-between">
-                                                                    <span className="text-[10px] text-slate-400">{f.dni}</span>
-                                                                    <span className="text-[9px] bg-slate-100 px-1 rounded text-slate-500 uppercase">{f.rol || 'Familiar'}</span>
-                                                                </div>
-                                                            </div>
-                                                        )) : (
-                                                            client.capitas > 1 ? <p className="text-[10px] text-red-400 italic">No hay datos de familiares cargados.</p> : null
-                                                        )}
-                                                    </div>
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-                                    </TableCell>
+                            {loading ? <TableRow><TableCell colSpan={8} className="text-center py-10 text-slate-400">Cargando...</TableCell></TableRow> :
+                                filteredClients.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-10 text-slate-400">Sin resultados.</TableCell></TableRow> :
+                                    filteredClients.map((client) => (
+                                        <TableRow key={client.id} className="hover:bg-slate-50 cursor-pointer group" onClick={() => setSelectedOp(client)}>
+                                            <TableCell>
+                                                <div className="flex items-start gap-3">
+                                                    <div className="relative"><Avatar className="h-9 w-9 border border-slate-200"><AvatarFallback className="bg-slate-100 text-xs font-bold text-slate-600">{client.name.substring(0, 2)}</AvatarFallback></Avatar>{isBirthdayThisMonth(client.dob) && <div className="absolute -top-1 -right-1 bg-pink-100 p-0.5 rounded-full text-pink-500"><Cake size={10} /></div>}</div>
+                                                    <div>
+                                                        <div className="font-bold text-slate-800 text-sm flex items-center gap-2">{client.name}{isBirthdayToday(client.dob) && <Badge className="bg-pink-500 text-[9px] h-4 px-1">Hoy!</Badge>}</div>
 
-                                    <TableCell><span className="text-xs font-medium text-slate-600">{client.seller}</span></TableCell>
-                                    <TableCell><div className="flex flex-col gap-1 text-[10px] text-slate-400"><span>V: {client.saleDate}</span><span className="font-bold text-blue-600">A: {client.activationDate}</span></div></TableCell>
-                                    
-                                    {/* ✅ DROPDOWNS DINÁMICOS CON DATOS DE SETTINGS */}
-                                    <TableCell onClick={(e) => e.stopPropagation()}>
-                                        <Select value={client.financialStatus} onValueChange={(val) => updateClientField(client.id, 'financialStatus', val)}>
-                                            <SelectTrigger className={`h-7 text-[10px] font-bold border-0 ring-1 ring-inset ${getFinancialColor(client.financialStatus)}`}><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                {financialOptions.map((opt: string) => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </TableCell>
-                                    <TableCell onClick={(e) => e.stopPropagation()}>
-                                        <Select value={client.actionStatus} onValueChange={(val) => updateClientField(client.id, 'actionStatus', val)}>
-                                            <SelectTrigger className={`h-7 text-[10px] font-medium border border-dashed ${getActionColor(client.actionStatus)}`}><SelectValue placeholder="-" /></SelectTrigger>
-                                            <SelectContent>
-                                                {actionOptions.map((opt: string) => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </TableCell>
-                                    <TableCell onClick={(e) => e.stopPropagation()}>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => setClientToRemove(client)}><Trash2 size={14}/></Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
+                                                        {/* ✅ CAMBIO AQUÍ: MOSTRAR CUIT Y BOTÓN DE COPIAR DNI */}
+                                                        <div className="flex items-center gap-1 mt-0.5">
+                                                            <span className="text-[11px] font-mono text-slate-400">{client.cuit || client.dni}</span>
+                                                            <CopyDniButton cuit={client.cuit} dni={client.dni} />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell><div className="flex items-center gap-1 text-xs text-slate-600"><MapPin size={12} className="text-slate-400" /> {client.province}</div></TableCell>
+
+                                            {/* COLUMNA PLAN & FAMILIA CON POPOVER */}
+                                            <TableCell onClick={(e) => e.stopPropagation()}>
+                                                <div className="flex flex-col items-start gap-1">
+                                                    {/* Badge con Color Personalizado */}
+                                                    <Badge variant="outline" className={`w-fit border ${getPrepagaBadgeColor(client.prepaga)}`}>
+                                                        {client.prepaga} - {client.plan}
+                                                    </Badge>
+
+                                                    {/* Reemplazo de HoverCard por Popover (Click para ver) */}
+                                                    <Popover>
+                                                        <PopoverTrigger asChild>
+                                                            <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 cursor-help hover:bg-blue-100 transition-colors">
+                                                                <Users size={10} className="text-blue-500" />
+                                                                <span className="text-[10px] font-bold text-blue-700">{client.capitas} Cápitas</span>
+                                                            </div>
+                                                        </PopoverTrigger>
+                                                        <PopoverContent className="w-60 p-3 bg-white border-slate-200 shadow-xl">
+                                                            <h4 className="text-xs font-black text-slate-600 uppercase mb-2 border-b pb-1">Grupo Familiar</h4>
+                                                            <div className="space-y-2">
+                                                                <div className="text-xs">
+                                                                    <span className="font-bold text-slate-800 block">{client.name}</span>
+                                                                    <span className="text-[10px] text-slate-400">Titular</span>
+                                                                </div>
+                                                                {client.familia && client.familia.length > 0 ? client.familia.map((f: any, i: number) => (
+                                                                    <div key={i} className="text-xs border-t border-slate-50 pt-1 mt-1">
+                                                                        <span className="font-medium text-slate-700 block">{f.nombre}</span>
+                                                                        <div className="flex justify-between">
+                                                                            <span className="text-[10px] text-slate-400">{f.dni}</span>
+                                                                            <span className="text-[9px] bg-slate-100 px-1 rounded text-slate-500 uppercase">{f.rol || 'Familiar'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                )) : (
+                                                                    client.capitas > 1 ? <p className="text-[10px] text-red-400 italic">No hay datos de familiares cargados.</p> : null
+                                                                )}
+                                                            </div>
+                                                        </PopoverContent>
+                                                    </Popover>
+                                                </div>
+                                            </TableCell>
+
+                                            <TableCell><span className="text-xs font-medium text-slate-600">{client.seller}</span></TableCell>
+                                            <TableCell><div className="flex flex-col gap-1 text-[10px] text-slate-400"><span>V: {client.saleDate}</span><span className="font-bold text-blue-600">A: {client.activationDate}</span></div></TableCell>
+
+                                            {/* ✅ DROPDOWNS DINÁMICOS CON DATOS DE SETTINGS */}
+                                            <TableCell onClick={(e) => e.stopPropagation()}>
+                                                <Select value={client.financialStatus} onValueChange={(val) => updateClientField(client.id, 'financialStatus', val)}>
+                                                    <SelectTrigger className={`h-7 text-[10px] font-bold border-0 ring-1 ring-inset ${getFinancialColor(client.financialStatus)}`}><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {financialOptions.map((opt: string) => (
+                                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableCell>
+                                            <TableCell onClick={(e) => e.stopPropagation()}>
+                                                <Select value={client.actionStatus} onValueChange={(val) => updateClientField(client.id, 'actionStatus', val)}>
+                                                    <SelectTrigger className={`h-7 text-[10px] font-medium border border-dashed ${getActionColor(client.actionStatus)}`}><SelectValue placeholder="-" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {actionOptions.map((opt: string) => (
+                                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableCell>
+                                            <TableCell onClick={(e) => e.stopPropagation()}>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => setClientToRemove(client)}><Trash2 size={14} /></Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
                         </TableBody>
                     </Table>
                 </CardContent>
             </Card>
 
             {/* --- MODAL COMPLETO (FIXED) --- */}
-            <OpsModal 
-                op={selectedOp} 
-                isOpen={!!selectedOp} 
-                onClose={() => setSelectedOp(null)} 
-                
+            <OpsModal
+                op={selectedOp}
+                isOpen={!!selectedOp}
+                onClose={() => setSelectedOp(null)}
+
                 // ✅ ESTA ES LA MAGIA: Actualización Optimista
                 onUpdateOp={(updatedLead: any) => {
                     // 1. Actualizamos la lista local inmediatamente (sin esperar a DB)
@@ -487,23 +704,23 @@ export function OpsPostSale({ globalConfig }: any) {
                         }
                         return c
                     }))
-                    
+
                     // 2. Si es el seleccionado, actualizarlo también para que no parpadee
                     if (selectedOp && selectedOp.id === updatedLead.id) {
                         setSelectedOp({ ...selectedOp, ...updatedLead })
                     }
-                }} 
-                
-                currentUser={"Administración"} 
-                role={"admin_god"} 
-                onStatusChange={()=>{}} onRelease={()=>{}} requestAdvance={()=>{}} requestBack={()=>{}} onPick={()=>{}} onSubStateChange={()=>{}} 
+                }}
+
+                currentUser={"Administración"}
+                role={"admin_god"}
+                onStatusChange={() => { }} onRelease={() => { }} requestAdvance={() => { }} requestBack={() => { }} onPick={() => { }} onSubStateChange={() => { }}
                 onAddNote={async (note: string) => {
                     const newNote = `POSTVENTA|${new Date().toLocaleString()}|Admin|${note}`
                     const currentNotes = selectedOp.notes ? selectedOp.notes + "|||" + newNote : newNote
                     await supabase.from('leads').update({ notes: currentNotes }).eq('id', selectedOp.id)
                 }}
-                onSendChat={()=>{}} onAddReminder={()=>{}} 
-                getStatusColor={getStatusColor} 
+                onSendChat={() => { }} onAddReminder={() => { }}
+                getStatusColor={getStatusColor}
                 getSubStateStyle={getSubStateStyle}
                 globalConfig={globalConfig}
             />
@@ -512,13 +729,76 @@ export function OpsPostSale({ globalConfig }: any) {
             <Dialog open={!!clientToRemove} onOpenChange={() => setClientToRemove(null)}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <div className="mx-auto bg-red-100 p-3 rounded-full w-fit mb-3"><Undo2 className="h-6 w-6 text-red-600"/></div>
+                        <div className="mx-auto bg-red-100 p-3 rounded-full w-fit mb-3"><Undo2 className="h-6 w-6 text-red-600" /></div>
                         <DialogTitle className="text-center text-lg font-bold">¿Sacar de Cartera?</DialogTitle>
                         <DialogDescription className="text-center">El cliente <b>{clientToRemove?.name}</b> volverá a "Demoras".</DialogDescription>
                     </DialogHeader>
                     <DialogFooter className="sm:justify-center gap-2">
                         <Button variant="ghost" onClick={() => setClientToRemove(null)}>Cancelar</Button>
                         <Button variant="destructive" onClick={handleRemoveFromPortfolio}>Confirmar Retiro</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ✅ MODAL REVISIÓN 6 MESES */}
+            <Dialog open={!!reviewingClient} onOpenChange={() => { setReviewingClient(null); setReviewNotes(''); setReviewCommunicated(null) }}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <div className="mx-auto bg-amber-100 p-3 rounded-full w-fit mb-3">
+                            <CalendarCheck className="h-6 w-6 text-amber-600" />
+                        </div>
+                        <DialogTitle className="text-center text-lg font-bold">
+                            Revisión de 6 Meses
+                        </DialogTitle>
+                        <DialogDescription className="text-center">
+                            <b>{reviewingClient?.name}</b> — Alta: {reviewingClient?.activationDate}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-4">
+                        {/* Pregunta de comunicación */}
+                        <div className="space-y-2">
+                            <p className="text-sm font-medium text-slate-700">¿Te pudiste comunicar con el cliente?</p>
+                            <div className="flex gap-3">
+                                <Button
+                                    variant={reviewCommunicated === true ? "default" : "outline"}
+                                    className={reviewCommunicated === true ? "bg-green-600 hover:bg-green-700" : ""}
+                                    onClick={() => setReviewCommunicated(true)}
+                                >
+                                    Sí, me comuniqué
+                                </Button>
+                                <Button
+                                    variant={reviewCommunicated === false ? "default" : "outline"}
+                                    className={reviewCommunicated === false ? "bg-red-600 hover:bg-red-700" : ""}
+                                    onClick={() => setReviewCommunicated(false)}
+                                >
+                                    No pude
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* Campo de observaciones */}
+                        <div className="space-y-2">
+                            <p className="text-sm font-medium text-slate-700">Observaciones</p>
+                            <Textarea
+                                placeholder="¿Qué conversaron? ¿Hay que hacer algún cambio? ¿Posible aumento?"
+                                value={reviewNotes}
+                                onChange={(e) => setReviewNotes(e.target.value)}
+                                className="min-h-[100px]"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter className="gap-2">
+                        <Button variant="ghost" onClick={() => { setReviewingClient(null); setReviewNotes(''); setReviewCommunicated(null) }}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            className="bg-amber-600 hover:bg-amber-700"
+                            onClick={handleReviewComplete}
+                        >
+                            Guardar Revisión
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

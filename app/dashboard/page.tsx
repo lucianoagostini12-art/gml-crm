@@ -8,13 +8,13 @@ import { useRouter } from "next/navigation"
 import { AdminDashboard } from "@/components/admin/AdminDashboard"
 import { SetterDashboard } from "@/components/setter/SetterDashboard"
 import { OpsManager } from "@/components/ops/OpsManager"
-import { SellerManager } from "@/components/crm/SellerManager" 
-import { LoginView } from "@/components/auth/LoginView" 
+import { SellerManager } from "@/components/crm/SellerManager"
+import { LoginView } from "@/components/auth/LoginView"
 
 export default function DashboardPage() {
     const supabase = createClient()
     const router = useRouter()
-    
+
     // Estado de Sesión
     const [userRole, setUserRole] = useState<string | null>(null)
     const [userName, setUserName] = useState("")
@@ -40,7 +40,7 @@ export default function DashboardPage() {
     const handleLogout = async () => {
         await supabase.auth.signOut()
         localStorage.clear()
-        router.push("/") 
+        router.push("/")
     }
 
     if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400 animate-pulse">Cargando Sistema GML...</div>

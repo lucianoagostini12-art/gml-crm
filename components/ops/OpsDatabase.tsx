@@ -57,7 +57,7 @@ export function OpsDatabase({ onSelectOp }: any) {
                 history: l.history || [],
                 capitas: l.capitas || 1,
                 familia: l.family_members || l.hijos || [],
-                is_pass: l.is_pass === true || l.pass === true // ✅ Agregado para filtro Pass/Alta
+                opType: l.type // ✅ Campo tipo de operación (pass/alta)
             })))
         }
         setLoading(false)
@@ -157,8 +157,8 @@ export function OpsDatabase({ onSelectOp }: any) {
             }
             // ✅ Filtro por tipo de operación (Pass/Alta)
             if (filterOpType !== "all") {
-                if (filterOpType === "pass" && !op.is_pass) return false
-                if (filterOpType === "alta" && op.is_pass) return false
+                if (filterOpType === "pass" && op.opType !== 'pass') return false
+                if (filterOpType === "alta" && op.opType === 'pass') return false
             }
 
             // 3. BUSCADOR GLOBAL (Ahora incluye familiares)

@@ -12,27 +12,36 @@ import { Megaphone, Trash2, Edit, AlertOctagon, CheckCircle2, Info, RefreshCw } 
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 
 export function AdminAnnouncements() {
     const supabase = createClient()
-    
+
     // Formulario
     const [title, setTitle] = useState("")
     const [message, setMessage] = useState("")
     const [priority, setPriority] = useState("normal")
     const [isBlocking, setIsBlocking] = useState(false)
-    
+
     // Datos
     const [announcements, setAnnouncements] = useState<any[]>([])
     const [totalUsers, setTotalUsers] = useState(0)
     const [loading, setLoading] = useState(true)
 
+    // ✅ Estado de edición
+    const [editingItem, setEditingItem] = useState<any>(null)
+    const [editTitle, setEditTitle] = useState("")
+    const [editMessage, setEditMessage] = useState("")
+    const [editPriority, setEditPriority] = useState("normal")
+    const [editIsBlocking, setEditIsBlocking] = useState(false)
+    const [isSaving, setIsSaving] = useState(false)
+
     // --- CARGAR DATOS ---
     const fetchData = async () => {
         setLoading(true)
-        
+
         // 1. Obtener total de usuarios activos (para calcular el "6/6")
         const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true })
         setTotalUsers(count || 0)
@@ -59,7 +68,7 @@ export function AdminAnnouncements() {
 
     useEffect(() => {
         fetchData()
-        
+
         // Suscripción Realtime para ver si alguien lo lee en vivo o si se crea uno nuevo
         const channel = supabase.channel('announcements_realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => fetchData())
@@ -100,11 +109,39 @@ export function AdminAnnouncements() {
         fetchData()
     }
 
+    // ✅ --- EDITAR COMUNICADO ---
+    const openEdit = (item: any) => {
+        setEditingItem(item)
+        setEditTitle(item.title)
+        setEditMessage(item.message)
+        setEditPriority(item.priority || 'normal')
+        setEditIsBlocking(item.is_blocking || false)
+    }
+
+    const handleUpdate = async () => {
+        if (!editingItem || !editTitle || !editMessage) return
+        setIsSaving(true)
+        const { error } = await supabase.from('announcements').update({
+            title: editTitle,
+            message: editMessage,
+            priority: editPriority,
+            is_blocking: editIsBlocking
+        }).eq('id', editingItem.id)
+
+        if (!error) {
+            setEditingItem(null)
+            fetchData()
+        } else {
+            alert("Error al actualizar")
+        }
+        setIsSaving(false)
+    }
+
     const getBadge = (type: string) => {
-        switch(type) {
-            case 'critical': return <Badge variant="destructive" className="flex w-fit gap-1"><AlertOctagon className="h-3 w-3"/> URGENTE</Badge>
-            case 'high': return <Badge className="bg-orange-500 hover:bg-orange-600 flex w-fit gap-1"><Info className="h-3 w-3"/> Importante</Badge>
-            default: return <Badge variant="secondary" className="flex w-fit gap-1"><CheckCircle2 className="h-3 w-3"/> Normal</Badge>
+        switch (type) {
+            case 'critical': return <Badge variant="destructive" className="flex w-fit gap-1"><AlertOctagon className="h-3 w-3" /> URGENTE</Badge>
+            case 'high': return <Badge className="bg-orange-500 hover:bg-orange-600 flex w-fit gap-1"><Info className="h-3 w-3" /> Importante</Badge>
+            default: return <Badge variant="secondary" className="flex w-fit gap-1"><CheckCircle2 className="h-3 w-3" /> Normal</Badge>
         }
     }
 
@@ -117,7 +154,7 @@ export function AdminAnnouncements() {
                     </h2>
                     <p className="text-slate-500">Cartelera de novedades y avisos.</p>
                 </div>
-                {loading && <RefreshCw className="h-5 w-5 animate-spin text-slate-400"/>}
+                {loading && <RefreshCw className="h-5 w-5 animate-spin text-slate-400" />}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -129,7 +166,7 @@ export function AdminAnnouncements() {
                             <Label>Título</Label>
                             <Input placeholder="Ej: Cambio de Precios" value={title} onChange={e => setTitle(e.target.value)} />
                         </div>
-                        
+
                         <div className="space-y-1">
                             <Label>Nivel de Importancia</Label>
                             <Select value={priority} onValueChange={setPriority}>
@@ -146,7 +183,7 @@ export function AdminAnnouncements() {
                             <Label>Mensaje</Label>
                             <Textarea placeholder="Escribí acá..." className="min-h-[100px]" value={message} onChange={e => setMessage(e.target.value)} />
                         </div>
-                        
+
                         <div className="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200">
                             <div className="flex flex-col">
                                 <Label className="text-slate-700 font-bold text-xs">Pop-up Bloqueante</Label>
@@ -192,11 +229,11 @@ export function AdminAnnouncements() {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-1">
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 disabled:opacity-50" disabled>
-                                                    <Edit className="h-4 w-4 text-slate-400"/>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-blue-50" onClick={() => openEdit(item)}>
+                                                    <Edit className="h-4 w-4 text-slate-400 hover:text-blue-500" />
                                                 </Button>
                                                 <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-red-50" onClick={() => handleDelete(item.id)}>
-                                                    <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500"/>
+                                                    <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
                                                 </Button>
                                             </div>
                                         </TableCell>
@@ -214,6 +251,51 @@ export function AdminAnnouncements() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* ✅ MODAL DE EDICIÓN */}
+            <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Edit className="h-5 w-5 text-blue-600" /> Editar Comunicado
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-1">
+                            <Label>Título</Label>
+                            <Input value={editTitle} onChange={e => setEditTitle(e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                            <Label>Nivel de Importancia</Label>
+                            <Select value={editPriority} onValueChange={setEditPriority}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="normal">🔵 Normal (Informativo)</SelectItem>
+                                    <SelectItem value="high">🟠 Importante (Atención)</SelectItem>
+                                    <SelectItem value="critical">🔴 Urgente (Crítico)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-1">
+                            <Label>Mensaje</Label>
+                            <Textarea className="min-h-[100px]" value={editMessage} onChange={e => setEditMessage(e.target.value)} />
+                        </div>
+                        <div className="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200">
+                            <div className="flex flex-col">
+                                <Label className="text-slate-700 font-bold text-xs">Pop-up Bloqueante</Label>
+                                <span className="text-[10px] text-slate-500">¿Interrumpe la pantalla?</span>
+                            </div>
+                            <Switch checked={editIsBlocking} onCheckedChange={setEditIsBlocking} />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingItem(null)}>Cancelar</Button>
+                        <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleUpdate} disabled={!editTitle || !editMessage || isSaving}>
+                            {isSaving ? "Guardando..." : "Guardar Cambios"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

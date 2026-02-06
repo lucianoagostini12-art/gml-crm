@@ -359,13 +359,14 @@ export function OpsHistory() {
         return events.filter(e => {
             const matchUser = selectedOperator === 'all' || e.user.name === selectedOperator
             const term = searchTerm.toLowerCase()
+            // ✅ FIX: Validar que cada propiedad exista antes de llamar toLowerCase/includes
             const matchSearch = searchTerm === '' ||
-                e.title?.toLowerCase().includes(term) ||
-                e.actionLabel?.toLowerCase().includes(term) ||
-                e.user.name.toLowerCase().includes(term) ||
-                e.clientInfo?.name.toLowerCase().includes(term) ||
-                e.clientInfo?.dni.includes(term) ||
-                e.context?.toLowerCase().includes(term)
+                (e.title && e.title.toLowerCase().includes(term)) ||
+                (e.actionLabel && e.actionLabel.toLowerCase().includes(term)) ||
+                (e.user.name && e.user.name.toLowerCase().includes(term)) ||
+                (e.clientInfo?.name && e.clientInfo.name.toLowerCase().includes(term)) ||
+                (e.clientInfo?.dni && e.clientInfo.dni.includes(term)) ||
+                (e.context && e.context.toLowerCase().includes(term))
             return matchUser && matchSearch
         })
     }, [events, selectedOperator, searchTerm])

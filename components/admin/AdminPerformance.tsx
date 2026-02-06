@@ -18,10 +18,14 @@ import {
   Medal,
   Timer,
   CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  CalendarDays,
 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 
 // --- TIPOS Y UTILIDADES ---
 type PerformanceMetrics = {
@@ -254,6 +258,10 @@ export function AdminPerformance() {
   const [drillWeekIdx, setDrillWeekIdx] = useState<0 | 1 | 2 | 3 | 4 | 5>(1)
   const [drillTab, setDrillTab] = useState<'altas' | 'pass'>('altas')
   const [drillMode, setDrillMode] = useState<'ventas' | 'cumplidas'>('ventas')
+
+  // ✅ Modal de Descarga de Reportes
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false)
+  const [selectedSellersDownload, setSelectedSellersDownload] = useState<string[]>([])
 
   const openDrill = (
     sellerName: string,
@@ -715,6 +723,96 @@ export function AdminPerformance() {
     return <Badge className="bg-red-50 text-red-700 border-0">🐢 En Riesgo</Badge>
   }
 
+  // ✅ FUNCIÓN DE DESCARGA DE REPORTES
+  const handleDownloadReport = () => {
+    const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    const monthLabel = months[parseInt(selectedMonth, 10)]
+    const sellerLabel = activeSeller ? activeSeller.full_name : "Todo el Equipo"
+    const filename = `Reporte_Performance_${monthLabel}_${selectedYear}_${sellerLabel}`.replace(/\s/g, "_")
+
+    const reportRows: string[] = []
+
+    // === ENCABEZADO ===
+    reportRows.push("=" + "=".repeat(60))
+    reportRows.push("REPORTE DE RENDIMIENTO - PANEL DE PERFORMANCE")
+    reportRows.push("=" + "=".repeat(60))
+    reportRows.push("")
+    reportRows.push(`Período: ${monthLabel} ${selectedYear}`)
+    reportRows.push(`Vendedor/Equipo: ${sellerLabel}`)
+    reportRows.push(`Generado: ${new Date().toLocaleString("es-AR")}`)
+    reportRows.push("")
+
+    // === MÉTRICAS PRINCIPALES ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("MÉTRICAS PRINCIPALES")
+    reportRows.push("-".repeat(40))
+    reportRows.push(`Total Datos del Mes: ${currentStats.totalLeads}`)
+    reportRows.push(`Ventas (ALTAS): ${currentStats.totalSales} capitas`)
+    reportRows.push(`Ventas (PASS): ${currentStats.salesPass} registros`)
+    reportRows.push(`Cumplidas (ALTAS): ${currentStats.totalCompleted} capitas`)
+    reportRows.push(`Cumplidas (PASS): ${currentStats.completedPass} registros`)
+    reportRows.push("")
+
+    // === RATIOS ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("RATIOS DE EFICIENCIA")
+    reportRows.push("-".repeat(40))
+    reportRows.push(`Conversión: ${currentStats.conversionRate}%`)
+    reportRows.push(`Efectividad (Cumplidas/Ventas): ${efectividadGlobal}%`)
+    reportRows.push(`Cotizaciones por Venta: ${currentStats.quotesPerSale}`)
+    reportRows.push(`Leads por Venta: ${currentStats.leadsPerSale}`)
+    reportRows.push(`Ticket Promedio: $${Math.round(currentStats.averageTicket).toLocaleString()}`)
+    reportRows.push(`Velocidad de Cierre: ${currentStats.avgDaysToClose} días`)
+    reportRows.push("")
+
+    // === ORIGEN DE LEADS ===
+    if (originStats.length > 0) {
+      reportRows.push("-".repeat(40))
+      reportRows.push("ANÁLISIS POR ORIGEN")
+      reportRows.push("-".repeat(40))
+      reportRows.push("Origen,Asignados,Vendidos,Conversión%")
+      for (const stat of originStats.slice(0, 10)) {
+        reportRows.push(`${stat.source},${stat.assigned},${stat.sold},${Math.round(stat.conversion)}%`)
+      }
+      reportRows.push("")
+    }
+
+    // === MATRIZ SEMANAL ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("MATRIZ SEMANAL GLOBAL")
+    reportRows.push("-".repeat(40))
+    reportRows.push("Vendedor,S1,S2,S3,S4,S5,Total ALTAS,PASS")
+    for (const seller of globalMatrix.slice(0, 15)) {
+      const w = seller.weekly
+      const wp = seller.weeklyPass
+      const totalAltas = (w?.w1 || 0) + (w?.w2 || 0) + (w?.w3 || 0) + (w?.w4 || 0) + (w?.w5 || 0)
+      const totalPass = (wp?.w1 || 0) + (wp?.w2 || 0) + (wp?.w3 || 0) + (wp?.w4 || 0) + (wp?.w5 || 0)
+      reportRows.push(`${seller.full_name || "Desconocido"},${w?.w1 || 0},${w?.w2 || 0},${w?.w3 || 0},${w?.w4 || 0},${w?.w5 || 0},${totalAltas},${totalPass}`)
+    }
+    reportRows.push("")
+
+    // === TOTALES DE EQUIPO ===
+    const totalAltasEquipo = (weeklyTotals.w1 || 0) + (weeklyTotals.w2 || 0) + (weeklyTotals.w3 || 0) + (weeklyTotals.w4 || 0) + (weeklyTotals.w5 || 0)
+    const totalPassEquipo = (weeklyPassTotals.w1 || 0) + (weeklyPassTotals.w2 || 0) + (weeklyPassTotals.w3 || 0) + (weeklyPassTotals.w4 || 0) + (weeklyPassTotals.w5 || 0)
+    reportRows.push(`TOTAL EQUIPO,${weeklyTotals.w1},${weeklyTotals.w2},${weeklyTotals.w3},${weeklyTotals.w4},${weeklyTotals.w5},${totalAltasEquipo},${totalPassEquipo}`)
+    reportRows.push("")
+    reportRows.push("=" + "=".repeat(60))
+
+    // Crear y descargar el archivo
+    const content = reportRows.join("\n")
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${filename}.txt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    setDownloadModalOpen(false)
+  }
+
   if (loading)
     return <div className="p-10 text-center text-slate-400 animate-pulse">Analizando rendimiento...</div>
 
@@ -735,6 +833,16 @@ export function AdminPerformance() {
         </div>
 
         <div className="flex flex-wrap gap-2 items-center">
+          <Button
+            variant="outline"
+            className="h-10 border-indigo-200 text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 font-bold gap-2 shadow-sm"
+            onClick={() => setDownloadModalOpen(true)}
+          >
+            <Download size={16} /> Descargar Reporte
+          </Button>
+
+          <div className="h-8 w-[1px] bg-slate-200 mx-2 hidden md:block"></div>
+
           <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
             <SelectTrigger className="w-[200px] font-bold">
               <SelectValue placeholder="Seleccionar Vendedora" />
@@ -1291,6 +1399,113 @@ export function AdminPerformance() {
               </TabsContent>
             </Tabs>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ✅ MODAL DE DESCARGA DE REPORTES CON SELECCIÓN MÚLTIPLE */}
+      <Dialog open={downloadModalOpen} onOpenChange={(open) => {
+        setDownloadModalOpen(open)
+        if (!open) setSelectedSellersDownload([])
+      }}>
+        <DialogContent className="sm:max-w-[550px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
+              Descargar Reportes de Rendimiento
+            </DialogTitle>
+            <DialogDescription>
+              Seleccioná las vendedoras para generar reportes individuales, o Global para un único reporte.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <CalendarDays className="h-4 w-4 text-indigo-500" />
+                Período: <span className="text-indigo-600">{["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][parseInt(selectedMonth, 10)]} {selectedYear}</span>
+              </div>
+            </div>
+
+            {/* ✅ SELECTOR DE VENDEDORAS */}
+            <div>
+              <label className="text-xs font-bold text-slate-600 mb-2 block">
+                <Users className="inline h-3 w-3 mr-1" />
+                Seleccionar Vendedoras
+              </label>
+              <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto p-2 border border-slate-200 rounded-lg bg-white">
+                {/* Opción Global */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedSellersDownload(["global"])}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all ${selectedSellersDownload.includes("global")
+                      ? "bg-indigo-600 text-white shadow-md ring-2 ring-indigo-300"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                >
+                  🏢 Global (Todo)
+                </button>
+
+                {/* Vendedoras individuales */}
+                {sellers.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      const name = s.full_name || s.email
+                      if (selectedSellersDownload.includes("global")) {
+                        setSelectedSellersDownload([name])
+                      } else if (selectedSellersDownload.includes(name)) {
+                        setSelectedSellersDownload(prev => prev.filter(x => x !== name))
+                      } else {
+                        setSelectedSellersDownload(prev => [...prev, name])
+                      }
+                    }}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all ${selectedSellersDownload.includes(s.full_name || s.email)
+                        ? "bg-purple-600 text-white shadow-md ring-2 ring-purple-300"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                  >
+                    {s.full_name || s.email}
+                  </button>
+                ))}
+              </div>
+
+              {selectedSellersDownload.length > 0 && !selectedSellersDownload.includes("global") && (
+                <p className="text-xs text-purple-600 mt-2 font-medium">
+                  📁 Se descargarán {selectedSellersDownload.length} archivo(s) individual(es)
+                </p>
+              )}
+              {selectedSellersDownload.includes("global") && (
+                <p className="text-xs text-indigo-600 mt-2 font-medium">
+                  📁 Se descargará 1 archivo global
+                </p>
+              )}
+            </div>
+
+            <div className="text-xs text-slate-500 leading-relaxed">
+              <p className="mb-2">📊 <b>Cada reporte incluye:</b></p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>Métricas principales (ventas, cumplidas, pass)</li>
+                <li>Ratios de eficiencia</li>
+                <li>Análisis por origen, Matriz semanal</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDownloadModalOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={handleDownloadReport}
+              disabled={selectedSellersDownload.length === 0}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {selectedSellersDownload.includes("global")
+                ? "Descargar Global"
+                : `Descargar ${selectedSellersDownload.length} Reporte(s)`
+              }
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

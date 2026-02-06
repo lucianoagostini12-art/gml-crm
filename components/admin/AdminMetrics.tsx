@@ -62,6 +62,16 @@ type AgentPulse = {
   lastSaleDate: Date | null
   businessDays: number // Días hábiles sin vender
   status: 'green' | 'yellow' | 'red' | 'gray'
+  // ✅ Info de la última operación para drilldown
+  lastSaleLead?: {
+    id: string
+    name?: string
+    prepaga?: string
+    plan?: string
+    source?: string
+    cuit?: string
+    status?: string
+  } | null
 }
 
 const AR_TZ = "America/Argentina/Buenos_Aires"
@@ -262,6 +272,13 @@ export function AdminMetrics() {
   const [downloadMonth, setDownloadMonth] = useState(String(now.getMonth() + 1))
   const [downloadYear, setDownloadYear] = useState(String(now.getFullYear()))
 
+  // ✅ Modal drilldown del semáforo
+  const [pulseDrillOpen, setPulseDrillOpen] = useState(false)
+  const [pulseDrillAgent, setPulseDrillAgent] = useState<AgentPulse | null>(null)
+
+  // ✅ Selección múltiple de vendedoras para descarga
+  const [selectedAgentsDownload, setSelectedAgentsDownload] = useState<string[]>([])
+
   // 1. CARGA DE AGENTES (Vendedores y Gestores)
   useEffect(() => {
     const loadAgents = async () => {
@@ -375,21 +392,41 @@ export function AdminMetrics() {
     const prevPeriods = periodsBetween(prevStart, prevEnd)
 
     // B. QUERIES
+    // Query principal por created_at
     let leadsQuery = supabase.from("leads").select("*").gte("created_at", currentStart.toISOString()).lte("created_at", currentEnd.toISOString())
     let prevLeadsQuery = supabase.from("leads").select("status, price, quoted_price").gte("created_at", prevStart.toISOString()).lte("created_at", prevEnd.toISOString())
     let historyQuery = supabase.from("lead_status_history").select("*").gte("changed_at", currentStart.toISOString()).lte("changed_at", currentEnd.toISOString())
+
+    // ✅ FALLBACK: Query adicional para leads históricos por fecha_ingreso
+    let leadsByFechaIngresoQuery = supabase
+      .from("leads")
+      .select("*")
+      .not("fecha_ingreso", "is", null)
+      .gte("fecha_ingreso", toISODate(currentStart))
+      .lte("fecha_ingreso", toISODate(currentEnd))
 
     if (agent !== "global") {
       leadsQuery = leadsQuery.eq("agent_name", agent)
       prevLeadsQuery = prevLeadsQuery.eq("agent_name", agent)
       historyQuery = historyQuery.eq("agent_name", agent)
+      leadsByFechaIngresoQuery = leadsByFechaIngresoQuery.eq("agent_name", agent)
     }
 
-    const [resLeads, resPrev, resHistory] = await Promise.all([leadsQuery, prevLeadsQuery, historyQuery])
+    const [resLeads, resPrev, resHistory, resFechaIngreso] = await Promise.all([leadsQuery, prevLeadsQuery, historyQuery, leadsByFechaIngresoQuery])
 
-    const leads = (resLeads.data || []) as Lead[]
+    // Combinar leads de created_at + fecha_ingreso sin duplicados
+    const leadsMap = new Map<string, Lead>()
+    for (const l of (resLeads.data || []) as Lead[]) {
+      leadsMap.set(l.id, l)
+    }
+    for (const l of (resFechaIngreso.data || []) as Lead[]) {
+      if (!leadsMap.has(l.id)) {
+        leadsMap.set(l.id, l)
+      }
+    }
+    const leads = Array.from(leadsMap.values())
 
-    setExportLeads(resLeads.data || [])
+    setExportLeads(leads)
     const prevLeads = (resPrev.data || []) as any[]
     const events = (resHistory.data || []) as StatusEvent[]
 
@@ -443,68 +480,131 @@ export function AdminMetrics() {
     } catch { }
 
 
+
     // --- 🚦 CÁLCULO DE SEMÁFORO (TEAM PULSE) ---
-    // ✅ CORREGIDO: Lee de lead_status_history donde to_status = 'ingresado'
-    // Esto es donde KanbanBoard registra el momento exacto del cierre de venta
-    let lastSaleByAgent = new Map<string, Date>()
+    // ✅ CORREGIDO: Combina AMBAS fuentes:
+    //    1. lead_status_history donde to_status = 'ingresado' (ventas registradas por flujo normal)
+    //    2. leads en SALE_STATUSES (ventas cargadas manualmente a OPS)
+    // Usa el MAX de ambas fechas por agente
+
+    // Map: normKey(agentName) -> { date: Date, lead: info }
+    type SaleInfo = { date: Date, lead: { id: string, name?: string, prepaga?: string, plan?: string, source?: string, cuit?: string, status?: string } | null }
+    const lastSaleByAgent = new Map<string, SaleInfo>()
 
     try {
-      // ✅ Buscar en lead_status_history donde el lead pasó a 'ingresado'
-      const { data: historyData, error: histErr } = await supabase
+      // ✅ FUENTE 1: lead_status_history (eventos de ingresado)
+      const { data: historyData } = await supabase
         .from("lead_status_history")
-        .select("agent_name, changed_at")
+        .select("lead_id, agent_name, changed_at")
         .eq("to_status", "ingresado")
         .order("changed_at", { ascending: false })
         .limit(5000)
 
-      if (!histErr && historyData) {
-        // Tomamos el MAX por agente (última venta de cada vendedor)
-        const tmp = new Map<string, Date>()
-        for (const row of historyData as any[]) {
-          const name = String(row?.agent_name || "").trim()
-          const d = safeDate(row?.changed_at || null)
-          if (!name || !d) continue
-          const key = normKey(name)
-          const prev = tmp.get(key)
-          if (!prev || d.getTime() > prev.getTime()) tmp.set(key, d)
-        }
-        lastSaleByAgent = tmp
-      } else {
-        // Fallback a leads si falla lead_status_history
-        const { data: allSales } = await supabase
+      // Obtener info de los leads mencionados en el historial (incluyendo campos de fecha)
+      const histLeadIds = new Set((historyData || []).map((h: any) => h.lead_id))
+      let histLeadInfoMap = new Map<string, any>()
+      if (histLeadIds.size > 0) {
+        const { data: histLeadsInfo } = await supabase
           .from("leads")
-          .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
-          .in("status", SALE_STATUSES)
+          .select("id, name, prepaga, quoted_prepaga, plan, quoted_plan, source, cuit, status, fecha_ingreso, sold_at, activation_date, fecha_alta, created_at")
+          .in("id", Array.from(histLeadIds))
 
-        for (const s of (allSales || []) as any[]) {
-          const name = String(s?.agent_name || "").trim()
-          const d = safeDate(salesDateOf(s) || null)
-          if (!name || !d) continue
-          const key = normKey(name)
-          const prev = lastSaleByAgent.get(key)
-          if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
+        for (const l of (histLeadsInfo || [])) {
+          histLeadInfoMap.set(l.id, l)
+        }
+      }
+
+      for (const row of (historyData || []) as any[]) {
+        const name = String(row?.agent_name || "").trim()
+        if (!name) continue
+        const key = normKey(name)
+        const prev = lastSaleByAgent.get(key)
+        const leadInfo = histLeadInfoMap.get(row.lead_id)
+
+        // ✅ FIX: Priorizar fecha_ingreso del lead sobre changed_at del historial
+        // fecha_ingreso es la fecha comercial real, changed_at es cuando el sistema registró el cambio
+        const realDate = leadInfo ? safeDate(salesDateOf(leadInfo)) : safeDate(row?.changed_at)
+        if (!realDate) continue
+
+        if (!prev || realDate.getTime() > prev.date.getTime()) {
+          lastSaleByAgent.set(key, {
+            date: realDate,
+            lead: leadInfo ? {
+              id: leadInfo.id,
+              name: leadInfo.name,
+              prepaga: leadInfo.prepaga || leadInfo.quoted_prepaga,
+              plan: leadInfo.plan || leadInfo.quoted_plan,
+              source: leadInfo.source,
+              cuit: leadInfo.cuit,
+              status: leadInfo.status
+            } : null
+          })
+        }
+      }
+
+      // ✅ FUENTE 2: leads en OPS (ventas cargadas manualmente sin historial)
+      const { data: allOpsLeads } = await supabase
+        .from("leads")
+        .select("id, agent_name, name, prepaga, quoted_prepaga, plan, quoted_plan, source, cuit, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
+        .in("status", SALE_STATUSES)
+
+      for (const l of (allOpsLeads || []) as any[]) {
+        const agentName = String(l?.agent_name || "").trim()
+        const d = safeDate(salesDateOf(l) || null)
+        if (!agentName || !d) continue
+        const key = normKey(agentName)
+        const prev = lastSaleByAgent.get(key)
+
+        // Solo actualizar si es más reciente que lo que tenemos
+        if (!prev || d.getTime() > prev.date.getTime()) {
+          lastSaleByAgent.set(key, {
+            date: d,
+            lead: {
+              id: l.id,
+              name: l.name,
+              prepaga: l.prepaga || l.quoted_prepaga,
+              plan: l.plan || l.quoted_plan,
+              source: l.source,
+              cuit: l.cuit,
+              status: l.status
+            }
+          })
         }
       }
     } catch {
-      // Fallback seguro a leads
+      // Fallback: solo leads en OPS
       const { data: allSales } = await supabase
         .from("leads")
-        .select("agent_name, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
+        .select("id, agent_name, name, prepaga, quoted_prepaga, plan, quoted_plan, source, cuit, status, sold_at, fecha_ingreso, activation_date, fecha_alta, created_at")
         .in("status", SALE_STATUSES)
 
-      for (const s of (allSales || []) as any[]) {
-        const name = String(s?.agent_name || "").trim()
-        const d = safeDate(salesDateOf(s) || null)
-        if (!name || !d) continue
-        const key = normKey(name)
+      for (const l of (allSales || []) as any[]) {
+        const agentName = String(l?.agent_name || "").trim()
+        const d = safeDate(salesDateOf(l) || null)
+        if (!agentName || !d) continue
+        const key = normKey(agentName)
         const prev = lastSaleByAgent.get(key)
-        if (!prev || d.getTime() > prev.getTime()) lastSaleByAgent.set(key, d)
+        if (!prev || d.getTime() > prev.date.getTime()) {
+          lastSaleByAgent.set(key, {
+            date: d,
+            lead: {
+              id: l.id,
+              name: l.name,
+              prepaga: l.prepaga || l.quoted_prepaga,
+              plan: l.plan || l.quoted_plan,
+              source: l.source,
+              cuit: l.cuit,
+              status: l.status
+            }
+          })
+        }
       }
     }
 
     if (agentsList.length > 0) {
       const pulseMap: AgentPulse[] = agentsList.map(a => {
-        const lastDate = lastSaleByAgent.get(normKey(a.name)) || null
+        const saleInfo = lastSaleByAgent.get(normKey(a.name))
+        const lastDate = saleInfo?.date || null
 
         let businessDays = 999
         if (lastDate) {
@@ -518,7 +618,14 @@ export function AdminMetrics() {
         else if (businessDays >= 3) status = 'red'     // 3 o más
         if (businessDays === 999) status = 'gray'
 
-        return { name: a.name, avatar: a.avatar, lastSaleDate: lastDate, businessDays, status }
+        return {
+          name: a.name,
+          avatar: a.avatar,
+          lastSaleDate: lastDate,
+          businessDays,
+          status,
+          lastSaleLead: saleInfo?.lead || null
+        }
       })
       setTeamPulse(pulseMap.sort((a, b) => a.businessDays - b.businessDays))
     }
@@ -719,11 +826,69 @@ export function AdminMetrics() {
     if (stagnantPercent > 30) coachAdvice = "⚠️ ALERTA STOCK: Muchos leads dormidos (>48hs). Recomendación: Día de limpieza de base."
     if (totalLeads > 0 && salesCount === 0) coachAdvice = "📉 FOCO: Hay leads pero no hay cierres. Revisar guión, calidad de base y seguimiento."
 
+    // ✅ EMBUDO REAL - Corregido para contar asignaciones reales (como AdminLeadFactory)
+    // Consultar asignaciones (from_status = 'sin_asignar' -> to_status = 'nuevo')
+    let assignmentCount = 0
+    try {
+      let assignQ = supabase
+        .from("lead_status_history")
+        .select("id", { count: 'exact' })
+        .eq("from_status", "sin_asignar")
+        .eq("to_status", "nuevo")
+        .gte("changed_at", currentStart.toISOString())
+        .lte("changed_at", currentEnd.toISOString())
+
+      if (agent !== "global") assignQ = assignQ.eq("agent_name", agent)
+
+      const { count } = await assignQ
+      if (count !== null) assignmentCount = count
+    } catch { }
+
+    // Consultar eventos de cotización (to_status contiene 'cotiz')
+    let quoteCount = 0
+    try {
+      let quoteQ = supabase
+        .from("lead_status_history")
+        .select("lead_id")
+        .ilike("to_status", "%cotiz%")
+        .gte("changed_at", currentStart.toISOString())
+        .lte("changed_at", currentEnd.toISOString())
+
+      if (agent !== "global") quoteQ = quoteQ.eq("agent_name", agent)
+
+      const { data: quoteData } = await quoteQ
+      // Contar leads únicos que pasaron por cotización
+      if (quoteData) {
+        const uniqueQuoteLeads = new Set((quoteData as { lead_id: string }[]).map(e => e.lead_id))
+        quoteCount = uniqueQuoteLeads.size
+      }
+    } catch { }
+
+    // Consultar cierres reales (to_status = 'ingresado')
+    let closingCount = 0
+    try {
+      let closeQ = supabase
+        .from("lead_status_history")
+        .select("lead_id")
+        .eq("to_status", "ingresado")
+        .gte("changed_at", currentStart.toISOString())
+        .lte("changed_at", currentEnd.toISOString())
+
+      if (agent !== "global") closeQ = closeQ.eq("agent_name", agent)
+
+      const { data: closeData } = await closeQ
+      // Contar leads únicos que cerraron
+      if (closeData) {
+        const uniqueCloseLeads = new Set((closeData as { lead_id: string }[]).map(e => e.lead_id))
+        closingCount = uniqueCloseLeads.size
+      }
+    } catch { }
+
     const funnelData = [
       { name: "Total Datos", value: totalLeads, fill: "#94a3b8" },
-      { name: "Contactados", value: counts.contactado + counts.cotizacion + salesCount, fill: "#3b82f6" },
-      { name: "Cotizados", value: counts.cotizacion + salesCount, fill: "#8b5cf6" },
-      { name: "Cierres", value: salesCount, fill: "#10b981" },
+      { name: "Asignados", value: assignmentCount, fill: "#3b82f6" },
+      { name: "Cotizados", value: quoteCount, fill: "#8b5cf6" },
+      { name: "Cierres", value: closingCount, fill: "#10b981" },
     ]
 
     // ✅ Auditoría (Mesa de Entradas) debe reaccionar al calendario:
@@ -755,18 +920,63 @@ export function AdminMetrics() {
       { label: "RECHAZADOS", count: auditCounts.rechazado, icon: AlertOctagon, color: "text-white", bg: "bg-red-500 shadow-md", border: "border-red-600" },
     ]
 
+    // ✅ CALIDAD DE ORIGEN (REAL) - Basado en eventos históricos
+    // Datos: Leads creados en el período, agrupados por origen
+    // Ventas: De esos leads, cuántos tienen evento histórico to_status='ingresado' 
+    //         (momento en que llegaron a OPS desde KanbanBoard)
+
+    // Obtener todos los IDs de leads del período
+    const leadIds = leads.map(l => l.id)
+
+    // Buscar cuáles de esos leads tienen evento "ingresado" en el historial
+    const leadsWithSaleEvent = new Set<string>()
+
+    if (leadIds.length > 0) {
+      try {
+        // Buscar en el historial los leads que alguna vez pasaron a "ingresado"
+        const { data: saleEvents } = await supabase
+          .from("lead_status_history")
+          .select("lead_id")
+          .eq("to_status", "ingresado")
+          .in("lead_id", leadIds)
+
+        if (saleEvents) {
+          for (const e of saleEvents) {
+            leadsWithSaleEvent.add(e.lead_id)
+          }
+        }
+      } catch { }
+    }
+
+    // Contar datos y ventas por origen
     const sourceAgg = new Map<string, { datos: number; ventas: number }>()
+
     leads.forEach((l) => {
       const src = String(l.source ?? "Desconocido").trim()
       if (!sourceAgg.has(src)) sourceAgg.set(src, { datos: 0, ventas: 0 })
+
+      // Contar como dato
       sourceAgg.get(src)!.datos += 1
-      if (SALE_STATUSES.includes(norm(l.status))) sourceAgg.get(src)!.ventas += 1
+
+      // Si el lead tiene evento de "ingresado" → cuenta como venta
+      // FALLBACK: Si no tiene evento pero está en OPS actualmente → también cuenta (cargado manual)
+      const hasHistoryEvent = leadsWithSaleEvent.has(l.id)
+      const isCurrentlyInOps = SALE_STATUSES.includes(norm(l.status))
+
+      if (hasHistoryEvent || isCurrentlyInOps) {
+        sourceAgg.get(src)!.ventas += 1
+      }
     })
-    const conversionBySource = Array.from(sourceAgg.entries()).sort((a, b) => b[1].datos - a[1].datos).slice(0, 8).map(([name, v], idx) => {
-      const tasa = v.datos > 0 ? Math.round((v.ventas / v.datos) * 100) : 0
-      const palette = ["#f59e0b", "#8b5cf6", "#3b82f6", "#10b981", "#ef4444", "#64748b", "#eab308", "#22c55e"]
-      return { name, datos: v.datos, ventas: v.ventas, tasa, color: palette[idx % palette.length] }
-    })
+
+    const conversionBySource = Array.from(sourceAgg.entries())
+      .filter(([name, v]) => v.datos > 0 || v.ventas > 0)
+      .sort((a, b) => b[1].datos - a[1].datos)
+      .slice(0, 12)
+      .map(([name, v], idx) => {
+        const tasa = v.datos > 0 ? Math.round((v.ventas / v.datos) * 100) : 0
+        const palette = ["#f59e0b", "#8b5cf6", "#3b82f6", "#10b981", "#ef4444", "#64748b", "#eab308", "#22c55e", "#06b6d4", "#ec4899", "#14b8a6", "#f97316"]
+        return { name, datos: v.datos, ventas: v.ventas, tasa, color: palette[idx % palette.length] }
+      })
 
     const lossAgg = new Map<string, number>()
     leads.forEach((l) => {
@@ -815,37 +1025,144 @@ export function AdminMetrics() {
   }, [agent, dateStart, dateEnd, agentsList])
 
   const handleDownloadReport = async () => {
-    let dataToExport: any[] = exportLeads || []
-    let filename = `Reporte_AdminMetrics_${dateStart}_al_${dateEnd}_${agent}`
+    if (!metrics) return
 
-    if (downloadMode === "global") {
-      // Global: últimos 90 días (para no explotar el navegador)
-      const since = new Date()
-      since.setDate(since.getDate() - 90)
-      let q = supabase.from("leads").select("*").gte("created_at", since.toISOString())
-      if (agent !== "global") q = q.eq("agent_name", agent)
-      const { data } = await q
-      dataToExport = (data || []) as any[]
-      filename = `Reporte_AdminMetrics_Global_${agent}_ultimos_90_dias`
+    // ✅ Usar la selección del modal
+    const isGlobal = selectedAgentsDownload.includes("global") || selectedAgentsDownload.length === 0
+    const agentLabel = isGlobal ? "Global" : selectedAgentsDownload.join("_")
+    const filename = `Reporte_Metricas_${dateStart}_al_${dateEnd}_${agentLabel}`.replace(/\s/g, "_")
+
+    // ✅ GENERAR REPORTE DE MÉTRICAS (NO CLIENTES)
+    const reportRows: string[] = []
+
+    // === ENCABEZADO ===
+    reportRows.push("=" + "=".repeat(60))
+    reportRows.push("REPORTE DE MÉTRICAS - TABLERO DE COMANDO")
+    reportRows.push("=" + "=".repeat(60))
+    reportRows.push("")
+    reportRows.push(`Período: ${dateStart} al ${dateEnd}`)
+    reportRows.push(`Agente/Equipo: ${agentLabel}`)
+    reportRows.push(`Generado: ${new Date().toLocaleString("es-AR")}`)
+    reportRows.push("")
+
+    // === RESUMEN EJECUTIVO ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("RESUMEN EJECUTIVO")
+    reportRows.push("-".repeat(40))
+    reportRows.push(`Ventas Cerradas: ${metrics.sales.count}`)
+    reportRows.push(`  - Altas: ${metrics.sales.altas}`)
+    reportRows.push(`  - Pass: ${metrics.sales.pass}`)
+    reportRows.push(`  - Tendencia: ${metrics.sales.trend.dir === 'up' ? '↑' : '↓'} ${metrics.sales.trend.val}%`)
+    reportRows.push("")
+    reportRows.push(`Facturación Estimada: $${parseInt(metrics.revenue.total).toLocaleString()}`)
+    reportRows.push(`  - Neto Liquidación: $${parseInt(metrics.revenue.neto).toLocaleString()}`)
+    reportRows.push(`  - Capitas: ${metrics.revenue.capitas}`)
+    reportRows.push(`  - Tendencia: ${metrics.revenue.trend.dir === 'up' ? '↑' : '↓'} ${metrics.revenue.trend.val}%`)
+    reportRows.push("")
+    reportRows.push(`Velocidad de Gestión: ${metrics.killerMetrics.speed.value} min (${metrics.killerMetrics.speed.status})`)
+    reportRows.push(`Strike Rate: ${metrics.killerMetrics.strikeRate}%`)
+    reportRows.push("")
+
+    // === INVENTARIO ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("INVENTARIO")
+    reportRows.push("-".repeat(40))
+    reportRows.push(`Datos Nuevos: ${metrics.inventory.newLeads}`)
+    reportRows.push(`En Gestión: ${metrics.inventory.activeLeads}`)
+    reportRows.push(`Ventas: ${metrics.inventory.sales}`)
+    reportRows.push(`Objetivo: ${metrics.inventory.goal}`)
+    reportRows.push("")
+
+    // === EMBUDO REAL ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("EMBUDO REAL")
+    reportRows.push("-".repeat(40))
+    for (const stage of metrics.funnelData) {
+      reportRows.push(`${stage.name}: ${stage.value}`)
+    }
+    reportRows.push("")
+
+    // === CALIDAD DE ORIGEN ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("CALIDAD DE ORIGEN (CONVERSIÓN)")
+    reportRows.push("-".repeat(40))
+    reportRows.push("Origen,Datos,Ventas,Tasa")
+    for (const source of metrics.conversionBySource) {
+      reportRows.push(`${source.name},${source.datos},${source.ventas},${source.tasa}%`)
+    }
+    reportRows.push("")
+
+    // === VENTAS POR PREPAGA ===
+    if (metrics.salesByPrepaga?.length > 0) {
+      reportRows.push("-".repeat(40))
+      reportRows.push("VENTAS POR PREPAGA")
+      reportRows.push("-".repeat(40))
+      reportRows.push("Prepaga,Ventas,Cumplidas,%Cumplimiento")
+      for (const prep of metrics.salesByPrepaga) {
+        reportRows.push(`${prep.name},${prep.ventas},${prep.cumplidas},${prep.pct}%`)
+      }
+      reportRows.push("")
     }
 
-    if (downloadMode === "custom") {
-      const m = String(downloadMonth).padStart(2, "0")
-      const start = `${downloadYear}-${m}-01`
-      const endD = new Date(Number(downloadYear), Number(downloadMonth), 1) // next month
-      const end = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, "0")}-01`
-
-      let q = supabase.from("leads").select("*")
-        .not("fecha_ingreso", "is", null)
-        .gte("fecha_ingreso", start)
-        .lt("fecha_ingreso", end)
-      if (agent !== "global") q = q.eq("agent_name", agent)
-      const { data } = await q
-      dataToExport = (data || []) as any[]
-      filename = `Reporte_AdminMetrics_${downloadYear}_${m}_${agent}`
+    // === MOTIVOS DE PÉRDIDA ===
+    if (metrics.lossReasons?.length > 0 && metrics.lossReasons[0].name !== "Sin Datos") {
+      reportRows.push("-".repeat(40))
+      reportRows.push("MOTIVOS DE PÉRDIDA")
+      reportRows.push("-".repeat(40))
+      reportRows.push("Motivo,Cantidad")
+      for (const reason of metrics.lossReasons) {
+        reportRows.push(`${reason.name},${reason.value}`)
+      }
+      reportRows.push("")
     }
 
-    exportToCSV(dataToExport, filename)
+    // === AUDITORÍA (MESA DE ENTRADAS) ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("AUDITORÍA - MESA DE ENTRADAS")
+    reportRows.push("-".repeat(40))
+    for (const step of metrics.auditSteps) {
+      reportRows.push(`${step.label}: ${step.count}`)
+    }
+    reportRows.push("")
+
+    // === PACING ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("PROYECCIÓN DEL MES")
+    reportRows.push("-".repeat(40))
+    reportRows.push(`Tiempo Transcurrido: ${metrics.pacing.time}%`)
+    reportRows.push(`Cumplimiento Objetivo: ${metrics.pacing.goal}%`)
+    reportRows.push(`Estado: ${metrics.pacing.status === 'ontrack' ? 'EN CAMINO ✓' : 'ATRASADO ⚠'}`)
+    reportRows.push("")
+
+    // === STOCK PODRIDO ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("SALUD DE CARTERA")
+    reportRows.push("-".repeat(40))
+    reportRows.push(`Leads Estancados (>48hs): ${metrics.stagnation.count}`)
+    reportRows.push(`Porcentaje: ${metrics.stagnation.percent}%`)
+    reportRows.push(`Estado: ${metrics.stagnation.status === 'critical' ? 'CRÍTICO ⚠' : 'SALUDABLE ✓'}`)
+    reportRows.push("")
+
+    // === DIAGNÓSTICO ===
+    reportRows.push("-".repeat(40))
+    reportRows.push("DIAGNÓSTICO IA")
+    reportRows.push("-".repeat(40))
+    reportRows.push(metrics.advanced.coach)
+    reportRows.push("")
+    reportRows.push("=" + "=".repeat(60))
+
+    // Crear y descargar el archivo
+    const content = reportRows.join("\n")
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${filename}.txt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
     setDownloadModalOpen(false)
   }
 
@@ -920,61 +1237,111 @@ export function AdminMetrics() {
         </div>
       </div>
 
-      {/* --- MODAL DESCARGA (misma linea OpsMetrics) --- */}
-      <Dialog open={downloadModalOpen} onOpenChange={setDownloadModalOpen}>
-        <DialogContent className="sm:max-w-[520px]">
+      {/* --- MODAL DESCARGA MÉTRICAS CON SELECCIÓN MÚLTIPLE --- */}
+      <Dialog open={downloadModalOpen} onOpenChange={(open) => {
+        setDownloadModalOpen(open)
+        if (!open) setSelectedAgentsDownload([])
+      }}>
+        <DialogContent className="sm:max-w-[550px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5 text-indigo-600" /> Descargar Reporte</DialogTitle>
-            <DialogDescription>Exporta un CSV de leads para auditoría y control.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
+              Descargar Reportes de Métricas
+            </DialogTitle>
+            <DialogDescription>
+              Seleccioná las vendedoras para generar reportes individuales, o Global para un único reporte.
+            </DialogDescription>
           </DialogHeader>
 
-          <Tabs value={downloadMode} onValueChange={(v) => setDownloadMode(v as any)} className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="current">Actual</TabsTrigger>
-              <TabsTrigger value="global">Global</TabsTrigger>
-              <TabsTrigger value="custom">Mes/Año</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="current" className="mt-4 text-sm text-slate-600">
-              Exporta lo que está cargado para el rango actual (<b>{dateStart}</b> a <b>{dateEnd}</b>).
-            </TabsContent>
-
-            <TabsContent value="global" className="mt-4 text-sm text-slate-600">
-              Exporta últimos <b>90 días</b> (para evitar archivos gigantes).
-            </TabsContent>
-
-            <TabsContent value="custom" className="mt-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-500">Mes</label>
-                  <Select value={downloadMonth} onValueChange={setDownloadMonth}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                        <SelectItem key={m} value={String(m)}>{String(m).padStart(2, "0")}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-500">Año</label>
-                  <Select value={downloadYear} onValueChange={setDownloadYear}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {[new Date().getFullYear(), new Date().getFullYear() - 1].map((y) => (
-                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+          <div className="py-4 space-y-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <CalendarDays className="h-4 w-4 text-indigo-500" />
+                Período: <span className="text-indigo-600">{dateStart}</span> al <span className="text-indigo-600">{dateEnd}</span>
               </div>
-            </TabsContent>
-          </Tabs>
+            </div>
 
-          <DialogFooter className="mt-2">
+            {/* ✅ SELECTOR DE VENDEDORAS */}
+            <div>
+              <Label className="text-xs font-bold text-slate-600 mb-2 block">
+                <Users className="inline h-3 w-3 mr-1" />
+                Seleccionar Vendedoras
+              </Label>
+              <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto p-2 border border-slate-200 rounded-lg bg-white">
+                {/* Opción Global */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedAgentsDownload(["global"])}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all ${selectedAgentsDownload.includes("global")
+                    ? "bg-indigo-600 text-white shadow-md ring-2 ring-indigo-300"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                >
+                  🏢 Global (Todo)
+                </button>
+
+                {/* Vendedoras individuales */}
+                {agentsList.map((a) => (
+                  <button
+                    key={a.name}
+                    type="button"
+                    onClick={() => {
+                      if (selectedAgentsDownload.includes("global")) {
+                        // Si global está seleccionado, cambiar a individual
+                        setSelectedAgentsDownload([a.name])
+                      } else if (selectedAgentsDownload.includes(a.name)) {
+                        // Deseleccionar
+                        setSelectedAgentsDownload(prev => prev.filter(x => x !== a.name))
+                      } else {
+                        // Agregar a la selección
+                        setSelectedAgentsDownload(prev => [...prev, a.name])
+                      }
+                    }}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all ${selectedAgentsDownload.includes(a.name)
+                      ? "bg-purple-600 text-white shadow-md ring-2 ring-purple-300"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                  >
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+
+              {selectedAgentsDownload.length > 0 && !selectedAgentsDownload.includes("global") && (
+                <p className="text-xs text-purple-600 mt-2 font-medium">
+                  📁 Se descargarán {selectedAgentsDownload.length} archivo(s) individual(es)
+                </p>
+              )}
+              {selectedAgentsDownload.includes("global") && (
+                <p className="text-xs text-indigo-600 mt-2 font-medium">
+                  📁 Se descargará 1 archivo global
+                </p>
+              )}
+            </div>
+
+            <div className="text-xs text-slate-500 leading-relaxed">
+              <p className="mb-2">📊 <b>Cada reporte incluye:</b></p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>Resumen ejecutivo (ventas, facturación, velocidad)</li>
+                <li>Embudo real, Calidad de origen</li>
+                <li>Ventas por prepaga, Auditoría</li>
+                <li>Proyección y Diagnóstico IA</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
             <Button variant="outline" onClick={() => setDownloadModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleDownloadReport} className="bg-indigo-600 hover:bg-indigo-700">
-              <Download className="h-4 w-4 mr-2" /> Descargar
+            <Button
+              onClick={handleDownloadReport}
+              disabled={selectedAgentsDownload.length === 0}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {selectedAgentsDownload.includes("global")
+                ? "Descargar Global"
+                : `Descargar ${selectedAgentsDownload.length} Reporte(s)`
+              }
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -999,13 +1366,20 @@ export function AdminMetrics() {
           <CardContent className="p-4 pt-6">
             <div className="flex flex-wrap gap-6 justify-center">
               {teamPulse.map((p, i) => (
-                <div key={i} className="flex flex-col items-center gap-2 group cursor-help relative">
+                <div
+                  key={i}
+                  className="flex flex-col items-center gap-2 group cursor-pointer relative"
+                  onClick={() => {
+                    setPulseDrillAgent(p)
+                    setPulseDrillOpen(true)
+                  }}
+                >
                   {/* Círculo indicador de estado */}
                   <div className={`
-                                  relative p-1 rounded-full border-4 transition-all duration-300
+                                  relative p-1 rounded-full border-4 transition-all duration-300 hover:scale-110
                                   ${p.status === 'green' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)] scale-110 z-10' :
-                      p.status === 'yellow' ? 'border-yellow-400' :
-                        p.status === 'red' ? 'border-red-500 grayscale-[0.3] hover:grayscale-0' : 'border-slate-200 grayscale opacity-50'}
+                      p.status === 'yellow' ? 'border-yellow-400 hover:shadow-[0_0_10px_rgba(250,204,21,0.4)]' :
+                        p.status === 'red' ? 'border-red-500 grayscale-[0.3] hover:grayscale-0 hover:shadow-[0_0_10px_rgba(239,68,68,0.4)]' : 'border-slate-200 grayscale opacity-50 hover:opacity-100'}
                               `}>
                     <Avatar className="h-12 w-12 border-2 border-white bg-slate-100">
                       <AvatarImage src={p.avatar} />
@@ -1037,6 +1411,8 @@ export function AdminMetrics() {
                         ? "🔥 ¡Venta HOY!"
                         : `Hace ${p.businessDays} días hábiles`
                     }
+                    <br />
+                    <span className="text-slate-400 text-[9px]">Click para ver operación</span>
                     <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
                   </div>
                 </div>
@@ -1505,6 +1881,117 @@ export function AdminMetrics() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* ✅ MODAL DRILLDOWN DEL SEMÁFORO */}
+      <Dialog open={pulseDrillOpen} onOpenChange={setPulseDrillOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <Avatar className="h-10 w-10 border-2 border-slate-100">
+                <AvatarImage src={pulseDrillAgent?.avatar} />
+                <AvatarFallback>{pulseDrillAgent?.name?.[0] || "?"}</AvatarFallback>
+              </Avatar>
+              <div>
+                <span className="text-lg font-bold">{pulseDrillAgent?.name}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${pulseDrillAgent?.status === 'green' ? 'bg-green-100 text-green-700 border-green-200' :
+                      pulseDrillAgent?.status === 'yellow' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+                        pulseDrillAgent?.status === 'red' ? 'bg-red-100 text-red-700 border-red-200' :
+                          'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                  >
+                    {pulseDrillAgent?.businessDays === 999
+                      ? "Sin ventas recientes"
+                      : pulseDrillAgent?.businessDays === 0
+                        ? "🔥 ¡Venta HOY!"
+                        : `Hace ${pulseDrillAgent?.businessDays} días hábiles`
+                    }
+                  </Badge>
+                </div>
+              </div>
+            </DialogTitle>
+            <DialogDescription>
+              Detalle de la última operación registrada.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            {pulseDrillAgent?.lastSaleLead ? (
+              <div className="space-y-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Fecha de Venta</span>
+                    <span className="font-bold text-slate-800">
+                      {pulseDrillAgent?.lastSaleDate?.toLocaleDateString("es-AR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric"
+                      })}
+                    </span>
+                  </div>
+
+                  <div className="border-t border-slate-200 pt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase">Cliente</span>
+                      <span className="font-bold text-slate-800 text-right">
+                        {pulseDrillAgent?.lastSaleLead?.name || "—"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase">CUIT</span>
+                      <span className="font-mono text-sm text-slate-700">
+                        {pulseDrillAgent?.lastSaleLead?.cuit || "—"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase">Prepaga</span>
+                      <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
+                        {pulseDrillAgent?.lastSaleLead?.prepaga || "—"}
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase">Plan</span>
+                      <span className="text-sm text-slate-700">
+                        {pulseDrillAgent?.lastSaleLead?.plan || "—"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase">Origen</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {pulseDrillAgent?.lastSaleLead?.source || "—"}
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-500 uppercase">Estado</span>
+                      <Badge className="bg-green-100 text-green-700 border-green-200">
+                        {pulseDrillAgent?.lastSaleLead?.status || "—"}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="text-4xl mb-2">🤷</div>
+                <p className="text-slate-500">No se encontró información de la última operación</p>
+                <p className="text-xs text-slate-400 mt-1">Puede que la venta no tenga historial disponible</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPulseDrillOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }

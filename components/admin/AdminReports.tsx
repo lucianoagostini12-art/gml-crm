@@ -551,7 +551,7 @@ export default function AdminReports() {
               <TableRow className="bg-slate-50 border-b border-slate-200">
                 <TableHead className="w-[50px]"></TableHead>
                 <TableHead className="font-black text-xs uppercase text-slate-500 tracking-wider">Estado Actual</TableHead>
-                <TableHead className="font-black text-xs uppercase text-slate-500 tracking-wider">Últ. Movimiento</TableHead>
+                <TableHead className="font-black text-xs uppercase text-slate-500 tracking-wider">Fechas</TableHead>
                 <TableHead className="font-black text-xs uppercase text-slate-500 tracking-wider">Cliente / Origen</TableHead>
                 <TableHead className="font-black text-xs uppercase text-slate-500 tracking-wider">Propuesta</TableHead>
                 <TableHead className="font-black text-xs uppercase text-slate-500 tracking-wider">Vendedor</TableHead>
@@ -697,11 +697,20 @@ function ReportRow({ lead, onToggleReview, onOpenReassign }: { lead: ReportLead,
         <TableCell>{getStatusBadge(lead.status)}</TableCell>
 
         <TableCell>
-          <div className="flex flex-col">
-            <span className={cn("text-xs font-bold", isForgotten ? "text-red-500" : "text-slate-700")}>
-              {format(parseISO(lead.last_update), "dd MMM, HH:mm", { locale: es })}
-            </span>
-            <span className="text-[10px] text-slate-400 font-medium">Hace {daysSinceUpdate} días</span>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-slate-400 font-medium w-[45px]">Creado:</span>
+              <span className="text-xs font-bold text-slate-600">
+                {format(parseISO(lead.created_at), "dd MMM", { locale: es })}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-slate-400 font-medium w-[45px]">Últ. mov:</span>
+              <span className={cn("text-xs font-bold", isForgotten ? "text-red-500" : "text-slate-600")}>
+                {format(parseISO(lead.last_update), "dd MMM", { locale: es })}
+              </span>
+            </div>
+            <span className="text-[9px] text-slate-400 font-medium">Hace {daysSinceUpdate} días</span>
           </div>
         </TableCell>
 

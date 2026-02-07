@@ -111,6 +111,24 @@ export function FocusModeView() {
     setLeads(newLeads)
 
     await supabase.from("leads").update({ calls: newCount, notes: newNotes, last_update: now.toISOString() }).eq("id", currentLead.id)
+
+    // ✅ Mensaje automático de primera llamada (solo leads de Sofía, dentro de ventana de 24hs)
+    if ((currentLead as any).chat_source === 'sofia_ai' && newCount === 1 && currentLead.phone) {
+      try {
+        const lastUpdate = new Date(currentLead.last_update || currentLead.created_at).getTime()
+        const hoursElapsed = (Date.now() - lastUpdate) / (1000 * 60 * 60)
+
+        if (hoursElapsed <= 24) {
+          const { sendManualWhatsAppMessage } = await import('@/app/actions/send-whatsapp')
+          const mensaje = `💬 Nuestra asesora se está intentando comunicar con vos para brindarte la información sobre tu consulta.\n\n¿Podrías indicarnos en qué momento te resulta más cómodo que te contactemos?`
+
+          await sendManualWhatsAppMessage(currentLead.phone, mensaje)
+          console.log(`✅ Mensaje de primera llamada enviado a ${currentLead.name}`)
+        }
+      } catch (err) {
+        console.error(`❌ Error enviando mensaje de primera llamada:`, err)
+      }
+    }
   }
 
   if (loading) return <div className="h-full flex items-center justify-center text-slate-500 animate-pulse">Cargando prospectos...</div>

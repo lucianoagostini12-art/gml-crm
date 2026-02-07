@@ -84,45 +84,57 @@ function generateAILabels(chat: any[], leadData?: { province?: string; locality?
     .join("\n")
     .toLowerCase()
 
-  // Detectar EDAD
-  let hasAge = false
+  // Detectar EDAD → etiqueta positiva
   const ageMatch =
     clientText.match(/\btengo\s+(\d{1,3})\b/) ||
     clientText.match(/\b(\d{1,3})\s*años\b/) ||
     clientText.match(/\bedad\s*[:=]?\s*(\d{1,3})\b/)
   if (ageMatch?.[1]) {
     const n = parseInt(ageMatch[1], 10)
-    if (!Number.isNaN(n) && n >= 0 && n <= 120) hasAge = true
+    if (!Number.isNaN(n) && n >= 0 && n <= 120) labels.push(`Edad: ${n}`)
   }
-  if (!hasAge) labels.push("Falta: Edad")
 
-  // Detectar ZONA
-  const hasZone =
-    leadData?.province ||
-    leadData?.locality ||
-    /\bsoy de\s+([a-záéíóúñ\s]{3,40})\b/.test(clientText) ||
-    /\bvivo en\s+([a-záéíóúñ\s]{3,40})\b/.test(clientText) ||
-    /\bestoy en\s+([a-záéíóúñ\s]{3,40})\b/.test(clientText) ||
-    /\bzona\s+(norte|sur|oeste|centro|capital|gba|caba|bs as|buenos aires)/i.test(clientText)
-  if (!hasZone) labels.push("Falta: Zona")
-
-  // Detectar SITUACIÓN LABORAL
-  let hasWork = !!leadData?.work
-  if (!hasWork) {
-    if (/\bjubilad/.test(clientText)) hasWork = true
-    else if (/\bmonotribut/.test(clientText)) hasWork = true
-    else if (/\bdependencia\b|\ben blanco\b|\bempleado\b|\bsueldo\b/.test(clientText)) hasWork = true
-    else if (/\bautonom/.test(clientText)) hasWork = true
+  // Detectar ZONA → etiqueta positiva
+  const zoneMatch =
+    clientText.match(/\bsoy de\s+([a-záéíóúñ\s]{3,40})\b/) ||
+    clientText.match(/\bvivo en\s+([a-záéíóúñ\s]{3,40})\b/) ||
+    clientText.match(/\bestoy en\s+([a-záéíóúñ\s]{3,40})\b/)
+  const zoneKeyword = clientText.match(/\bzona\s+(norte|sur|oeste|centro|capital|gba|caba|bs as|buenos aires)/i)
+  if (leadData?.province) {
+    labels.push(`Zona: ${leadData.province}`)
+  } else if (leadData?.locality) {
+    labels.push(`Zona: ${leadData.locality}`)
+  } else if (zoneMatch?.[1]) {
+    labels.push(`Zona: ${zoneMatch[1].trim()}`)
+  } else if (zoneKeyword?.[1]) {
+    labels.push(`Zona: ${zoneKeyword[1].trim()}`)
   }
-  if (!hasWork) labels.push("Falta: Situación laboral")
 
-  // Detectar GRUPO FAMILIAR
-  let hasGroup = !!leadData?.group
-  if (!hasGroup) {
-    if (/\bfamilia\b|\bhijos\b|\besposa\b|\bmarido\b|\bpareja\b/.test(clientText)) hasGroup = true
-    else if (/\bsolo\b|\bpara mi\b|\bpara mí\b/.test(clientText)) hasGroup = true
+  // Detectar SITUACIÓN LABORAL → etiqueta positiva
+  if (leadData?.work) {
+    labels.push(`Laboral: ${leadData.work}`)
+  } else if (/\bjubilad/.test(clientText)) {
+    labels.push("Jubilado/a")
+  } else if (/\bmonotribut/.test(clientText)) {
+    labels.push("Monotributista")
+  } else if (/\bdependencia\b|\ben blanco\b|\bempleado\b|\bsueldo\b/.test(clientText)) {
+    labels.push("Rel. dependencia")
+  } else if (/\bautonom/.test(clientText)) {
+    labels.push("Autónomo/a")
   }
-  if (!hasGroup) labels.push("Falta: Grupo familiar")
+
+  // Detectar GRUPO FAMILIAR → etiqueta positiva
+  if (leadData?.group) {
+    labels.push(`Grupo: ${leadData.group}`)
+  } else if (/\bhijos\b/.test(clientText)) {
+    labels.push("Tiene hijos")
+  } else if (/\bfamilia\b/.test(clientText)) {
+    labels.push("Familia")
+  } else if (/\besposa\b|\bmarido\b|\bpareja\b/.test(clientText)) {
+    labels.push("Con pareja")
+  } else if (/\bsolo\b|\bpara mi\b|\bpara mí\b/.test(clientText)) {
+    labels.push("Individual")
+  }
 
   // Señales de INTENCIÓN
   if (/\bprecio\b|\bcu[aá]nto sale\b|\bvalor\b|\bcotiz/.test(clientText) || /\$\s*\d/.test(clientText)) {
@@ -215,7 +227,9 @@ export async function POST(request: Request) {
       // ✅ NUEVO: Actualizar chat_source y source si no estaban seteados (leads legacy)
       const updateData: any = {
         chat: updatedChat,
-        last_update: new Date().toISOString()
+        last_update: new Date().toISOString(),
+        last_message_from: 'client',  // ✅ Track quién mandó el último mensaje
+        followup_sent: false           // ✅ Resetear para permitir UN nuevo follow-up
       };
       if (!lead.chat_source) {
         updateData.chat_source = 'sofia_ai';
@@ -270,8 +284,9 @@ export async function POST(request: Request) {
 
             await supabase.from('leads').update({
               chat: finalChat,
-              ai_labels: aiLabels, // ✅ NUEVO: Guardar etiquetas automáticamente
-              chat_source: 'sofia_ai' // ✅ Asegurar que siempre esté marcado
+              ai_labels: aiLabels,
+              chat_source: 'sofia_ai',
+              last_message_from: 'assistant'  // ✅ Track que la IA respondió
             }).eq('id', lead.id);
 
             console.log('✅ ¡Ciclo completado con éxito!');

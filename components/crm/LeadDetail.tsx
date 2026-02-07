@@ -390,6 +390,27 @@ export function LeadDetail({ lead, open, onOpenChange }: LeadDetailProps) {
 
     fetchAuditLogs()
     toast.success(`📞 Llamada #${newCallCount} registrada - ${timestamp}`)
+
+    // ✅ Mensaje automático de primera llamada (solo leads de Sofía, dentro de ventana de 24hs)
+    if (lead.chat_source === 'sofia_ai' && newCallCount === 1 && lead.phone) {
+      try {
+        const lastUpdate = new Date(lead.last_update || lead.created_at).getTime()
+        const hoursElapsed = (Date.now() - lastUpdate) / (1000 * 60 * 60)
+
+        if (hoursElapsed <= 24) {
+          const { sendManualWhatsAppMessage } = await import('@/app/actions/send-whatsapp')
+          const mensaje = `💬 Nuestra asesora se está intentando comunicar con vos para brindarte la información sobre tu consulta.\n\n¿Podrías indicarnos en qué momento te resulta más cómodo que te contactemos?`
+
+          await sendManualWhatsAppMessage(lead.phone, mensaje)
+          console.log(`✅ Mensaje de primera llamada enviado a ${lead.name}`)
+          toast.success("Mensaje enviado al cliente")
+        } else {
+          console.log(`⚠️ No se envió mensaje a ${lead.name}: fuera de ventana de 24hs (${hoursElapsed.toFixed(1)}hs)`)
+        }
+      } catch (err) {
+        console.error(`❌ Error enviando mensaje de primera llamada:`, err)
+      }
+    }
   }
 
   const getIntentStyle = (val: string) => {

@@ -49,6 +49,7 @@ export async function GET(request: Request) {
             .eq('last_message_from', 'client')
             .eq('followup_sent', false)
             .eq('ai_status', 'active')
+            .neq('chat_status', 'derivado') // ✅ No molestar leads derivados
             .lt('last_update', cutoffTime.toISOString())
             .or('agent_name.is.null,agent_name.eq.Sin Asignar,agent_name.eq.Sin asignar')
             .limit(MAX_LEADS_PER_RUN);

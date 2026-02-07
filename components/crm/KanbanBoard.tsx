@@ -623,7 +623,7 @@ export function KanbanBoard({ userName, onLeadClick }: { userName?: string, onLe
                 if (hoursElapsed <= 24) {
                     const { sendManualWhatsAppMessage } = await import('@/app/actions/send-whatsapp')
                     const nombreVendedora = lead.agent_name || 'una asesora'
-                    const mensaje = `💬 ¡Hola! Te está intentando llamar *${nombreVendedora}* para darte la info que pediste 📞\n\n¿En qué momento te queda más cómodo que te contactemos? 😊`
+                    const mensaje = `💬 Nuestra asesora se está intentando comunicar con vos para brindarte la información sobre tu consulta.\n\n¿Podrías indicarnos en qué momento te resulta más cómodo que te contactemos?`
 
                     await sendManualWhatsAppMessage(lead.phone, mensaje)
                     console.log(`✅ Mensaje de primera llamada enviado a ${lead.name}`)

@@ -374,7 +374,7 @@ export function AdminLeadFactory() {
     const { data, error } = await supabase
       .from("leads")
       .select("*")
-      .or("agent_name.is.null,agent_name.eq.Sin Asignar")
+      .or("agent_name.is.null,agent_name.eq.Sin Asignar,agent_name.eq.Sin asignar")
       .neq('status', 'perdido') // 🔥 ESTO HACE LA MAGIA: Si está perdido, NO lo muestra en bandeja
       .order("created_at", { ascending: false })
 

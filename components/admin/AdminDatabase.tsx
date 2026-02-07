@@ -618,7 +618,7 @@ export function AdminDatabase() {
         lead.chat.forEach((m: any, idx: number) => {
           allChatMessages.push({
             id: `webhook_${idx}`,
-            text: m.text || m.message || m.body || "",
+            text: m.text || m.content || m.message || m.body || "",
             sender: m.user || m.sender || (m.isMe ? "Bot" : "Cliente"),
             time: m.time || m.timestamp || m.created_at || "",
             source: "wati",
